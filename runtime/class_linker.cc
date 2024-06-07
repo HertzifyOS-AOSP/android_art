@@ -2345,10 +2345,6 @@ bool ClassLinker::AddImageSpace(gc::space::ImageSpace* space,
       }, space->Begin(), image_pointer_size_);
     }
 
-    for (auto dex_cache : dex_caches.Iterate<mirror::DexCache>()) {
-      CHECK(!dex_cache->GetDexFile()->IsCompactDexFile());
-    }
-
     ScopedTrace trace("AppImage:UpdateCodeItemAndNterp");
     bool can_use_nterp = interpreter::CanRuntimeUseNterp();
     uint16_t hotness_threshold = runtime->GetJITOptions()->GetWarmupThreshold();
@@ -4417,7 +4413,6 @@ void ClassLinker::LoadClass(Thread* self,
                             const DexFile& dex_file,
                             const dex::ClassDef& dex_class_def,
                             Handle<mirror::Class> klass) {
-  CHECK(!dex_file.IsCompactDexFile());
   ClassAccessor accessor(dex_file,
                          dex_class_def,
                          /* parse_hiddenapi_class_data= */ klass->IsBootStrapClassLoaded());
