@@ -189,10 +189,11 @@ static void Thread_setNativeName(JNIEnv* env, jobject peer, jstring java_name) {
 /*
  * Change Linux niceness priority for the given thread, returning errno.
  */
-static int Thread_setNiceness0(JNIEnv* env, jobject java_thread, jint new_niceness) {
-  ScopedObjectAccess soa(env);
-  MutexLock mu(soa.Self(), *Locks::thread_list_lock_);
-  Thread* thread = Thread::FromManagedThread(soa, java_thread);
+static int Thread_setNiceness0([[maybe_unused]] JNIEnv* env, jobject java_thread, jint new_niceness)
+    REQUIRES_SHARED(art::Locks::mutator_lock_) {
+  Thread* self = Thread::Current();
+  MutexLock mu(self, *Locks::thread_list_lock_);
+  Thread* thread = Thread::FromManagedThread(self, self->DecodeJObject(java_thread));
   if (thread != nullptr) {
     return thread->SetNativeNiceness(new_niceness);
   }
@@ -204,16 +205,18 @@ static int Thread_setNiceness0(JNIEnv* env, jobject java_thread, jint new_nicene
  * from Thread.MIN_PRIORITY to Thread.MAX_PRIORITY (1-10), with "normal"
  * threads at Thread.NORM_PRIORITY (5). Returns corresponding niceness.
  */
-static int Thread_setPriority0(JNIEnv* env, jobject java_thread, jint new_priority) {
+static void Thread_setPriority0([[maybe_unused]] JNIEnv* env,
+                                jobject java_thread,
+                                jint new_priority,
+                                jint new_niceness) REQUIRES_SHARED(art::Locks::mutator_lock_) {
   // We should just do the conversion and call the above. But that would bypass the
   // Android S workaround in SetNativePriority. So we have a separate code path.
-  ScopedObjectAccess soa(env);
-  MutexLock mu(soa.Self(), *Locks::thread_list_lock_);
-  Thread* thread = Thread::FromManagedThread(soa, java_thread);
+  Thread* self = Thread::Current();
+  MutexLock mu(self, *Locks::thread_list_lock_);
+  Thread* thread = Thread::FromManagedThread(self, self->DecodeJObject(java_thread));
   if (thread != nullptr) {
-    return thread->SetNativePriority(new_priority);
+    thread->SetNativePriority(new_priority, new_niceness);
   }
-  return Thread::PriorityToNiceness(new_priority);
 }
 
 static int Thread_priorityForNiceness(int niceness) {
@@ -402,7 +405,7 @@ static JNINativeMethod gMethods[] = {
     CRITICAL_NATIVE_METHOD(Thread, priorityForNiceness, "(I)I"),
     NATIVE_METHOD(Thread, setNativeName, "(Ljava/lang/String;)V"),
     NATIVE_METHOD(Thread, setNiceness0, "(I)I"),
-    NATIVE_METHOD(Thread, setPriority0, "(I)I"),
+    NATIVE_METHOD(Thread, setPriority0, "(II)V"),
     FAST_NATIVE_METHOD(Thread, sleep, "(Ljava/lang/Object;JI)V"),
     NATIVE_METHOD(Thread, yield, "()V"),
     NATIVE_METHOD(Thread,
