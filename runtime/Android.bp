@@ -656,25 +656,25 @@ cc_defaults {
 // where all non-NDK dependencies are static as well.
 cc_defaults {
     name: "art_libunwindstack_static_defaults",
+    defaults: [
+        "art_liblog_static_defaults",
+    ],
     whole_static_libs: [
         "libunwindstack",
         "libbase",
         "liblzma",
-    ],
-    shared_libs: [
-        "liblog",
     ],
 }
 
 cc_defaults {
     name: "libart_static_base_defaults",
     defaults: [
+        "art_liblog_static_defaults",
         "art_libunwindstack_static_defaults",
     ],
     whole_static_libs: [
         "libartpalette",
         "libbase",
-        "liblog",
         "liblz4",
         "liblzma", // libelffile dependency; must be repeated here since it's a static lib.
         "libnativebridge",

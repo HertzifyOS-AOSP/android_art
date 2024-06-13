@@ -102,11 +102,13 @@ gensrcs {
 
 cc_defaults {
     name: "libart-dex2oat_static_base_defaults",
+    defaults: [
+        "art_liblog_static_defaults",
+        "art_libz_static_defaults",
+    ],
     whole_static_libs: [
         "libbase",
-        "liblog",
         "liblz4",
-        "libz",
     ],
 }
 
@@ -302,6 +304,9 @@ art_cc_binary {
             // it'd get overridden by the load hook even when it uses
             // PrependProperties.
             compile_multilib: "64",
+            // libz is a libdex2oat_static transitive dependency from art_libz_static_defaults,
+            // duplicated here because we cannot import *_static_defaults only for host.
+            shared_libs: ["libz"],
         },
     },
 
@@ -346,12 +351,13 @@ art_cc_binary {
             ],
         },
         host: {
-            // Comments for host in dex2oat apply here too.
+            // Comments for host in the dex2oat binary apply here too.
             static_libs: [
                 "libdex2oatd_static",
             ],
             stl: "c++_static",
             compile_multilib: "64",
+            shared_libs: ["libz"],
         },
     },
 
@@ -368,6 +374,11 @@ cc_defaults {
         "dex2oat-defaults",
     ],
     target: {
+        host: {
+            // libz is normally linked dynamically on host in
+            // art_libz_static_defaults, so need to bring it in statically here.
+            static_libs: ["libz"],
+        },
         darwin: {
             enabled: false,
         },
