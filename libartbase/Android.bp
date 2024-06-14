@@ -271,8 +271,9 @@ art_cc_library {
     },
 }
 
-art_cc_defaults {
+cc_defaults {
     name: "libartbase-art-gtest-defaults",
+    defaults: ["libart-gtest-defaults"],
     srcs: [
         "base/common_art_test.cc",
     ],
@@ -281,36 +282,48 @@ art_cc_defaults {
         // Required for "base/mutex.h" in common_art_test.cc
         "libart_headers",
     ],
-    static: {
-        whole_static_libs: [
-            "libcap",
-        ],
-    },
-    shared: {
-        static_libs: [
-            "libcap",
-        ],
-    },
-}
-
-art_cc_library_static {
-    name: "libartbase-art-gtest",
-    defaults: [
-        "libart-gtest-defaults",
-        "libartbase-art-gtest-defaults",
-        "libartbase_static_defaults",
-        "libdexfile_static_defaults",
+    static_libs: [ // Since we're building static libs we're only using the headers from these.
+        "libcap",
+        "libdexfile",
     ],
 }
 
-art_cc_library_static {
+cc_library_static {
+    name: "libartbase-art-gtest",
+    defaults: [
+        "libartbase-art-gtest-defaults",
+    ],
+}
+
+cc_defaults {
+    name: "libartbase-art-gtest_static_defaults",
+    defaults: [
+        "libartbase_static_defaults",
+        "libdexfile_static_defaults",
+    ],
+    whole_static_libs: [
+        "libartbase-art-gtest",
+        "libcap",
+    ],
+}
+
+cc_library_static {
     name: "libartbased-art-gtest",
     defaults: [
         "art_debug_defaults",
-        "libart-gtest-defaults",
         "libartbase-art-gtest-defaults",
+    ],
+}
+
+cc_defaults {
+    name: "libartbased-art-gtest_static_defaults",
+    defaults: [
         "libartbased_static_defaults",
         "libdexfiled_static_defaults",
+    ],
+    whole_static_libs: [
+        "libartbase-art-gtest",
+        "libcap",
     ],
 }
 
