@@ -67,8 +67,7 @@ cc_defaults {
         // Ideally these defaults should only be added for host, but Soong
         // doesn't support that. This is good enough - in the worst case it adds
         // some unnecessary dependencies.
-        "libart-runtime-for-test_static_defaults",
-        "libart-compiler-for-test_static_defaults",
+        "libart-for-test_static_defaults",
         "libart_simulator_static_base_defaults",
         "libartbase_static_defaults",
     ],
@@ -83,8 +82,7 @@ cc_defaults {
     name: "libartd-simulator-for-test_static_defaults",
     defaults: [
         // See comment in libart-simulator-for-test_static_defaults.
-        "libartd-runtime-for-test_static_defaults",
-        "libartd-compiler_static_defaults",
+        "libartd-for-test_static_defaults",
         "libart_simulator_static_base_defaults",
         "libartbased_static_defaults",
     ],
