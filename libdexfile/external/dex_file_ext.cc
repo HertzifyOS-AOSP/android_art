@@ -199,7 +199,7 @@ ADexFile_Error ADexFile_create(const void* _Nonnull address,
                                                                 /*verify_checksum=*/false,
                                                                 &error_msg);
   if (dex_file == nullptr) {
-    LOG(ERROR) << "Can not open dex file " << loc_str << ": " << error_msg;
+    LOG(ERROR) << error_msg;
     return ADEXFILE_ERROR_INVALID_DEX;
   }
 
