@@ -2087,6 +2087,14 @@ void ExecuteSwitchImplCpp(SwitchImplContext* ctx) {
       return;  // Return statement or debugger forced exit.
     }
     if (self->IsExceptionPending()) {
+      // VirtualThreadParkingError is a special exception thrown to unwind the stack
+      // when parking a virtual thread. It shouldn't be caught or handled by the java code.
+      if (self->IsVirtualThreadParking()) {
+        DCHECK(self->GetException()->GetClass()->DescriptorEquals(
+            "Ldalvik/system/VirtualThreadParkingError;"));
+        return;
+      }
+
       if (!InstructionHandler<transaction_active, Instruction::kInvalidFormat>(
               ctx, instrumentation, self, shadow_frame, dex_pc, inst, inst_data, next, exit).
               HandlePendingException()) {

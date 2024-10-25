@@ -216,6 +216,10 @@ class MANAGED PrimitiveArray : public Array {
    */
   EXPORT void Memcpy(int32_t dst_pos, ObjPtr<PrimitiveArray<T>> src, int32_t src_pos, int32_t count)
       REQUIRES_SHARED(Locks::mutator_lock_);
+  EXPORT void Memcpy(int32_t dst_pos, const T* src, int32_t src_pos, int32_t count)
+      REQUIRES_SHARED(Locks::mutator_lock_);
+  EXPORT void MemcpyTo(int32_t src_pos, T* dst, int32_t dst_pos, int32_t count)
+      REQUIRES_SHARED(Locks::mutator_lock_);
 
  private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(PrimitiveArray);
