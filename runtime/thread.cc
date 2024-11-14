@@ -4983,9 +4983,6 @@ int* Thread::GetPriorityMap() {
     return;                             \
   }
     bool need_fake = false;  // Saw an anomaly requiring us to fake the map?
-#ifdef PALETTE_ADDED_MAP_PRIORITY
-    // TODO(b/389104950): Reenable this and remove #else once aosp/3355710 and aosp/3312350
-    // are submitted.
     bool success = true;
     bool saw_difference = true;  // Do we map to different niceness values?
                                  // PaletteMapPriority always yields nontrivial mapping.
@@ -4997,10 +4994,6 @@ int* Thread::GetPriorityMap() {
       }
       CHECK_DEFERRED_ABORT(result == PALETTE_STATUS_OK, "Bad PALLETTE_STATUS");
     }
-#else
-    constexpr bool success = false;
-    bool saw_difference;  // Initialized below.
-#endif
     if (!success) {
       // Discover the map the hard way.
       int32_t me = static_cast<int32_t>(::art::GetTid());
