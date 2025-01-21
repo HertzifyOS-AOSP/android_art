@@ -132,6 +132,7 @@ ArtField* WellKnownClasses::dalvik_system_DexPathList_dexElements;
 ArtField* WellKnownClasses::dalvik_system_DexPathList__Element_dexFile;
 ArtField* WellKnownClasses::dalvik_system_VMRuntime_nonSdkApiUsageConsumer;
 ArtField* WellKnownClasses::dalvik_system_VirtualThreadContext_parkedStates;
+ArtField* WellKnownClasses::dalvik_system_VirtualThreadContext_pinnedCarrierThread;
 ArtField* WellKnownClasses::dalvik_system_VirtualThreadParkedStates_frames;
 ArtField* WellKnownClasses::dalvik_system_VirtualThreadFrame_frame;
 ArtField* WellKnownClasses::dalvik_system_VirtualThreadFrame_refs;
@@ -823,6 +824,10 @@ void WellKnownClasses::InitFieldsAndMethodsOnly(JNIEnv* env) {
                  /*is_static=*/false,
                  "parkedStates",
                  "Ldalvik/system/VirtualThreadParkedStates;");
+  dalvik_system_VirtualThreadContext_pinnedCarrierThread = CacheField(d_s_vtc.Get(),
+                                                                      /*is_static=*/false,
+                                                                      "pinnedCarrierThread",
+                                                                      "Ljava/lang/Thread;");
   dalvik_system_VirtualThreadParkedStates_frames =
       CacheField(d_s_vtps.Get(),
                  /*is_static=*/false,

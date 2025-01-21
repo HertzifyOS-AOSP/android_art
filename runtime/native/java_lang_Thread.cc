@@ -254,11 +254,26 @@ struct VirtualThreadParkingVisitor final : public StackVisitor {
       return false;
     }
 
+    // If the verifier was able to verify the locks are balanced, the interpreter won't update the
+    // lock cound data. We need to walk the stack to find the locks here. Or should we just have an
+    // increment/decrement counter?
+    Monitor::VisitLocks(this, LockVisitingCallback, this);
+    if (reason_ == kMonitor) {
+      return false;
+    }
+    DCHECK(reason_ == kNoReason);
+
     shadow_frame_count_++;
     shadow_frames_.push_back(shadow_frame);
 
     return true;
   }
+
+  static void LockVisitingCallback(ObjPtr<mirror::Object> obj, void* visitor) {
+    DCHECK(!obj.IsNull());
+    reinterpret_cast<VirtualThreadParkingVisitor*>(visitor)->reason_ = kMonitor;
+  }
+
   std::vector<ShadowFrame*> shadow_frames_;
   size_t shadow_frame_count_;
   PinningReason reason_;
@@ -277,8 +292,14 @@ static void Thread_parkVirtualInternal(
 
   VirtualThreadParkingVisitor dump_visitor(self);
   dump_visitor.WalkStack();
+
   DCHECK_NE(dump_visitor.reason_, kUnsupportedFrame) << "JIT / AOT frame isn't supported.";
-  DCHECK_EQ(dump_visitor.reason_, kNoReason) << "error until pinning virtual threads is supported.";
+  if (dump_visitor.reason_ != kNoReason) {
+    WellKnownClasses::dalvik_system_VirtualThreadContext_pinnedCarrierThread->SetObject<false>(
+        v_context_h.Get(), opeer_h.Get());
+    // Return to the java code to park the carrier thread
+    return;
+  }
 
   size_t num_frames = dump_visitor.shadow_frames_.size();
 

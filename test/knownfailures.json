@@ -1620,7 +1620,9 @@
       "tests": ["2390-virtual-thread-carrier-leak",
                 "2390-virtual-thread-context-leak",
                 "2390-virtual-thread-parking-error-leak",
-                "2391-virtual-thread-sleeps"],
+                "2391-virtual-thread-sleeps",
+                "2392-virtual-thread-pinning-jni",
+                "2393-virtual-thread-pinning-monitor"],
       "variant": "jvm",
       "description": ["Tests for ART-specific Virtual Thread APIs."]
     },
