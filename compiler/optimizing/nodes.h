@@ -3778,7 +3778,22 @@ class HBinaryOperation : public HExpression<2> {
   HInstruction* GetRight() const { return InputAt(1); }
   DataType::Type GetResultType() const { return GetType(); }
 
-  virtual bool IsCommutative() const { return false; }
+  bool IsCommutative() const {
+    switch (GetKind()) {
+      case kAdd:
+      case kAnd:
+      case kEqual:
+      case kMax:
+      case kMin:
+      case kMul:
+      case kNotEqual:
+      case kOr:
+      case kXor:
+        return true;
+      default:
+        return false;
+    }
+  }
 
   // Put constant on the right.
   // Returns whether order is changed.
@@ -3982,8 +3997,6 @@ class HEqual final : public HCondition {
       : HCondition(kEqual, first, second, dex_pc) {
   }
 
-  bool IsCommutative() const override { return true; }
-
   HConstant* Evaluate([[maybe_unused]] HNullConstant* x,
                       [[maybe_unused]] HNullConstant* y) const override {
     return MakeConstantCondition(true);
@@ -4026,8 +4039,6 @@ class HNotEqual final : public HCondition {
   HNotEqual(HInstruction* first, HInstruction* second, uint32_t dex_pc = kNoDexPc)
       : HCondition(kNotEqual, first, second, dex_pc) {
   }
-
-  bool IsCommutative() const override { return true; }
 
   HConstant* Evaluate([[maybe_unused]] HNullConstant* x,
                       [[maybe_unused]] HNullConstant* y) const override {
@@ -5301,8 +5312,6 @@ class HAdd final : public HBinaryOperation {
       : HBinaryOperation(kAdd, result_type, left, right, SideEffects::None(), dex_pc) {
   }
 
-  bool IsCommutative() const override { return true; }
-
   template <typename T> static T Compute(T x, T y) { return x + y; }
 
   HConstant* Evaluate(HIntConstant* x, HIntConstant* y) const override {
@@ -5362,8 +5371,6 @@ class HMul final : public HBinaryOperation {
        uint32_t dex_pc = kNoDexPc)
       : HBinaryOperation(kMul, result_type, left, right, SideEffects::None(), dex_pc) {
   }
-
-  bool IsCommutative() const override { return true; }
 
   template <typename T> static T Compute(T x, T y) { return x * y; }
 
@@ -5482,8 +5489,6 @@ class HMin final : public HBinaryOperation {
        uint32_t dex_pc)
       : HBinaryOperation(kMin, result_type, left, right, SideEffects::None(), dex_pc) {}
 
-  bool IsCommutative() const override { return true; }
-
   // Evaluation for integral values.
   template <typename T> static T ComputeIntegral(T x, T y) {
     return (x <= y) ? x : y;
@@ -5518,8 +5523,6 @@ class HMax final : public HBinaryOperation {
        HInstruction* right,
        uint32_t dex_pc)
       : HBinaryOperation(kMax, result_type, left, right, SideEffects::None(), dex_pc) {}
-
-  bool IsCommutative() const override { return true; }
 
   // Evaluation for integral values.
   template <typename T> static T ComputeIntegral(T x, T y) {
@@ -5717,8 +5720,6 @@ class HAnd final : public HBinaryOperation {
       : HBinaryOperation(kAnd, result_type, left, right, SideEffects::None(), dex_pc) {
   }
 
-  bool IsCommutative() const override { return true; }
-
   template <typename T> static T Compute(T x, T y) { return x & y; }
 
   HConstant* Evaluate(HIntConstant* x, HIntConstant* y) const override {
@@ -5743,8 +5744,6 @@ class HOr final : public HBinaryOperation {
       : HBinaryOperation(kOr, result_type, left, right, SideEffects::None(), dex_pc) {
   }
 
-  bool IsCommutative() const override { return true; }
-
   template <typename T> static T Compute(T x, T y) { return x | y; }
 
   HConstant* Evaluate(HIntConstant* x, HIntConstant* y) const override {
@@ -5768,8 +5767,6 @@ class HXor final : public HBinaryOperation {
        uint32_t dex_pc = kNoDexPc)
       : HBinaryOperation(kXor, result_type, left, right, SideEffects::None(), dex_pc) {
   }
-
-  bool IsCommutative() const override { return true; }
 
   template <typename T> static T Compute(T x, T y) { return x ^ y; }
 
