@@ -23,6 +23,9 @@ import art.Test2392;
 public class Main {
 
     public static void main(String[] args) throws InterruptedException {
+        if (!com.android.art.flags.Flags.virtualThreadImplV1()) {
+            return;
+        }
         System.loadLibrary(args[0]);
         Test2392.main(args);
     }

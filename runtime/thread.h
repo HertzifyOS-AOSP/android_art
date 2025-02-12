@@ -34,6 +34,7 @@
 #include "base/pointer_size.h"
 #include "base/safe_map.h"
 #include "base/value_object.h"
+#include "com_android_art_flags.h"
 #include "entrypoints/jni/jni_entrypoints.h"
 #include "entrypoints/quick/quick_entrypoints.h"
 #include "handle.h"
@@ -248,6 +249,10 @@ static constexpr StackType kNativeStackType = StackType::kHardware;
 // For simulator builds this is the kSimulated stack and for non-simulator builds this is the
 // kHardware stack.
 static constexpr StackType kQuickStackType = StackType::kHardware;
+
+static_assert(com::android::art::flags::virtual_thread_impl_v1() ==
+              COM_ANDROID_ART_FLAGS_VIRTUAL_THREAD_IMPL_V1);
+static constexpr bool kIsVirtualThreadEnabled = com::android::art::flags::virtual_thread_impl_v1();
 
 // See Thread.tlsPtr_.active_suspend1_barriers below for explanation.
 struct WrappedSuspend1Barrier {

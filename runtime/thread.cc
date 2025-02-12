@@ -679,7 +679,8 @@ void* Thread::CreateCallback(void* arg) {
         WellKnownClasses::java_lang_Thread_target->GetObject(receiver);
     // When the runnable is a VirtualThreadContext, don't run thread.run() and treat it as a virtual
     // thread.
-    if (UNLIKELY(
+    if (kIsVirtualThreadEnabled &&
+        UNLIKELY(
             !runnable.IsNull() &&
             runnable->InstanceOf(WellKnownClasses::dalvik_system_VirtualThreadContext.Get()))) {
       self->SetVirtualThreadFlags(VirtualThreadFlag::kIsVirtual, true);

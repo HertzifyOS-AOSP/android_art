@@ -37,6 +37,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class Main {
 
     public static void main(String[] args) throws InterruptedException {
+        if (!com.android.art.flags.Flags.virtualThreadImplV1()) {
+            return;
+        }
         // Exit if the thread throws any exception.
         Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
             System.err.println("thread: " + t.getName());

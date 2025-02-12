@@ -795,7 +795,7 @@ extern "C" uint64_t artQuickToInterpreterBridge(ArtMethod* method, Thread* self,
     ShadowFrame* shadow_frame = shadow_frame_unique_ptr.get();
 
     // Restore the values of virtual registers if a virtual thread is unparking
-    if (self->IsVirtualThreadUnparking()) {
+    if (kIsVirtualThreadEnabled && self->IsVirtualThreadUnparking()) {
       interpreter::FillVirtualThreadFrame(self, shadow_frame);
     }
     // TODO: Consider skip the following operations, e.g. copying registers, if

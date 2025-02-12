@@ -28,6 +28,7 @@
 #include "base/pointer_size.h"
 #include "class_linker.h"
 #include "class_root-inl.h"
+#include "com_android_art_flags.h"
 #include "debugger.h"
 #include "dex/dex_file_types.h"
 #include "entrypoints/runtime_asm_entrypoints.h"
@@ -1248,7 +1249,7 @@ static inline bool DoCallCommon(ArtMethod* called_method,
       CREATE_SHADOW_FRAME(num_regs, called_method, /* dex pc */ 0);
   ShadowFrame* new_shadow_frame = shadow_frame_unique_ptr.get();
   // Restore the values of virtual registers if a virtual thread is unparking
-  if (self->IsVirtualThreadUnparking()) {
+  if (kIsVirtualThreadEnabled && self->IsVirtualThreadUnparking()) {
     FillVirtualThreadFrame(self, new_shadow_frame);
   }
   // TODO: Consider skip the following operations, e.g. copying registers, if

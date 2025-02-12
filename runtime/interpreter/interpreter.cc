@@ -268,7 +268,9 @@ static inline JValue Execute(
     if (kIsDebugBuild) {
       // TODO(b/346542404): Check this precondition prorperly, and shouldn't emit method enter event
       // when unparking a virtual thread.
-      if (!self->AreVirtualThreadFlagsEnabled(VirtualThreadFlag::kIsVirtual)) {
+      bool is_virtual = kIsVirtualThreadEnabled &&
+                        self->AreVirtualThreadFlagsEnabled(VirtualThreadFlag::kIsVirtual);
+      if (!is_virtual) {
         CHECK_EQ(shadow_frame.GetDexPC(), 0u);
       }
       self->AssertNoPendingException();
@@ -391,7 +393,8 @@ void EnterInterpreterFromInvoke(Thread* self,
   ShadowFrameAllocaUniquePtr shadow_frame_unique_ptr =
       CREATE_SHADOW_FRAME(num_regs, method, /* dex pc */ 0);
   ShadowFrame* shadow_frame = shadow_frame_unique_ptr.get();
-  if (self->AreVirtualThreadFlagsEnabled(VirtualThreadFlag::kIsVirtual |
+  if (kIsVirtualThreadEnabled &&
+      self->AreVirtualThreadFlagsEnabled(VirtualThreadFlag::kIsVirtual |
                                          VirtualThreadFlag::kUnparking)) {
     interpreter::FillVirtualThreadFrame(self, shadow_frame);
   }
