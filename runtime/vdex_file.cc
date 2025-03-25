@@ -253,31 +253,6 @@ const uint8_t* VdexFile::GetNextTypeLookupTableData(const uint8_t* cursor,
   }
 }
 
-bool VdexFile::OpenAllDexFiles(std::vector<std::unique_ptr<const DexFile>>* dex_files,
-                               std::string* error_msg) const {
-  size_t i = 0;
-  auto dex_file_container = std::make_shared<MemoryDexFileContainer>(Begin(), End());
-  for (const uint8_t* dex_file_start = GetNextDexFileData(nullptr, i);
-       dex_file_start != nullptr;
-       dex_file_start = GetNextDexFileData(dex_file_start, ++i)) {
-    // TODO: Supply the location information for a vdex file.
-    static constexpr char kVdexLocation[] = "";
-    std::string location = DexFileLoader::GetMultiDexLocation(i, kVdexLocation);
-    ArtDexFileLoader dex_file_loader(dex_file_container, location);
-    std::unique_ptr<const DexFile> dex(dex_file_loader.OpenOne(dex_file_start - Begin(),
-                                                               GetLocationChecksum(i),
-                                                               /*oat_dex_file=*/nullptr,
-                                                               /*verify=*/false,
-                                                               /*verify_checksum=*/false,
-                                                               error_msg));
-    if (dex == nullptr) {
-      return false;
-    }
-    dex_files->push_back(std::move(dex));
-  }
-  return true;
-}
-
 static bool CreateDirectories(const std::string& child_path, /* out */ std::string* error_msg) {
   size_t last_slash_pos = child_path.find_last_of('/');
   CHECK_NE(last_slash_pos, std::string::npos) << "Invalid path: " << child_path;

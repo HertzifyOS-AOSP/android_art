@@ -268,10 +268,6 @@ class VdexFile {
     return GetDexChecksumAt(dex_file_index);
   }
 
-  // Open all the dex files contained in this vdex file.
-  EXPORT bool OpenAllDexFiles(std::vector<std::unique_ptr<const DexFile>>* dex_files,
-                              std::string* error_msg) const;
-
   // Writes a vdex into `path` and returns true on success.
   // The vdex will not contain a dex section but will store checksums of `dex_files`,
   // encoded `verifier_deps`, as well as the current boot class path cheksum and
