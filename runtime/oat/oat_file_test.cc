@@ -206,17 +206,22 @@ TEST_F(OatFileTest, RejectsCdex) {
                                                      dex_location,
                                                      &error_msg));
     EXPECT_EQ(odex_file, nullptr) << "Cdex accepted unexpectedly";
-    EXPECT_THAT(error_msg, HasSubstr("Vdex file is not valid"));
+    EXPECT_THAT(error_msg, HasSubstr("invalid dex file magic"));
   }
 
-  // Create `OatFile` from the vdex file alone. This should fail too. In the current implementation,
-  // we fail at the `VdexFile` creation, which is a prerequisite of the `OatFile` creation.
+  // Create `OatFile` from the vdex file alone. This should fail too.
   {
     std::string error_msg;
     std::unique_ptr<VdexFile> vdex_file =
         VdexFile::Open(vdex_location, /*low_4gb=*/false, &error_msg);
-    EXPECT_EQ(vdex_file, nullptr) << "Cdex accepted unexpectedly";
-    EXPECT_THAT(error_msg, HasSubstr("Vdex file is not valid"));
+    ASSERT_NE(vdex_file, nullptr);
+    std::unique_ptr<OatFile> odex_file(OatFile::OpenFromVdex(/*zip_fd=*/-1,
+                                                             std::move(vdex_file),
+                                                             vdex_location,
+                                                             /*context=*/nullptr,
+                                                             &error_msg));
+    EXPECT_EQ(odex_file, nullptr) << "Cdex accepted unexpectedly";
+    EXPECT_THAT(error_msg, HasSubstr("found dex file with invalid dex file version"));
   }
 }
 

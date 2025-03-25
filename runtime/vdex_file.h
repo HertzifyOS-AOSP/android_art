@@ -252,7 +252,9 @@ class VdexFile {
         GetSectionHeader(VdexSection::kVerifierDepsSection).section_size);
   }
 
-  EXPORT bool IsValid() const;
+  bool IsValid() const {
+    return mmap_.Size() >= sizeof(VdexFileHeader) && GetVdexFileHeader().IsValid();
+  }
 
   // This method is for iterating over the dex files in the vdex. If `cursor` is null,
   // the first dex file is returned. If `cursor` is not null, it must point to a dex
