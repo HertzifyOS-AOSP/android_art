@@ -1315,6 +1315,65 @@ bool MarkCompact::PrepareForCompaction() {
   return true;
 }
 
+template <typename Visitor>
+class MarkCompact::VisitReferencesVisitor {
+ public:
+  explicit VisitReferencesVisitor(Visitor visitor) : visitor_(visitor) {}
+
+  ALWAYS_INLINE void operator()(mirror::Object* obj,
+                                MemberOffset offset,
+                                [[maybe_unused]] bool is_static) const
+      REQUIRES(Locks::heap_bitmap_lock_) REQUIRES_SHARED(Locks::mutator_lock_) {
+    visitor_(obj->GetFieldObject<mirror::Object>(offset));
+  }
+
+  ALWAYS_INLINE void operator()([[maybe_unused]] ObjPtr<mirror::Class> klass,
+                                ObjPtr<mirror::Reference> ref) const
+      REQUIRES(Locks::heap_bitmap_lock_) REQUIRES_SHARED(Locks::mutator_lock_) {
+    visitor_(ref.Ptr());
+  }
+
+  void VisitRootIfNonNull(mirror::CompressedReference<mirror::Object>* root) const
+      REQUIRES(Locks::heap_bitmap_lock_) REQUIRES_SHARED(Locks::mutator_lock_) {
+    if (!root->IsNull()) {
+      VisitRoot(root);
+    }
+  }
+
+  void VisitRoot(mirror::CompressedReference<mirror::Object>* root) const
+      REQUIRES(Locks::heap_bitmap_lock_) REQUIRES_SHARED(Locks::mutator_lock_) {
+    visitor_(root->AsMirrorPtr());
+  }
+
+ private:
+  Visitor visitor_;
+};
+
+void MarkCompact::VerifyNoMissingCardMarks() {
+  if (kVerifyNoMissingCardMarks) {
+    accounting::CardTable* card_table = heap_->GetCardTable();
+    for (const auto& space : heap_->GetContinuousSpaces()) {
+      auto obj_visitor = [&](mirror::Object* obj) {
+        VisitReferencesVisitor ref_visitor([&](mirror::Object* ref)
+            REQUIRES_SHARED(Locks::mutator_lock_, Locks::heap_bitmap_lock_) {
+          if (ref != nullptr && !IsMarked(ref)) {
+            CHECK(card_table->IsDirty(obj))
+                << "obj:" << obj << " (" << obj->PrettyTypeOf() << ") ref:" << ref
+                << " card:" << static_cast<int>(card_table->GetCard(obj))
+                << " space:" << space->GetName()
+                << " retention-policy:" << space->GetGcRetentionPolicy();
+          }
+        });
+        // We can't expect referent to hold the assertion.
+        obj->VisitReferences</*kVisitNativeRoots=*/true>(ref_visitor, VoidFunctor());
+      };
+      space->GetMarkBitmap()->VisitMarkedRange(reinterpret_cast<uintptr_t>(space->Begin()),
+                                               reinterpret_cast<uintptr_t>(space->End()),
+                                               obj_visitor);
+    }
+  }
+}
+
 class MarkCompact::VerifyRootMarkedVisitor : public SingleRootVisitor {
  public:
   explicit VerifyRootMarkedVisitor(MarkCompact* collector) : collector_(collector) { }
@@ -1351,6 +1410,7 @@ void MarkCompact::MarkingPause() {
   {
     // Handle the dirty objects as we are a concurrent GC
     WriterMutexLock mu(thread_running_gc_, *Locks::heap_bitmap_lock_);
+    VerifyNoMissingCardMarks();
     {
       MutexLock mu2(thread_running_gc_, *Locks::runtime_shutdown_lock_);
       MutexLock mu3(thread_running_gc_, *Locks::thread_list_lock_);
@@ -4907,41 +4967,7 @@ void MarkCompact::DelayReferenceReferent(ObjPtr<mirror::Class> klass,
   heap_->GetReferenceProcessor()->DelayReferenceReferent(klass, ref, this);
 }
 
-template <typename Visitor>
-class MarkCompact::VisitReferencesVisitor {
- public:
-  explicit VisitReferencesVisitor(Visitor visitor) : visitor_(visitor) {}
-
-  ALWAYS_INLINE void operator()(mirror::Object* obj,
-                                MemberOffset offset,
-                                [[maybe_unused]] bool is_static) const
-      REQUIRES(Locks::heap_bitmap_lock_) REQUIRES_SHARED(Locks::mutator_lock_) {
-    visitor_(obj->GetFieldObject<mirror::Object>(offset));
-  }
-
-  ALWAYS_INLINE void operator()([[maybe_unused]] ObjPtr<mirror::Class> klass,
-                                ObjPtr<mirror::Reference> ref) const
-      REQUIRES(Locks::heap_bitmap_lock_) REQUIRES_SHARED(Locks::mutator_lock_) {
-    visitor_(ref.Ptr());
-  }
-
-  void VisitRootIfNonNull(mirror::CompressedReference<mirror::Object>* root) const
-      REQUIRES(Locks::heap_bitmap_lock_) REQUIRES_SHARED(Locks::mutator_lock_) {
-    if (!root->IsNull()) {
-      VisitRoot(root);
-    }
-  }
-
-  void VisitRoot(mirror::CompressedReference<mirror::Object>* root) const
-      REQUIRES(Locks::heap_bitmap_lock_) REQUIRES_SHARED(Locks::mutator_lock_) {
-    visitor_(root->AsMirrorPtr());
-  }
-
- private:
-  Visitor visitor_;
-};
-
-void MarkCompact::VerifyNoMissingCardMarks() {
+void MarkCompact::VerifyNoMissingGenerationalCardMarks() {
   if (kVerifyNoMissingCardMarks) {
     accounting::CardTable* card_table = heap_->GetCardTable();
     auto obj_visitor = [&](mirror::Object* obj) REQUIRES_SHARED(Locks::mutator_lock_) {
@@ -5287,7 +5313,7 @@ void MarkCompact::FinishPhase(bool performed_compaction) {
     // and card-dirtying by a mutator will spuriosely fail.
     ScopedPause pause(this);
     WriterMutexLock mu(thread_running_gc_, *Locks::heap_bitmap_lock_);
-    VerifyNoMissingCardMarks();
+    VerifyNoMissingGenerationalCardMarks();
   }
   if (kVerifyPostGCObjects && use_generational_) {
     ReaderMutexLock mu(thread_running_gc_, *Locks::mutator_lock_);

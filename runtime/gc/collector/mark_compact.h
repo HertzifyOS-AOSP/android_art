@@ -684,6 +684,9 @@ class MarkCompact final : public GarbageCollector {
 
   // Verify that cards corresponding to objects containing references to
   // young-gen are dirty.
+  void VerifyNoMissingGenerationalCardMarks()
+      REQUIRES(Locks::heap_bitmap_lock_, Locks::mutator_lock_);
+  // Verify that card corresponding to a marked object with unmarked reference is dirty.
   void VerifyNoMissingCardMarks() REQUIRES(Locks::heap_bitmap_lock_, Locks::mutator_lock_);
   // Verify that post-GC objects (all objects except the ones allocated after
   // marking pause) are valid with valid references in them. Bitmap corresponding
