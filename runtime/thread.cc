@@ -1047,9 +1047,11 @@ bool Thread::Init(ThreadList* thread_list, JavaVMExt* java_vm, JNIEnvExt* jni_en
 #ifdef __BIONIC__
   __get_tls()[TLS_SLOT_ART_THREAD_SELF] = this;
 #else
-  CHECK_PTHREAD_CALL(pthread_setspecific, (Thread::pthread_key_self_, this), "attach self");
   Thread::self_tls_ = this;
 #endif
+  // On Bionic, we can set pthread_key_self_ to any non-null value. We use the pthread_key_self_
+  // destructor to detect cases where the thread wasn't detached before exiting.
+  CHECK_PTHREAD_CALL(pthread_setspecific, (Thread::pthread_key_self_, this), "attach self");
   DCHECK_EQ(Thread::Current(), this);
 
   tls32_.thin_lock_thread_id = thread_list->AllocThreadId(this);
@@ -2445,9 +2447,11 @@ void Thread::ThreadExitCallback(void* arg) {
 #ifdef __BIONIC__
     __get_tls()[TLS_SLOT_ART_THREAD_SELF] = self;
 #else
-    CHECK_PTHREAD_CALL(pthread_setspecific, (Thread::pthread_key_self_, self), "reattach self");
     Thread::self_tls_ = self;
 #endif
+    // On Bionic, we can set pthread_key_self_ to any non-null value. We use the pthread_key_self_
+    // destructor to detect cases where the thread wasn't detached before exiting.
+    CHECK_PTHREAD_CALL(pthread_setspecific, (Thread::pthread_key_self_, self), "reattach self");
     self->tls32_.thread_exit_check_count = 1;
   } else {
     LOG(FATAL) << "Native thread exited without calling DetachCurrentThread: " << *self;
