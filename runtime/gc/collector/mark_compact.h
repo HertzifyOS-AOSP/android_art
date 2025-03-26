@@ -692,6 +692,18 @@ class MarkCompact final : public GarbageCollector {
   void VerifyPostGCObjects(bool performed_compaction, uint8_t* mark_bitmap_clear_end)
       REQUIRES(Locks::heap_bitmap_lock_) REQUIRES_SHARED(Locks::mutator_lock_);
 
+  // Like ProcessMarkStack(), but ensures that a non-null popped reference is
+  // scanned.
+  void ProcessMarkStackNonNull() REQUIRES_SHARED(Locks::mutator_lock_)
+      REQUIRES(Locks::heap_bitmap_lock_);
+  // Process one object popped out of mark_stack. Expects obj to be non-null.
+  void ProcessMarkObject(mirror::Object* obj) REQUIRES_SHARED(Locks::mutator_lock_)
+      REQUIRES(Locks::heap_bitmap_lock_);
+
+  // Vector to hold thread-local overflow arrays (and the number of entries in
+  // there) of gc-roots found during mutator-stack scanning in marking phase.
+  std::vector<std::pair<StackReference<mirror::Object>*, size_t>>* overflow_arrays_
+      GUARDED_BY(lock_);
   // For checkpoints
   Barrier gc_barrier_;
   // Required only when mark-stack is accessed in shared mode, which happens

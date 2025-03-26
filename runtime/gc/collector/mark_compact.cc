@@ -480,6 +480,7 @@ void YoungMarkCompact::RunPhases() {
 
 MarkCompact::MarkCompact(Heap* heap)
     : GarbageCollector(heap, "concurrent mark compact"),
+      overflow_arrays_(nullptr),
       gc_barrier_(0),
       lock_("mark compact lock", kGenericBottomLock),
       sigbus_in_progress_count_{kSigbusCounterCompactionDoneMask, kSigbusCounterCompactionDoneMask},
@@ -4135,11 +4136,31 @@ void MarkCompact::CompactionPhase() {
 template <size_t kBufferSize>
 class MarkCompact::ThreadRootsVisitor : public RootVisitor {
  public:
+  using RefType = StackReference<mirror::Object>;
+
   explicit ThreadRootsVisitor(MarkCompact* mark_compact, Thread* const self)
         : mark_compact_(mark_compact), self_(self) {}
 
   ~ThreadRootsVisitor() {
-    Flush();
+    if (overflow_arr_start_ != nullptr) {
+      // Pass on the thread-local overflow array to the gc-thread for processing
+      // after checkpoint.
+      CHECK_GT(top_, overflow_arr_start_);
+      auto pair = std::make_pair(overflow_arr_start_, top_ - overflow_arr_start_);
+      MutexLock mu(self_, mark_compact_->lock_);
+      if (mark_compact_->overflow_arrays_ == nullptr) {
+        mark_compact_->overflow_arrays_ = new std::vector<std::pair<RefType*, size_t>>(1, pair);
+      } else {
+        mark_compact_->overflow_arrays_->push_back(pair);
+      }
+    } else {
+      // Since we don't reset mark-stack between the two stack-scan checkpoints
+      // in marking phase, we need to clear the stale references that are left
+      // unused in the stack.
+      for (; top_ < end_; top_++) {
+        top_->Assign(nullptr);
+      }
+    }
   }
 
   void VisitRoots(mirror::Object*** roots,
@@ -4167,35 +4188,46 @@ class MarkCompact::ThreadRootsVisitor : public RootVisitor {
   }
 
  private:
-  void Flush() REQUIRES_SHARED(Locks::mutator_lock_)
-               REQUIRES(Locks::heap_bitmap_lock_) {
-    StackReference<mirror::Object>* start;
-    StackReference<mirror::Object>* end;
-    {
-      MutexLock mu(self_, mark_compact_->lock_);
-      // Loop here because even after expanding once it may not be sufficient to
-      // accommodate all references. It's almost impossible, but there is no harm
-      // in implementing it this way.
-      while (!mark_compact_->mark_stack_->BumpBack(idx_, &start, &end)) {
-        mark_compact_->ExpandMarkStack();
+  void FetchBuffer() REQUIRES_SHARED(Locks::mutator_lock_) {
+    size_t requested_size;
+    ptrdiff_t new_top_offset;
+    if (LIKELY(overflow_arr_start_ == nullptr)) {
+      // During stack scanning threads can only be calling AtomicBumpBack() on
+      // the mark-stack.
+      if (mark_compact_->mark_stack_->AtomicBumpBack(kBufferSize, &top_, &end_)) {
+        return;
       }
+      new_top_offset = 0;
+      requested_size = kBufferSize;
+    } else {
+      DCHECK_GT(end_, overflow_arr_start_);
+      new_top_offset = end_ - overflow_arr_start_;
+      requested_size = 2 * new_top_offset;
     }
-    while (idx_ > 0) {
-      *start++ = roots_[--idx_];
-    }
-    DCHECK_EQ(start, end);
+    // realloc() acts like malloc() when overflow_arr_start_ is null.
+    overflow_arr_start_ =
+        static_cast<RefType*>(realloc(overflow_arr_start_, requested_size * sizeof(RefType)));
+    top_ = overflow_arr_start_ + new_top_offset;
+    end_ = overflow_arr_start_ + requested_size;
   }
 
   void Push(mirror::Object* obj) REQUIRES_SHARED(Locks::mutator_lock_)
                                  REQUIRES(Locks::heap_bitmap_lock_) {
-    if (UNLIKELY(idx_ >= kBufferSize)) {
-      Flush();
+    if (UNLIKELY(top_ == end_)) {
+      FetchBuffer();
+      DCHECK_GE(end_ - top_, static_cast<ssize_t>(kBufferSize));
     }
-    roots_[idx_++].Assign(obj);
+    top_->Assign(obj);
+    top_++;
   }
 
-  StackReference<mirror::Object> roots_[kBufferSize];
-  size_t idx_ = 0;
+  // If mark-stack has slots available, [top_, end_) represents the slots
+  // acquired from the mark-stack for storing references. After mark-stack
+  // is full, [top_, end_) is the range in overflow array.
+  RefType* top_ = nullptr;
+  RefType* end_ = nullptr;
+  // Thread-local array of references to be used if and when mark-stack is full.
+  RefType* overflow_arr_start_ = nullptr;
   MarkCompact* const mark_compact_;
   Thread* const self_;
 };
@@ -4229,6 +4261,21 @@ class MarkCompact::CheckpointMarkThreadRoots : public Closure {
   MarkCompact* const mark_compact_;
 };
 
+inline void MarkCompact::ProcessMarkObject(mirror::Object* obj) {
+  DCHECK(obj != nullptr);
+  ScanObject</*kUpdateLiveWords=*/true>(obj);
+}
+
+void MarkCompact::ProcessMarkStackNonNull() {
+  TimingLogger::ScopedTiming t(__FUNCTION__, GetTimings());
+  while (!mark_stack_->IsEmpty()) {
+    mirror::Object* obj = mark_stack_->PopBack();
+    if (obj != nullptr) {
+      ProcessMarkObject(obj);
+    }
+  }
+}
+
 void MarkCompact::MarkRootsCheckpoint(Thread* self, Runtime* runtime) {
   // We revote TLABs later during paused round of marking.
   TimingLogger::ScopedTiming t(__FUNCTION__, GetTimings());
@@ -4239,20 +4286,39 @@ void MarkCompact::MarkRootsCheckpoint(Thread* self, Runtime* runtime) {
   // run through the barrier including self.
   size_t barrier_count = thread_list->RunCheckpoint(&check_point);
   // Release locks then wait for all mutator threads to pass the barrier.
-  // If there are no threads to wait which implys that all the checkpoint functions are finished,
+  // If there are no threads to wait which implies that all the checkpoint functions are finished,
   // then no need to release locks.
-  if (barrier_count == 0) {
-    return;
+  if (barrier_count > 0) {
+    Locks::heap_bitmap_lock_->ExclusiveUnlock(self);
+    Locks::mutator_lock_->SharedUnlock(self);
+    {
+      ScopedThreadStateChange tsc(self, ThreadState::kWaitingForCheckPointsToRun);
+      gc_barrier_.Increment(self, barrier_count);
+    }
+    Locks::mutator_lock_->SharedLock(self);
+    Locks::heap_bitmap_lock_->ExclusiveLock(self);
   }
-  Locks::heap_bitmap_lock_->ExclusiveUnlock(self);
-  Locks::mutator_lock_->SharedUnlock(self);
+  // We may have null in the mark-stack as some thread(s) may have not filled
+  // the buffer completely.
+  ProcessMarkStackNonNull();
+  std::vector<std::pair<StackReference<mirror::Object>*, size_t>>* vec = nullptr;
   {
-    ScopedThreadStateChange tsc(self, ThreadState::kWaitingForCheckPointsToRun);
-    gc_barrier_.Increment(self, barrier_count);
+    MutexLock mu(self, lock_);
+    if (overflow_arrays_ != nullptr) {
+      vec = overflow_arrays_;
+      overflow_arrays_ = nullptr;
+    }
   }
-  Locks::mutator_lock_->SharedLock(self);
-  Locks::heap_bitmap_lock_->ExclusiveLock(self);
-  ProcessMarkStack();
+  if (vec != nullptr) {
+    for (auto [arr, size] : *vec) {
+      for (size_t i = 0; i < size; i++) {
+        ProcessMarkObject(arr[i].AsMirrorPtr());
+      }
+      free(arr);
+      ProcessMarkStack();
+    }
+    delete vec;
+  }
 }
 
 void MarkCompact::MarkNonThreadRoots(Runtime* runtime) {
@@ -4625,14 +4691,14 @@ void MarkCompact::ProcessMarkStack() {
   TimingLogger::ScopedTiming t(__FUNCTION__, GetTimings());
   // TODO: try prefetch like in CMS
   while (!mark_stack_->IsEmpty()) {
-    mirror::Object* obj = mark_stack_->PopBack();
-    DCHECK(obj != nullptr);
-    ScanObject</*kUpdateLiveWords*/ true>(obj);
+    ProcessMarkObject(mark_stack_->PopBack());
   }
 }
 
 void MarkCompact::ExpandMarkStack() {
   const size_t new_size = mark_stack_->Capacity() * 2;
+  // TODO: We could reduce the overhead here by making the Resize() of
+  // AtomicStack take care of transferring references.
   std::vector<StackReference<mirror::Object>> temp(mark_stack_->Begin(),
                                                    mark_stack_->End());
   mark_stack_->Resize(new_size);
