@@ -1613,11 +1613,9 @@ void ThreadList::Unregister(Thread* self, bool should_run_callbacks) {
 #ifdef __BIONIC__
   __get_tls()[TLS_SLOT_ART_THREAD_SELF] = nullptr;
 #else
+  CHECK_PTHREAD_CALL(pthread_setspecific, (Thread::pthread_key_self_, nullptr), "detach self");
   Thread::self_tls_ = nullptr;
 #endif
-  // On Bionic, we use the pthread_key_self_ destructor to detect cases where the thread wasn't
-  // detached before exiting.
-  CHECK_PTHREAD_CALL(pthread_setspecific, (Thread::pthread_key_self_, nullptr), "detach self");
 
   // Signal that a thread just detached.
   MutexLock mu(nullptr, *Locks::thread_list_lock_);
