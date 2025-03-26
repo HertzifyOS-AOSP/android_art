@@ -337,6 +337,8 @@ static constexpr bool kVerifyRootsMarked = kIsDebugBuild;
 static constexpr bool kVerifyNoMissingCardMarks = kIsDebugBuild;
 // Verify that all references in post-GC objects are valid.
 static constexpr bool kVerifyPostGCObjects = kIsDebugBuild;
+// Assert during marking that GC-roots are valid.
+static constexpr bool kVerifyGcRootDuringMarking = kIsDebugBuild;
 // Number of compaction buffers reserved for mutator threads in SIGBUS feature
 // case. It's extremely unlikely that we will ever have more than these number
 // of mutator threads trying to access the moving-space during one compaction
@@ -4139,7 +4141,11 @@ class MarkCompact::ThreadRootsVisitor : public RootVisitor {
   using RefType = StackReference<mirror::Object>;
 
   explicit ThreadRootsVisitor(MarkCompact* mark_compact, Thread* const self)
-        : mark_compact_(mark_compact), self_(self) {}
+      : mark_compact_(mark_compact), self_(self) {
+    if (kVerifyGcRootDuringMarking) {
+      verification_ = mark_compact->GetHeap()->GetVerification();
+    }
+  }
 
   ~ThreadRootsVisitor() {
     if (overflow_arr_start_ != nullptr) {
@@ -4169,6 +4175,9 @@ class MarkCompact::ThreadRootsVisitor : public RootVisitor {
       REQUIRES_SHARED(Locks::mutator_lock_) REQUIRES(Locks::heap_bitmap_lock_) {
     for (size_t i = 0; i < count; i++) {
       mirror::Object* obj = *roots[i];
+      if (kVerifyGcRootDuringMarking) {
+        CHECK(verification_->IsValidObject(obj)) << obj;
+      }
       if (mark_compact_->MarkObjectNonNullNoPush</*kParallel*/true>(obj)) {
         Push(obj);
       }
@@ -4181,6 +4190,9 @@ class MarkCompact::ThreadRootsVisitor : public RootVisitor {
       REQUIRES_SHARED(Locks::mutator_lock_) REQUIRES(Locks::heap_bitmap_lock_) {
     for (size_t i = 0; i < count; i++) {
       mirror::Object* obj = roots[i]->AsMirrorPtr();
+      if (kVerifyGcRootDuringMarking) {
+        CHECK(verification_->IsValidObject(obj)) << obj;
+      }
       if (mark_compact_->MarkObjectNonNullNoPush</*kParallel*/true>(obj)) {
         Push(obj);
       }
@@ -4230,6 +4242,7 @@ class MarkCompact::ThreadRootsVisitor : public RootVisitor {
   RefType* overflow_arr_start_ = nullptr;
   MarkCompact* const mark_compact_;
   Thread* const self_;
+  const Verification* verification_;
 };
 
 class MarkCompact::CheckpointMarkThreadRoots : public Closure {
@@ -4799,8 +4812,13 @@ void MarkCompact::VisitRoots(mirror::Object*** roots,
       UpdateRoot(roots[i], moving_space_begin, moving_space_end, info);
     }
   } else {
+    const Verification* verification = GetHeap()->GetVerification();
     for (size_t i = 0; i < count; ++i) {
-      MarkObjectNonNull(*roots[i]);
+      mirror::Object* obj = *roots[i];
+      if (kVerifyGcRootDuringMarking) {
+        CHECK(verification->IsValidObject(obj)) << obj << " info:" << info;
+      }
+      MarkObjectNonNull(obj);
     }
   }
 }
@@ -4816,8 +4834,13 @@ void MarkCompact::VisitRoots(mirror::CompressedReference<mirror::Object>** roots
       UpdateRoot(roots[i], moving_space_begin, moving_space_end, info);
     }
   } else {
+    const Verification* verification = GetHeap()->GetVerification();
     for (size_t i = 0; i < count; ++i) {
-      MarkObjectNonNull(roots[i]->AsMirrorPtr());
+      mirror::Object* obj = roots[i]->AsMirrorPtr();
+      if (kVerifyGcRootDuringMarking) {
+        CHECK(verification->IsValidObject(obj)) << obj << " info:" << info;
+      }
+      MarkObjectNonNull(obj);
     }
   }
 }
