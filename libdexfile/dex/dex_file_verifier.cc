@@ -685,6 +685,11 @@ bool DexFileVerifier::CheckHeader() {
     }
   }
 
+  if (header_->map_off_ == 0) {
+    ErrorStringPrintf("Map offset is zero");
+    return false;
+  }
+
   // Check that all offsets are inside the file.
   bool ok =
       CheckValidOffsetAndSize(header_->link_off_,
@@ -728,12 +733,20 @@ bool DexFileVerifier::CheckHeader() {
                               /* alignment= */ 0,
                               "data");
 
-  if (ok) {
-    data_ = (dex_version_ >= 41)
-        ? ArrayRef<const uint8_t>(dex_file_->Begin(), EndOfFile() - dex_file_->Begin())
-        : ArrayRef<const uint8_t>(OffsetToPtr(header_->data_off_), header_->data_size_);
+  if (!ok) {
+    return false;
   }
-  return ok;
+
+  if (dex_version_ >= 41) {
+    data_ = ArrayRef<const uint8_t>(dex_file_->Begin(), EndOfFile() - dex_file_->Begin());
+  } else {
+    // data_off_ is allowed to be 0.
+    if (header_->data_off_ != 0) {
+      data_ = ArrayRef<const uint8_t>(OffsetToPtr(header_->data_off_), header_->data_size_);
+    }
+  }
+
+  return true;
 }
 
 bool DexFileVerifier::CheckMap() {
@@ -3475,14 +3488,16 @@ bool DexFileVerifier::CheckInterSectionIterate(size_t offset,
 }
 
 bool DexFileVerifier::CheckInterSection() {
-  // Eagerly verify that `StringId` offsets map to string data items to make sure
-  // we can retrieve the string data for verifying other items (types, shorties, etc.).
-  // After this we can safely use `DexFile` helpers such as `GetFieldId()` or `GetMethodId()`
-  // but not `PrettyMethod()` or `PrettyField()` as descriptors have not been verified yet.
-  const dex::StringId* string_ids = OffsetToPtr<dex::StringId>(header_->string_ids_off_);
-  for (size_t i = 0, num_strings = header_->string_ids_size_; i != num_strings; ++i) {
-    if (!CheckOffsetToTypeMap(string_ids[i].string_data_off_, DexFile::kDexTypeStringDataItem)) {
-      return false;
+  if (header_->string_ids_off_ != 0) {
+    // Eagerly verify that `StringId` offsets map to string data items to make sure
+    // we can retrieve the string data for verifying other items (types, shorties, etc.).
+    // After this we can safely use `DexFile` helpers such as `GetFieldId()` or `GetMethodId()`
+    // but not `PrettyMethod()` or `PrettyField()` as descriptors have not been verified yet.
+    const dex::StringId* string_ids = OffsetToPtr<dex::StringId>(header_->string_ids_off_);
+    for (size_t i = 0, num_strings = header_->string_ids_size_; i != num_strings; ++i) {
+      if (!CheckOffsetToTypeMap(string_ids[i].string_data_off_, DexFile::kDexTypeStringDataItem)) {
+        return false;
+      }
     }
   }
 
@@ -3653,6 +3668,10 @@ bool DexFileVerifier::CheckFieldAccessFlags(uint32_t idx,
 }
 
 void DexFileVerifier::FindStringRangesForMethodNames() {
+  if (header_->string_ids_off_ == 0) {
+    return;
+  }
+
   // Use DexFile::StringId* as RandomAccessIterator.
   const dex::StringId* first = OffsetToPtr<dex::StringId>(header_->string_ids_off_);
   const dex::StringId* last = first + header_->string_ids_size_;
