@@ -133,7 +133,7 @@ luci.console_view(
     name = "luci",
     repo = REPO_ROOT + "/platform/art",
     title = "ART LUCI Console",
-    refs = ["refs/heads/master"],
+    refs = ["refs/heads/main"],
     include_experimental_builds = True,
 )
 
@@ -152,21 +152,21 @@ luci.gitiles_poller(
     name = "art",
     bucket = "ci",
     repo = REPO_ROOT + "/platform/art",
-    refs = ["refs/heads/master"],
+    refs = ["refs/heads/main"],
 )
 
 luci.gitiles_poller(
     name = "libcore",
     bucket = "ci",
     repo = REPO_ROOT + "/platform/libcore",
-    refs = ["refs/heads/master"],
+    refs = ["refs/heads/main"],
 )
 
 luci.gitiles_poller(
     name = "vogar",
     bucket = "ci",
     repo = REPO_ROOT + "/platform/external/vogar",
-    refs = ["refs/heads/master"],
+    refs = ["refs/heads/main"],
 )
 
 luci.gitiles_poller(
