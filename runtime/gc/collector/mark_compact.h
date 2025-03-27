@@ -958,6 +958,7 @@ class MarkCompact final : public GarbageCollector {
   void* prev_post_compact_end_;
   void* prev_black_dense_end_;
   void* prev_black_allocations_begin_;
+  void* prev_moving_space_end_at_compaction_;
   bool prev_gc_young_;
   bool prev_gc_performed_compaction_;
   // Timestamp when the read-barrier is enabled
