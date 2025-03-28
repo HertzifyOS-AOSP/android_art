@@ -17,11 +17,10 @@
 #ifndef ART_RUNTIME_GC_HEAP_INL_H_
 #define ART_RUNTIME_GC_HEAP_INL_H_
 
-#include "heap.h"
-
 #include "allocation_listener.h"
 #include "base/quasi_atomic.h"
 #include "base/time_utils.h"
+#include "com_android_art_rw_flags.h"
 #include "gc/accounting/atomic_stack.h"
 #include "gc/accounting/card_table-inl.h"
 #include "gc/allocation_record.h"
@@ -32,6 +31,7 @@
 #include "gc/space/region_space-inl.h"
 #include "gc/space/rosalloc_space-inl.h"
 #include "handle_scope-inl.h"
+#include "heap.h"
 #include "obj_ptr-inl.h"
 #include "runtime.h"
 #include "thread-inl.h"
@@ -473,6 +473,15 @@ inline bool Heap::IsOutOfMemoryOnAllocation([[maybe_unused]] AllocatorType alloc
 }
 
 inline bool Heap::ShouldConcurrentGCForJava(size_t new_num_bytes_allocated) {
+  if (com::android::art::rw::flags::enable_time_based_gc_triggering()) {
+    if (time_based_gc_threshold_ != 0) {
+      size_t bytes_allocated_since_last_gc_kb =
+          (new_num_bytes_allocated - num_bytes_alive_after_gc_) / KB;
+      uint64_t time_since_last_gc_ms = NsToMs(NanoTime() - last_gc_start_time_);
+      return bytes_allocated_since_last_gc_kb * time_since_last_gc_ms >= time_based_gc_threshold_;
+    }
+  }
+
   // For a Java allocation, we only check whether the number of Java allocated bytes excceeds a
   // threshold. By not considering native allocation here, we (a) ensure that Java heap bounds are
   // maintained, and (b) reduce the cost of the check here.
