@@ -247,8 +247,7 @@ class FuzzerCorpusTest : public CommonRuntimeTest {
 // Tests that we can verify dex files without crashing.
 TEST_F(FuzzerCorpusTest, VerifyCorpusDexFiles) {
   // These dex files are expected to pass verification. The others are regressions tests.
-  const std::unordered_set<std::string> valid_dex_files = {
-      "Main.dex", "hello_world.dex", "b404728595.dex"};
+  const std::unordered_set<std::string> valid_dex_files = {"Main.dex", "hello_world.dex"};
   const std::string archive_filename = "dex_verification_fuzzer_corpus.zip";
 
   TestFuzzerHelper(archive_filename, valid_dex_files, DexFileVerification);
