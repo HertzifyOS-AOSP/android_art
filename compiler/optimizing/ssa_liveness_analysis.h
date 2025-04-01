@@ -1150,7 +1150,7 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
   static constexpr int kNoRegister = -1;
   static constexpr int kNoSpillSlot = -1;
 
-  ART_FRIEND_TEST(RegisterAllocatorTest, SpillInactive);
+  friend class RegisterAllocatorTest;
 
   DISALLOW_COPY_AND_ASSIGN(LiveInterval);
 };
@@ -1328,8 +1328,7 @@ class SsaLivenessAnalysis : public ValueObject {
   ScopedArenaVector<HInstruction*> instructions_from_lifetime_position_;
   size_t number_of_ssa_values_;
 
-  ART_FRIEND_TEST(RegisterAllocatorTest, SpillInactive);
-  ART_FRIEND_TEST(RegisterAllocatorTest, FreeUntil);
+  friend class RegisterAllocatorTest;
 
   DISALLOW_COPY_AND_ASSIGN(SsaLivenessAnalysis);
 };
