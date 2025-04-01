@@ -98,6 +98,15 @@ class RegisterAllocator : public DeletableArenaObject<kArenaAllocRegisterAllocat
   // blocks and irreducible loop headers to save memory and improve performance.
   uint32_t GetRegisterMask(LiveInterval* interval, RegisterType register_type) const;
 
+  // Helper function for `GetRegisterMask()` specialized for intervals holding a register.
+  static uint32_t GetSingleRegisterMask(LiveInterval* interval, RegisterType register_type);
+
+  // Helper function for `GetRegisterMask()` specialized for intervals holding blocked registers.
+  static uint32_t GetBlockedRegistersMask(LiveInterval* interval,
+                                          ArrayRef<HInstruction* const> instructions_from_positions,
+                                          size_t number_of_registers,
+                                          uint32_t registers_blocked_for_call);
+
   ScopedArenaAllocator* const allocator_;
   CodeGenerator* const codegen_;
   const SsaLivenessAnalysis& liveness_;
