@@ -304,9 +304,15 @@ LiveInterval* RegisterAllocator::Split(LiveInterval* interval, size_t position) 
   }
 }
 
-LiveInterval* RegisterAllocator::SplitBetween(LiveInterval* interval, size_t from, size_t to) {
-  HBasicBlock* block_from = liveness_.GetBlockFromPosition(from / 2);
-  HBasicBlock* block_to = liveness_.GetBlockFromPosition(to / 2);
+LiveInterval* RegisterAllocator::SplitBetween(
+    LiveInterval* interval,
+    size_t from,
+    size_t to,
+    ArrayRef<HInstruction* const> instructions_from_positions) {
+  HBasicBlock* block_from =
+      SsaLivenessAnalysis::GetBlockFromPosition(from / 2, instructions_from_positions);
+  HBasicBlock* block_to =
+      SsaLivenessAnalysis::GetBlockFromPosition(to / 2, instructions_from_positions);
   DCHECK(block_from != nullptr);
   DCHECK(block_to != nullptr);
 

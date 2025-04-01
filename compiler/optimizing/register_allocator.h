@@ -80,7 +80,10 @@ class RegisterAllocator : public DeletableArenaObject<kArenaAllocRegisterAllocat
 
   // Split `interval` at a position between `from` and `to`. The method will try
   // to find an optimal split position.
-  LiveInterval* SplitBetween(LiveInterval* interval, size_t from, size_t to);
+  static LiveInterval* SplitBetween(LiveInterval* interval,
+                                    size_t from,
+                                    size_t to,
+                                    ArrayRef<HInstruction* const> instructions_from_positions);
 
   // Helper for calling the right typed codegen function for dumping a register.
   void DumpRegister(std::ostream& stream, int reg, RegisterType register_type) const {
