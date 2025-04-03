@@ -247,12 +247,13 @@ void RegisterAllocatorLinearScan::AllocateRegisters() {
     // these checks are mostly for making sure these moves have been added correctly.
     size_t current_liveness = 0;
     for (HBasicBlock* block : codegen_->GetGraph()->GetLinearOrder()) {
-      for (HInstructionIterator inst_it(block->GetPhis()); !inst_it.Done(); inst_it.Advance()) {
+      for (HInstructionIteratorPrefetchNext inst_it(block->GetPhis()); !inst_it.Done();
+           inst_it.Advance()) {
         HInstruction* instruction = inst_it.Current();
         DCHECK_LE(current_liveness, instruction->GetLifetimePosition());
         current_liveness = instruction->GetLifetimePosition();
       }
-      for (HInstructionIterator inst_it(block->GetInstructions());
+      for (HInstructionIteratorPrefetchNext inst_it(block->GetInstructions());
            !inst_it.Done();
            inst_it.Advance()) {
         HInstruction* instruction = inst_it.Current();
@@ -304,11 +305,13 @@ void RegisterAllocatorLinearScan::AllocateRegistersInternal() {
   // Iterate post-order, to ensure the list is sorted, and the last added interval
   // is the one with the lowest start position.
   for (HBasicBlock* block : codegen_->GetGraph()->GetLinearPostOrder()) {
-    for (HBackwardInstructionIterator back_it(block->GetInstructions()); !back_it.Done();
+    for (HBackwardInstructionIteratorPrefetchNext back_it(block->GetInstructions());
+         !back_it.Done();
          back_it.Advance()) {
       ProcessInstruction(back_it.Current());
     }
-    for (HInstructionIterator inst_it(block->GetPhis()); !inst_it.Done(); inst_it.Advance()) {
+    for (HInstructionIteratorPrefetchNext inst_it(block->GetPhis()); !inst_it.Done();
+         inst_it.Advance()) {
       ProcessInstruction(inst_it.Current());
     }
 
