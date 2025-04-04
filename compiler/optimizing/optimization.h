@@ -84,7 +84,6 @@ enum class OptimizationPass {
   kLoopOptimization,
   kReferenceTypePropagation,
   kScheduling,
-  kSideEffectsAnalysis,
   kWriteBarrierElimination,
 #ifdef ART_ENABLE_CODEGEN_arm
   kInstructionSimplifierArm,

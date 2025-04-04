@@ -505,7 +505,6 @@ bool OptimizingCompiler::RunArchOptimizations(HGraph* graph,
     case InstructionSet::kArm: {
       static constexpr OptimizationDef arm_optimizations[] = {
           OptDef(OptimizationPass::kInstructionSimplifierArm),
-          OptDef(OptimizationPass::kSideEffectsAnalysis),
           OptDef(OptimizationPass::kGlobalValueNumbering, "GVN$after_arch"),
           OptDef(OptimizationPass::kCriticalNativeAbiFixupArm),
           OptDef(OptimizationPass::kScheduling)
@@ -521,7 +520,6 @@ bool OptimizingCompiler::RunArchOptimizations(HGraph* graph,
     case InstructionSet::kArm64: {
       static constexpr OptimizationDef arm64_optimizations[] = {
           OptDef(OptimizationPass::kInstructionSimplifierArm64),
-          OptDef(OptimizationPass::kSideEffectsAnalysis),
           OptDef(OptimizationPass::kGlobalValueNumbering, "GVN$after_arch"),
           OptDef(OptimizationPass::kScheduling)
       };
@@ -536,7 +534,6 @@ bool OptimizingCompiler::RunArchOptimizations(HGraph* graph,
     case InstructionSet::kRiscv64: {
       static constexpr OptimizationDef riscv64_optimizations[] = {
           OptDef(OptimizationPass::kInstructionSimplifierRiscv64),
-          OptDef(OptimizationPass::kSideEffectsAnalysis),
           OptDef(OptimizationPass::kGlobalValueNumbering, "GVN$after_arch"),
           OptDef(OptimizationPass::kCriticalNativeAbiFixupRiscv64)
       };
@@ -551,7 +548,6 @@ bool OptimizingCompiler::RunArchOptimizations(HGraph* graph,
     case InstructionSet::kX86: {
       static constexpr OptimizationDef x86_optimizations[] = {
           OptDef(OptimizationPass::kInstructionSimplifierX86),
-          OptDef(OptimizationPass::kSideEffectsAnalysis),
           OptDef(OptimizationPass::kGlobalValueNumbering, "GVN$after_arch"),
           OptDef(OptimizationPass::kPcRelativeFixupsX86),
           OptDef(OptimizationPass::kX86MemoryOperandGeneration)
@@ -567,7 +563,6 @@ bool OptimizingCompiler::RunArchOptimizations(HGraph* graph,
     case InstructionSet::kX86_64: {
       static constexpr OptimizationDef x86_64_optimizations[] = {
           OptDef(OptimizationPass::kInstructionSimplifierX86_64),
-          OptDef(OptimizationPass::kSideEffectsAnalysis),
           OptDef(OptimizationPass::kGlobalValueNumbering, "GVN$after_arch"),
           OptDef(OptimizationPass::kX86MemoryOperandGeneration)
       };
@@ -661,8 +656,6 @@ void OptimizingCompiler::RunOptimizations(HGraph* graph,
              "dead_code_elimination$after_inlining",
              OptimizationPass::kInliner),
       // GVN.
-      OptDef(OptimizationPass::kSideEffectsAnalysis,
-             "side_effects$before_gvn"),
       OptDef(OptimizationPass::kGlobalValueNumbering),
       OptDef(OptimizationPass::kReferenceTypePropagation,
              "reference_type_propagation$after_gvn",
@@ -676,8 +669,6 @@ void OptimizingCompiler::RunOptimizations(HGraph* graph,
       OptDef(OptimizationPass::kDeadCodeElimination,
              "dead_code_elimination$after_gvn"),
       // High-level optimizations.
-      OptDef(OptimizationPass::kSideEffectsAnalysis,
-             "side_effects$before_licm"),
       OptDef(OptimizationPass::kInvariantCodeMotion),
       OptDef(OptimizationPass::kInductionVarAnalysis),
       OptDef(OptimizationPass::kBoundsCheckElimination),
