@@ -118,7 +118,8 @@ inline void RemoveSuspendChecks(HGraph* graph) {
       if (block->GetLoopInformation() != nullptr) {
         block->GetLoopInformation()->SetSuspendCheck(nullptr);
       }
-      for (HInstructionIterator it(block->GetInstructions()); !it.Done(); it.Advance()) {
+      for (HInstructionIteratorPrefetchNext it(block->GetInstructions()); !it.Done();
+           it.Advance()) {
         HInstruction* current = it.Current();
         if (current->IsSuspendCheck()) {
           current->GetBlock()->RemoveInstruction(current);
@@ -773,6 +774,17 @@ class OptimizingUnitTestHelper {
     AddOrInsertInstruction(block, invoke);
     ManuallyBuildEnvFor(invoke, env);
     return invoke;
+  }
+
+  template <typename Type>
+  Type* MakeUnOp(HBasicBlock* block,
+                 DataType::Type result_type,
+                 HInstruction* input,
+                 uint32_t dex_pc = kNoDexPc) {
+    static_assert(std::is_base_of_v<HUnaryOperation, Type>);
+    Type* insn = new (GetAllocator()) Type(result_type, input, dex_pc);
+    AddOrInsertInstruction(block, insn);
+    return insn;
   }
 
   template <typename Type>

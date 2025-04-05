@@ -48,7 +48,8 @@ void SsaLivenessAnalysis::NumberInstructions() {
   for (HBasicBlock* block : graph_->GetLinearOrder()) {
     block->SetLifetimeStart(lifetime_position);
 
-    for (HInstructionIterator inst_it(block->GetPhis()); !inst_it.Done(); inst_it.Advance()) {
+    for (HInstructionIteratorPrefetchNext inst_it(block->GetPhis()); !inst_it.Done();
+         inst_it.Advance()) {
       HInstruction* current = inst_it.Current();
       codegen_->AllocateLocations(current);
       LocationSummary* locations = current->GetLocations();
@@ -65,7 +66,7 @@ void SsaLivenessAnalysis::NumberInstructions() {
     // Add a null marker to notify we are starting a block.
     instructions_from_lifetime_position_.push_back(nullptr);
 
-    for (HInstructionIterator inst_it(block->GetInstructions()); !inst_it.Done();
+    for (HInstructionIteratorPrefetchNext inst_it(block->GetInstructions()); !inst_it.Done();
          inst_it.Advance()) {
       HInstruction* current = inst_it.Current();
       codegen_->AllocateLocations(current);
@@ -187,7 +188,8 @@ void SsaLivenessAnalysis::ComputeLiveRanges() {
         // therefore be the same and we only need to keep alive one.
       } else {
         size_t phi_input_index = successor->GetPredecessorIndexOf(block);
-        for (HInstructionIterator phi_it(successor->GetPhis()); !phi_it.Done(); phi_it.Advance()) {
+        for (HInstructionIteratorPrefetchNext phi_it(successor->GetPhis()); !phi_it.Done();
+             phi_it.Advance()) {
           HInstruction* phi = phi_it.Current();
           HInstruction* input = phi->InputAt(phi_input_index);
           input->GetLiveInterval()->AddPhiUse(phi, phi_input_index, block);
@@ -205,7 +207,8 @@ void SsaLivenessAnalysis::ComputeLiveRanges() {
       current->GetLiveInterval()->AddRange(block->GetLifetimeStart(), block->GetLifetimeEnd());
     }
 
-    for (HBackwardInstructionIterator back_it(block->GetInstructions()); !back_it.Done();
+    for (HBackwardInstructionIteratorPrefetchNext back_it(block->GetInstructions());
+         !back_it.Done();
          back_it.Advance()) {
       HInstruction* current = back_it.Current();
       if (current->HasSsaIndex()) {
@@ -242,7 +245,8 @@ void SsaLivenessAnalysis::ComputeLiveRanges() {
     }
 
     // Kill phis defined in this block.
-    for (HInstructionIterator inst_it(block->GetPhis()); !inst_it.Done(); inst_it.Advance()) {
+    for (HInstructionIteratorPrefetchNext inst_it(block->GetPhis()); !inst_it.Done();
+         inst_it.Advance()) {
       HInstruction* current = inst_it.Current();
       if (current->HasSsaIndex()) {
         kill.SetBit(current->GetSsaIndex());
@@ -351,8 +355,8 @@ static int RegisterOrLowRegister(Location location) {
   return location.IsPair() ? location.low() : location.reg();
 }
 
-int LiveInterval::FindFirstRegisterHint(size_t* free_until,
-                                        const SsaLivenessAnalysis& liveness) const {
+int LiveInterval::FindFirstRegisterHint(
+    ArrayRef<size_t> free_until, ArrayRef<HInstruction* const> instructions_from_positions) const {
   DCHECK(!IsHighInterval());
   if (IsTemp()) return kNoRegister;
 
@@ -366,12 +370,14 @@ int LiveInterval::FindFirstRegisterHint(size_t* free_until,
     }
   }
 
-  if (IsSplit() && liveness.IsAtBlockBoundary(GetStart() / 2)) {
+  if (IsSplit() &&
+      SsaLivenessAnalysis::IsAtBlockBoundary(GetStart() / 2, instructions_from_positions)) {
     // If the start of this interval is at a block boundary, we look at the
     // location of the interval in blocks preceding the block this interval
     // starts at. If one location is a register we return it as a hint. This
     // will avoid a move between the two blocks.
-    HBasicBlock* block = liveness.GetBlockFromPosition(GetStart() / 2);
+    HBasicBlock* block =
+        SsaLivenessAnalysis::GetBlockFromPosition(GetStart() / 2, instructions_from_positions);
     size_t next_register_use = FirstRegisterUse();
     for (HBasicBlock* predecessor : block->GetPredecessors()) {
       size_t position = predecessor->GetLifetimeEnd() - 1;
