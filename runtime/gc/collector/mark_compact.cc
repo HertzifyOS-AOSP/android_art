@@ -844,6 +844,25 @@ class MarkCompact::FlipCallback : public Closure {
   MarkCompact* const collector_;
 };
 
+// Traces the page faults incurred in the context of the GC thread. The 'Majflt' counter traces the
+// major faults i.e. all faults that had to bring a page into the memory from disk as well as
+// decompression from zram. The 'Minflt' counter traces all minor page faults(for eg. CoW and
+// anonymous page allocations). Since we only measure page faults hit by the GC thread, these
+// counters do not measure userfaults.
+void TraceFaults() {
+  if (!ATraceEnabled())
+    return;
+
+  struct rusage usage = {};
+
+  int ret = getrusage(RUSAGE_THREAD, &usage);
+  if (ret)
+    return;
+
+  ATraceIntegerValue("Minflt", usage.ru_minflt);
+  ATraceIntegerValue("Majflt", usage.ru_majflt);
+}
+
 void MarkCompact::RunPhases() {
   Thread* self = Thread::Current();
   thread_running_gc_ = self;
@@ -852,6 +871,7 @@ void MarkCompact::RunPhases() {
   InitializePhase();
   {
     ReaderMutexLock mu(self, *Locks::mutator_lock_);
+    TraceFaults();
     MarkingPhase();
   }
   {
@@ -862,6 +882,7 @@ void MarkCompact::RunPhases() {
       bump_pointer_space_->AssertAllThreadLocalBuffersAreRevoked();
     }
   }
+  TraceFaults();
   bool perform_compaction;
   {
     ReaderMutexLock mu(self, *Locks::mutator_lock_);
@@ -2695,6 +2716,7 @@ void MarkCompact::CompactMovingSpace(uint8_t* page) {
   // We do the compaction in reverse direction so that the pages containing
   // TLAB and latest allocations are processed first.
   TimingLogger::ScopedTiming t(__FUNCTION__, GetTimings());
+  TraceFaults();
   size_t page_status_arr_len = moving_first_objs_count_ + black_page_count_;
   size_t idx = page_status_arr_len;
   size_t black_dense_end_idx = (black_dense_end_ - moving_space_begin_) / gPageSize;
@@ -2837,6 +2859,7 @@ void MarkCompact::CompactMovingSpace(uint8_t* page) {
                         /*tolerate_enoent=*/false);
   }
   DCHECK_EQ(to_space_end, bump_pointer_space_->Begin());
+  TraceFaults();
 }
 
 size_t MarkCompact::MapMovingSpacePages(size_t start_idx,
@@ -4832,6 +4855,7 @@ void MarkCompact::MarkingPhase() {
   WriterMutexLock mu(thread_running_gc_, *Locks::heap_bitmap_lock_);
   MaybeClampGcStructures();
   PrepareForMarking(/*pre_marking=*/true);
+  TraceFaults();
   MarkZygoteLargeObjects();
   MarkRoots(
         static_cast<VisitRootFlags>(kVisitRootFlagAllRoots | kVisitRootFlagStartLoggingNewRoots));
