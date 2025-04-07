@@ -976,16 +976,16 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
         safepoints_(),
         uses_(),
         env_uses_(),
-        type_(type),
         next_sibling_(nullptr),
         parent_(this),
+        defined_by_(defined_by),
+        high_or_low_interval_(nullptr),
+        type_(type),
         register_(reg),
         spill_slot_(kNoSpillSlot),
         is_fixed_(is_fixed),
         is_temp_(is_temp),
-        is_high_interval_(is_high_interval),
-        high_or_low_interval_(nullptr),
-        defined_by_(defined_by) {}
+        is_high_interval_(is_high_interval) {}
 
   // Searches for a LiveRange that either covers the given position or is the
   // first next LiveRange. Returns null if no such LiveRange exists. Ranges
@@ -1092,14 +1092,21 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
   UsePositionList uses_;
   EnvUsePositionList env_uses_;
 
-  // The instruction type this interval corresponds to.
-  const DataType::Type type_;
-
   // Live interval that is the result of a split.
   LiveInterval* next_sibling_;
 
   // The first interval from which split intervals come from.
   LiveInterval* parent_;
+
+  // The instruction represented by this interval.
+  HInstruction* const defined_by_;
+
+  // If this interval needs a register pair, the high or low equivalent.
+  // `is_high_interval_` tells whether this holds the low or the high.
+  LiveInterval* high_or_low_interval_;
+
+  // The instruction type this interval corresponds to.
+  const DataType::Type type_;
 
   // The register allocated to this interval.
   int register_;
@@ -1115,13 +1122,6 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
 
   // Whether this interval is a synthesized interval for register pair.
   const bool is_high_interval_;
-
-  // If this interval needs a register pair, the high or low equivalent.
-  // `is_high_interval_` tells whether this holds the low or the high.
-  LiveInterval* high_or_low_interval_;
-
-  // The instruction represented by this interval.
-  HInstruction* const defined_by_;
 
   static constexpr int kNoRegister = -1;
   static constexpr int kNoSpillSlot = -1;
