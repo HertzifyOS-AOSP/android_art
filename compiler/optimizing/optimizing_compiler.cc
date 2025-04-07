@@ -452,7 +452,7 @@ bool OptimizingCompiler::RunRequiredPasses(HGraph* graph,
 #if defined(ART_ENABLE_CODEGEN_arm)
     case InstructionSet::kThumb2:
     case InstructionSet::kArm: {
-      OptimizationDef arm_optimizations[] = {
+      static constexpr OptimizationDef arm_optimizations[] = {
           OptDef(OptimizationPass::kCriticalNativeAbiFixupArm),
       };
       return RunOptimizations(graph,
@@ -464,7 +464,7 @@ bool OptimizingCompiler::RunRequiredPasses(HGraph* graph,
 #endif
 #if defined(ART_ENABLE_CODEGEN_riscv64)
     case InstructionSet::kRiscv64: {
-      OptimizationDef riscv64_optimizations[] = {
+      static constexpr OptimizationDef riscv64_optimizations[] = {
           OptDef(OptimizationPass::kCriticalNativeAbiFixupRiscv64),
       };
       return RunOptimizations(graph,
@@ -476,7 +476,7 @@ bool OptimizingCompiler::RunRequiredPasses(HGraph* graph,
 #endif
 #ifdef ART_ENABLE_CODEGEN_x86
     case InstructionSet::kX86: {
-      OptimizationDef x86_optimizations[] = {
+      static constexpr OptimizationDef x86_optimizations[] = {
           OptDef(OptimizationPass::kPcRelativeFixupsX86),
       };
       return RunOptimizations(graph,
@@ -503,7 +503,7 @@ bool OptimizingCompiler::RunArchOptimizations(HGraph* graph,
 #if defined(ART_ENABLE_CODEGEN_arm)
     case InstructionSet::kThumb2:
     case InstructionSet::kArm: {
-      OptimizationDef arm_optimizations[] = {
+      static constexpr OptimizationDef arm_optimizations[] = {
           OptDef(OptimizationPass::kInstructionSimplifierArm),
           OptDef(OptimizationPass::kSideEffectsAnalysis),
           OptDef(OptimizationPass::kGlobalValueNumbering, "GVN$after_arch"),
@@ -519,7 +519,7 @@ bool OptimizingCompiler::RunArchOptimizations(HGraph* graph,
 #endif
 #ifdef ART_ENABLE_CODEGEN_arm64
     case InstructionSet::kArm64: {
-      OptimizationDef arm64_optimizations[] = {
+      static constexpr OptimizationDef arm64_optimizations[] = {
           OptDef(OptimizationPass::kInstructionSimplifierArm64),
           OptDef(OptimizationPass::kSideEffectsAnalysis),
           OptDef(OptimizationPass::kGlobalValueNumbering, "GVN$after_arch"),
@@ -534,7 +534,7 @@ bool OptimizingCompiler::RunArchOptimizations(HGraph* graph,
 #endif
 #if defined(ART_ENABLE_CODEGEN_riscv64)
     case InstructionSet::kRiscv64: {
-      OptimizationDef riscv64_optimizations[] = {
+      static constexpr OptimizationDef riscv64_optimizations[] = {
           OptDef(OptimizationPass::kInstructionSimplifierRiscv64),
           OptDef(OptimizationPass::kSideEffectsAnalysis),
           OptDef(OptimizationPass::kGlobalValueNumbering, "GVN$after_arch"),
@@ -549,7 +549,7 @@ bool OptimizingCompiler::RunArchOptimizations(HGraph* graph,
 #endif
 #ifdef ART_ENABLE_CODEGEN_x86
     case InstructionSet::kX86: {
-      OptimizationDef x86_optimizations[] = {
+      static constexpr OptimizationDef x86_optimizations[] = {
           OptDef(OptimizationPass::kInstructionSimplifierX86),
           OptDef(OptimizationPass::kSideEffectsAnalysis),
           OptDef(OptimizationPass::kGlobalValueNumbering, "GVN$after_arch"),
@@ -565,7 +565,7 @@ bool OptimizingCompiler::RunArchOptimizations(HGraph* graph,
 #endif
 #ifdef ART_ENABLE_CODEGEN_x86_64
     case InstructionSet::kX86_64: {
-      OptimizationDef x86_64_optimizations[] = {
+      static constexpr OptimizationDef x86_64_optimizations[] = {
           OptDef(OptimizationPass::kInstructionSimplifierX86_64),
           OptDef(OptimizationPass::kSideEffectsAnalysis),
           OptDef(OptimizationPass::kGlobalValueNumbering, "GVN$after_arch"),
@@ -642,7 +642,7 @@ void OptimizingCompiler::RunOptimizations(HGraph* graph,
     return;
   }
 
-  OptimizationDef optimizations[] = {
+  static constexpr OptimizationDef optimizations[] = {
       // Initial optimizations.
       OptDef(OptimizationPass::kConstantFolding),
       OptDef(OptimizationPass::kInstructionSimplifier),
@@ -1089,7 +1089,7 @@ CodeGenerator* OptimizingCompiler::TryCompileIntrinsic(
     builder.BuildIntrinsicGraph(method);
   }
 
-  OptimizationDef optimizations[] = {
+  static constexpr OptimizationDef optimizations[] = {
       // The codegen has a few assumptions that only the instruction simplifier
       // can satisfy.
       OptDef(OptimizationPass::kInstructionSimplifier),
