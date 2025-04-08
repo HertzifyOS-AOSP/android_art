@@ -158,6 +158,34 @@ public final class PrimaryDexopterReporterTest extends PrimaryDexopterTestBase {
     }
 
     @Test
+    public void testDex2OatResult_StartFailed() throws Exception {
+        int status = 4, exitCode = -1, signal = 0;
+        lenient()
+                .when(mArtd.dexopt(any(), anyString(), anyString(), anyString(), anyString(), any(),
+                        any(), any(), anyInt(), any(), any()))
+                .thenThrow(
+                        new ServiceSpecificException(-1, "Not your typical dex2oat error message"));
+
+        mPrimaryDexopter.dexopt();
+
+        Dex2OatStatsReporter.Dex2OatResult failedToStart =
+                new Dex2OatStatsReporter.Dex2OatResult(status, exitCode, signal);
+        verify(()
+                        -> Dex2OatStatsReporter.report(eq(mPkgState.getAppId()),
+                                eq(COMPILER_FILTER_VERIFY), eq(COMPILER_REASON_INSTALL),
+                                eq(DexMetadata.TYPE_NONE), any(DetailedDexInfo.class), eq("arm64"),
+                                eq(failedToStart), eq(0L), eq(0L)),
+                times(2));
+
+        verify(()
+                        -> Dex2OatStatsReporter.report(eq(mPkgState.getAppId()),
+                                eq(COMPILER_FILTER_VERIFY), eq(COMPILER_REASON_INSTALL),
+                                eq(DexMetadata.TYPE_NONE), any(DetailedDexInfo.class), eq("arm"),
+                                eq(failedToStart), eq(0L), eq(0L)),
+                times(2));
+    }
+
+    @Test
     public void testDex2OatResult_NotRun() throws Exception {
         mockPrimaryDexopter(DEXOPT_PARAMS_SKIP);
 

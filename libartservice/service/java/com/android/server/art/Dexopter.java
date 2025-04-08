@@ -307,6 +307,8 @@ public abstract class Dexopter<DexInfoType extends DetailedDexInfo> {
                             dex2OatResult = new Dex2OatResult(Integer.parseInt(matcher.group(1)),
                                     Integer.parseInt(matcher.group(2)),
                                     Integer.parseInt(matcher.group(3)));
+                        } else {
+                            dex2OatResult = Dex2OatResult.failedToStart();
                         }
                     } finally {
                         if (!externalProfileErrors.isEmpty()) {

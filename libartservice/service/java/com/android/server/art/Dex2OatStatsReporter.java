@@ -201,6 +201,11 @@ public class Dex2OatStatsReporter {
                     ArtStatsLog.ART_DEX2_OAT_REPORTED__RESULT_STATUS__EXEC_RESULT_STATUS_CANCELLED);
         }
 
+        public static Dex2OatResult failedToStart() {
+            return baseResultWithStatus(ArtStatsLog
+                            .ART_DEX2_OAT_REPORTED__RESULT_STATUS__EXEC_RESULT_STATUS_START_FAILED);
+        }
+
         private static Dex2OatResult baseResultWithStatus(int status) {
             return new Dex2OatResult(status, -1 /* exitCode */, 0 /* signal */);
         }
