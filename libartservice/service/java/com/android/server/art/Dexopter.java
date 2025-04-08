@@ -303,7 +303,7 @@ public abstract class Dexopter<DexInfoType extends DetailedDexInfo> {
                         Pattern pattern = Pattern.compile(
                                 "\\[status=(-?\\d+),exit_code=(-?\\d+),signal=(-?\\d+)]");
                         Matcher matcher = pattern.matcher(Objects.requireNonNull(e.getMessage()));
-                        if (matcher.matches()) {
+                        if (matcher.find()) {
                             dex2OatResult = new Dex2OatResult(Integer.parseInt(matcher.group(1)),
                                     Integer.parseInt(matcher.group(2)),
                                     Integer.parseInt(matcher.group(3)));
