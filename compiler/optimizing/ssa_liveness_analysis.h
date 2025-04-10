@@ -36,11 +36,30 @@ class SsaLivenessAnalysis;
 static constexpr int kNoRegister = -1;
 
 // Constants describing positions assigned to various data for an instruction.
+//
+//                              0     1     2     3     4
+// temporary                    +-----------------+
+// blocked                      +-----------------+
+// fixed register input   ------+
+// normal input           ------------+
+// fixed register output                          +-----------
+// overlapping output           +-----------------------------
+// non-overlapping output                   +-----------------
+//
+// If the output is requested in the same register as first input using the
+// `Location::kSameAsFirstInput`, the first input is considered used at
+// position 0 even if it's not requested in a fixed register.
+//
+// Note: Three positions per instruction would be enough as the non-overlapping output
+// can start at position 1 without any change to the results. However, we prefer to use
+// a power of two for faster division.
 static constexpr size_t kLivenessPositionsPerInstruction = 4u;
 static constexpr size_t kLivenessPositionsForTemp = kLivenessPositionsPerInstruction - 1u;
 static constexpr size_t kLivenessPositionsToBlock = kLivenessPositionsPerInstruction - 1u;
 static constexpr size_t kLivenessPositionOfNormalUse = 1u;  // Inside instruction.
 static constexpr size_t kLivenessPositionOfFixedOutput = kLivenessPositionsPerInstruction - 1u;
+static constexpr size_t kLivenessPositionOfNonOverlappingOutput =
+    com::android::art::flags::reg_alloc_no_output_overlap() ? 2u : 0u;
 static constexpr size_t kLivenessPositionForMoveAfter = kLivenessPositionsPerInstruction - 1u;
 
 class BlockInfo : public ArenaObject<kArenaAllocSsaLiveness> {
@@ -992,7 +1011,6 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
   // Whether this interval is a synthesized interval for register pair.
   const bool is_high_interval_;
 
-  static constexpr int kNoRegister = -1;
   static constexpr int kNoSpillSlot = -1;
   static constexpr int8_t kNoTempIndex = -1;
 

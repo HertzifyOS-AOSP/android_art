@@ -675,6 +675,7 @@ void RegisterAllocatorLinearScan::CheckForFixedOutput(HInstruction* instruction,
   Location output = locations->Out();
   if (output.IsUnallocated()) {
     if (output.GetPolicy() == Location::kSameAsFirstInput) {
+      DCHECK(locations->OutputCanOverlapWithInputs());
       Location first = locations->InAt(0);
       if (first.IsRegister() || first.IsFpuRegister()) {
         current->SetFrom(position + kLivenessPositionOfFixedOutput);
@@ -685,6 +686,12 @@ void RegisterAllocatorLinearScan::CheckForFixedOutput(HInstruction* instruction,
         LiveInterval* high = current->GetHighInterval();
         high->SetRegister(first.high());
         high->SetFrom(position + kLivenessPositionOfFixedOutput);
+      }
+    } else if (com::android::art::flags::reg_alloc_no_output_overlap() &&
+               !locations->OutputCanOverlapWithInputs()) {
+      current->SetFrom(position + kLivenessPositionOfNonOverlappingOutput);
+      if (current->HasHighInterval()) {
+        current->GetHighInterval()->SetFrom(position + kLivenessPositionOfNonOverlappingOutput);
       }
     }
   } else if (output.IsRegister() || output.IsFpuRegister()) {
@@ -1049,29 +1056,31 @@ bool RegisterAllocatorLinearScan::LinearScan::TryAllocateFreeReg(LiveInterval* c
     }
   }
 
-  // An interval that starts an instruction (that is, it is not split), may
-  // re-use the registers used by the inputs of that instruciton, based on the
-  // location summary.
-  HInstruction* defined_by = current->GetDefinedBy();
-  if (defined_by != nullptr && !current->IsSplit()) {
-    LocationSummary* locations = defined_by->GetLocations();
-    if (!locations->OutputCanOverlapWithInputs() && locations->Out().IsUnallocated()) {
-      HInputsRef inputs = defined_by->GetInputs();
-      for (size_t i = 0; i < inputs.size(); ++i) {
-        if (locations->InAt(i).IsValid()) {
-          // Take the last interval of the input. It is the location of that interval
-          // that will be used at `defined_by`.
-          LiveInterval* interval = inputs[i]->GetLiveInterval()->GetLastSibling();
-          // Note that interval may have not been processed yet.
-          // TODO: Handle non-split intervals last in the work list.
-          if (interval->HasRegister() && interval->SameRegisterKind(*current)) {
-            // The input must be live until the end of `defined_by`, to comply to
-            // the linear scan algorithm. So we use `defined_by`'s end lifetime
-            // position to check whether the input is dead or is inactive after
-            // `defined_by`.
-            DCHECK(interval->CoversSlow(defined_by->GetLifetimePosition()));
-            size_t position = defined_by->GetLifetimePosition() + kLivenessPositionOfNormalUse;
-            FreeIfNotCoverAt(interval, position, free_until);
+  if (!com::android::art::flags::reg_alloc_no_output_overlap()) {
+    // An interval that starts an instruction (that is, it is not split), may
+    // re-use the registers used by the inputs of that instruciton, based on the
+    // location summary.
+    HInstruction* defined_by = current->GetDefinedBy();
+    if (defined_by != nullptr && !current->IsSplit()) {
+      LocationSummary* locations = defined_by->GetLocations();
+      if (!locations->OutputCanOverlapWithInputs() && locations->Out().IsUnallocated()) {
+        HInputsRef inputs = defined_by->GetInputs();
+        for (size_t i = 0; i < inputs.size(); ++i) {
+          if (locations->InAt(i).IsValid()) {
+            // Take the last interval of the input. It is the location of that interval
+            // that will be used at `defined_by`.
+            LiveInterval* interval = inputs[i]->GetLiveInterval()->GetLastSibling();
+            // Note that interval may have not been processed yet.
+            // TODO: Handle non-split intervals last in the work list.
+            if (interval->HasRegister() && interval->SameRegisterKind(*current)) {
+              // The input must be live until the end of `defined_by`, to comply to
+              // the linear scan algorithm. So we use `defined_by`'s end lifetime
+              // position to check whether the input is dead or is inactive after
+              // `defined_by`.
+              DCHECK(interval->CoversSlow(defined_by->GetLifetimePosition()));
+              size_t position = defined_by->GetLifetimePosition() + kLivenessPositionOfNormalUse;
+              FreeIfNotCoverAt(interval, position, free_until);
+            }
           }
         }
       }
@@ -1437,7 +1446,30 @@ bool RegisterAllocatorLinearScan::LinearScan::AllocateBlockedReg(LiveInterval* c
           handled_.push_back(active);
         }
         RemoveIntervalAndPotentialOtherHalf(&active_, it);
-        AddSorted(&unhandled_, split);
+        if (com::android::art::flags::reg_alloc_no_output_overlap() &&
+            start % kLivenessPositionsPerInstruction == kLivenessPositionOfNonOverlappingOutput) {
+          // If we're splitting an active interval in the middle of instruction for non-overlapping
+          // output, we cannot insert parallel moves in the middle of that instruction. Going back
+          // to the start of the instruction would be difficult (bringing back already handled
+          // inputs that die at the instruction, treating the output as live before its lifetime
+          // starts), so we force spilling the active interval, avoiding a register for the second
+          // half of the instruction's lifetime. If it has a register use later, we split it twice.
+          // Note: This can result in suboptimal register allocation only if register pairs are
+          // involved. For single-register intervals, the `split` would be spilled later anyway.
+          DCHECK(split != active);
+          DCHECK_EQ(start, split->GetStart());
+          AllocateSpillSlotFor(split->IsHighInterval() ? split->GetLowInterval() : split);
+          handled_.push_back(split);
+          size_t register_use = split->FirstRegisterUseAfter(start);
+          if (register_use != kNoLifetime) {
+            LiveInterval* second_split = SplitBetween(split, start, register_use - 1);
+            DCHECK(second_split != split);
+            DCHECK_LT(start, second_split->GetStart());
+            AddSorted(&unhandled_, second_split);
+          }
+        } else {
+          AddSorted(&unhandled_, split);
+        }
         break;
       }
     }

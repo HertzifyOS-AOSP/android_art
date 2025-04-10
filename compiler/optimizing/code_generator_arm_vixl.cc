@@ -3121,8 +3121,8 @@ void InstructionCodeGeneratorARMVIXL::VisitSelect(HSelect* select) {
       !IsBooleanValueOrMaterializedCondition(condition) &&
       !out.Equals(first) &&
       !out.Equals(second) &&
-      (condition->GetLocations()->InAt(0).Equals(out) ||
-       condition->GetLocations()->InAt(1).Equals(out));
+      (condition->GetLocations()->InAt(0).OverlapsWith(out) ||
+       condition->GetLocations()->InAt(1).OverlapsWith(out));
   DCHECK_IMPLIES(output_overlaps_with_condition_inputs, condition->IsCondition());
   Location src;
 
