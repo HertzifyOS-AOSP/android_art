@@ -34,7 +34,7 @@ void SsaLivenessAnalysis::Analyze() {
 }
 
 void SsaLivenessAnalysis::NumberInstructions() {
-  int ssa_index = 0;
+  size_t ssa_index = 0;
   size_t lifetime_position = 0;
   // Each instruction gets a lifetime position, and a block gets a lifetime
   // start and end position. Non-phi instructions have a distinct lifetime position than
@@ -61,7 +61,7 @@ void SsaLivenessAnalysis::NumberInstructions() {
       }
       current->SetLifetimePosition(lifetime_position);
     }
-    lifetime_position += 2;
+    lifetime_position += kLivenessPositionsPerInstruction;
 
     // Add a null marker to notify we are starting a block.
     instructions_from_lifetime_position_.push_back(nullptr);
@@ -79,18 +79,19 @@ void SsaLivenessAnalysis::NumberInstructions() {
       }
       instructions_from_lifetime_position_.push_back(current);
       current->SetLifetimePosition(lifetime_position);
-      lifetime_position += 2;
+      lifetime_position += kLivenessPositionsPerInstruction;
     }
 
     block->SetLifetimeEnd(lifetime_position);
   }
-  number_of_ssa_values_ = ssa_index;
+  DCHECK_EQ(GetNumberOfSsaValues(), ssa_index);
 }
 
 void SsaLivenessAnalysis::ComputeLiveness() {
+  size_t number_of_ssa_values = GetNumberOfSsaValues();
   for (HBasicBlock* block : graph_->GetLinearOrder()) {
     block_infos_[block->GetBlockId()] =
-        new (allocator_) BlockInfo(allocator_, *block, number_of_ssa_values_);
+        new (allocator_) BlockInfo(allocator_, *block, number_of_ssa_values);
   }
 
   // Compute the live ranges, as well as the initial live_in, live_out, and kill sets.
@@ -104,11 +105,11 @@ void SsaLivenessAnalysis::ComputeLiveness() {
   ComputeLiveInAndLiveOutSets();
 }
 
-void SsaLivenessAnalysis::RecursivelyProcessInputs(HInstruction* current,
-                                                   HInstruction* actual_user,
-                                                   BitVectorView<size_t> live_in) {
+void SsaLivenessAnalysis::ProcessInputs(HInstruction* current,
+                                        HInstruction* actual_user,
+                                        BitVectorView<size_t> live_in) {
   HInputsRef inputs = current->GetInputs();
-  for (size_t i = 0; i < inputs.size(); ++i) {
+  for (size_t i : Range(inputs.size())) {
     HInstruction* input = inputs[i];
     bool has_in_location = current->GetLocations()->InAt(i).IsValid();
     bool has_out_location = input->GetLocations()->Out().IsValid();
@@ -126,14 +127,14 @@ void SsaLivenessAnalysis::RecursivelyProcessInputs(HInstruction* current,
     } else if (has_out_location) {
       // `input` generates a result but it is not used by `current`.
     } else {
-      // `input` is inlined into `current`. Walk over its inputs and record
-      // uses at `current`.
+      // `input` is inlined into `current`.
       DCHECK(input->IsEmittedAtUseSite());
-      // Check that the inlined input is not a phi. Recursing on loop phis could
-      // lead to an infinite loop.
+      // Phis cannot be inlined.
       DCHECK(!input->IsPhi());
+      // Instructions with environments cannot be inlined.
+      // Note: An implicit null check is an exception but it's handled differently and it no
+      // longer has any uses during register allocation, therefore we cannot encounter it here.
       DCHECK(!input->HasEnvironment());
-      RecursivelyProcessInputs(input, actual_user, live_in);
     }
   }
 }
@@ -207,6 +208,7 @@ void SsaLivenessAnalysis::ComputeLiveRanges() {
       current->GetLiveInterval()->AddRange(block->GetLifetimeStart(), block->GetLifetimeEnd());
     }
 
+    HInstruction* actual_user = nullptr;
     for (HBackwardInstructionIteratorPrefetchNext back_it(block->GetInstructions());
          !back_it.Done();
          back_it.Advance()) {
@@ -221,15 +223,25 @@ void SsaLivenessAnalysis::ComputeLiveRanges() {
       // Process inputs of instructions.
       if (current->IsEmittedAtUseSite()) {
         if (kIsDebugBuild) {
-          DCHECK(!current->GetLocations()->Out().IsValid());
-          for (const HUseListNode<HInstruction*>& use : current->GetUses()) {
-            HInstruction* user = use.GetUser();
-            size_t index = use.GetIndex();
-            DCHECK(!user->GetLocations()->InAt(index).IsValid());
+          CHECK(!current->GetLocations()->Out().IsValid());
+          CHECK(!current->HasEnvironmentUses());
+          if (current->IsNullCheck()) {
+            CHECK(current->GetUses().empty());
+          } else {
+            CHECK(current->GetUses().HasExactlyOneElement()) << current->DebugName();
+            HInstruction* user = current->GetUses().begin()->GetUser();
+            size_t index = current->GetUses().begin()->GetIndex();
+            CHECK(!user->GetLocations()->InAt(index).IsValid());
+            // The `user` must be in the range `(current, actual_user]`.
+            for (HInstruction* inst = current->GetNext(); inst != user; inst = inst->GetNext()) {
+              CHECK(inst != actual_user);  // Check that we're not going past the `actual_user`.
+              CHECK(inst->IsEmittedAtUseSite());
+            }
           }
-          DCHECK(!current->HasEnvironmentUses());
         }
       } else {
+        actual_user = current;
+
         // Process the environment first, because we know their uses come after
         // or at the same liveness position of inputs.
         ProcessEnvironment(current, current, live_in);
@@ -240,8 +252,10 @@ void SsaLivenessAnalysis::ComputeLiveRanges() {
         if (check != nullptr) {
           ProcessEnvironment(check, current, live_in);
         }
-        RecursivelyProcessInputs(current, current, live_in);
       }
+
+      DCHECK(actual_user != nullptr);
+      ProcessInputs(current, actual_user, live_in);
     }
 
     // Kill phis defined in this block.
@@ -371,13 +385,14 @@ int LiveInterval::FindFirstRegisterHint(
   }
 
   if (IsSplit() &&
-      SsaLivenessAnalysis::IsAtBlockBoundary(GetStart() / 2, instructions_from_positions)) {
+      SsaLivenessAnalysis::IsAtBlockBoundary(
+          GetStart() / kLivenessPositionsPerInstruction, instructions_from_positions)) {
     // If the start of this interval is at a block boundary, we look at the
     // location of the interval in blocks preceding the block this interval
     // starts at. If one location is a register we return it as a hint. This
     // will avoid a move between the two blocks.
-    HBasicBlock* block =
-        SsaLivenessAnalysis::GetBlockFromPosition(GetStart() / 2, instructions_from_positions);
+    HBasicBlock* block = SsaLivenessAnalysis::GetBlockFromPosition(
+        GetStart() / kLivenessPositionsPerInstruction, instructions_from_positions);
     size_t next_register_use = FirstRegisterUse();
     for (HBasicBlock* predecessor : block->GetPredecessors()) {
       size_t position = predecessor->GetLifetimeEnd() - 1;

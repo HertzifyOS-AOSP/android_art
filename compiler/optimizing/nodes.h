@@ -153,7 +153,7 @@ static inline typename std::make_unsigned<T>::type MakeUnsigned(T x) {
   return static_cast<typename std::make_unsigned<T>::type>(x);
 }
 
-class HInstructionList : public ValueObject {
+class HInstructionList final : public ValueObject {
  public:
   HInstructionList() : first_instruction_(nullptr), last_instruction_(nullptr) {}
 
@@ -693,7 +693,7 @@ class HGraph : public ArenaObject<kArenaAllocGraph> {
   DISALLOW_COPY_AND_ASSIGN(HGraph);
 };
 
-class HLoopInformation : public ArenaObject<kArenaAllocLoopInfo> {
+class HLoopInformation final : public ArenaObject<kArenaAllocLoopInfo> {
  public:
   HLoopInformation(HBasicBlock* header, HGraph* graph)
       : header_(header),
@@ -817,7 +817,7 @@ class HLoopInformation : public ArenaObject<kArenaAllocLoopInfo> {
 // Stores try/catch information for basic blocks.
 // Note that HGraph is constructed so that catch blocks cannot simultaneously
 // be try blocks.
-class TryCatchInformation : public ArenaObject<kArenaAllocTryCatchInfo> {
+class TryCatchInformation final : public ArenaObject<kArenaAllocTryCatchInfo> {
  public:
   // Try block information constructor.
   explicit TryCatchInformation(const HTryBoundary& try_entry)
@@ -878,7 +878,7 @@ static constexpr uint32_t kInvalidBlockId = static_cast<uint32_t>(-1);
 // as a double linked list. Each block knows its predecessors and
 // successors.
 
-class HBasicBlock : public ArenaObject<kArenaAllocBasicBlock> {
+class HBasicBlock final : public ArenaObject<kArenaAllocBasicBlock> {
  public:
   explicit HBasicBlock(HGraph* graph, uint32_t dex_pc = kNoDexPc)
       : graph_(graph),
@@ -1269,7 +1269,7 @@ class HBasicBlock : public ArenaObject<kArenaAllocBasicBlock> {
 
 // Iterates over the LoopInformation of all loops which contain 'block'
 // from the innermost to the outermost.
-class HLoopInformationOutwardIterator : public ValueObject {
+class HLoopInformationOutwardIterator final : public ValueObject {
  public:
   explicit HLoopInformationOutwardIterator(const HBasicBlock& block)
       : current_(block.GetLoopInformation()) {}
@@ -1559,7 +1559,7 @@ using HUseList = IntrusiveForwardList<HUseListNode<T>>;
 // instructions they use and pointers to the corresponding HUseListNodes kept
 // by the used instructions.
 template <typename T>
-class HUserRecord : public ValueObject {
+class HUserRecord final : public ValueObject {
  public:
   HUserRecord() : instruction_(nullptr), before_use_node_() {}
   explicit HUserRecord(HInstruction* instruction) : instruction_(instruction), before_use_node_() {}
@@ -1642,7 +1642,7 @@ using HConstInputsRef = TransformArrayRef<const HUserRecord<HInstruction*>, HInp
  * Note that, to ease the implementation, 'changes' bits are least significant
  * bits, while 'dependency' bits are most significant bits.
  */
-class SideEffects : public ValueObject {
+class SideEffects final : public ValueObject {
  public:
   SideEffects() : flags_(0) {}
 
@@ -1858,7 +1858,7 @@ class SideEffects : public ValueObject {
 };
 
 // A HEnvironment object contains the values of virtual registers at a given location.
-class HEnvironment : public ArenaObject<kArenaAllocEnvironment> {
+class HEnvironment final : public ArenaObject<kArenaAllocEnvironment> {
  public:
   static HEnvironment* Create(ArenaAllocator* allocator,
                               size_t number_of_vregs,
@@ -2019,7 +2019,7 @@ class HEnvironment : public ArenaObject<kArenaAllocEnvironment> {
 std::ostream& operator<<(std::ostream& os, const HInstruction& rhs);
 
 // Iterates over the Environments
-class HEnvironmentIterator : public ValueObject {
+class HEnvironmentIterator final : public ValueObject {
  public:
   using iterator_category = std::forward_iterator_tag;
   using value_type = HEnvironment*;
@@ -2168,7 +2168,24 @@ class HInstruction : public ArenaObject<kArenaAllocInstruction> {
 
   uint32_t GetDexPc() const { return dex_pc_; }
 
-  virtual bool IsControlFlow() const { return false; }
+  bool IsControlFlow() const {
+    switch (GetKind()) {
+      case kExit:
+      case kGoto:
+      case kIf:
+      case kPackedSwitch:
+      case kReturn:
+      case kReturnVoid:
+      case kThrow:
+      case kTryBoundary:
+#if defined(ART_ENABLE_CODEGEN_x86)
+      case kX86PackedSwitch:
+#endif
+        return true;
+      default:
+        return false;
+    }
+  }
 
   // Can the instruction throw?
   // TODO: We should rename to CanVisiblyThrow, as some instructions (like HNewInstance),
@@ -2294,18 +2311,29 @@ class HInstruction : public ArenaObject<kArenaAllocInstruction> {
   }
 
   bool IsRemovable() const {
-    return
-        !DoesAnyWrite() &&
-        // TODO(solanes): Merge calls from IsSuspendCheck to IsControlFlow into one that doesn't
-        // do virtual dispatching.
-        !IsSuspendCheck() &&
-        !IsNop() &&
-        !IsParameterValue() &&
-        // If we added an explicit barrier then we should keep it.
-        !IsMemoryBarrier() &&
-        !IsConstructorFence() &&
-        !IsControlFlow() &&
-        !CanThrow();
+    switch (GetKind()) {
+      case kConstructorFence:
+      case kMemoryBarrier:
+      case kNop:
+      case kParameterValue:
+      case kSuspendCheck:
+      // Control flow HInstructions. This has to be kept in sync with IsControlFlow.
+      case kExit:
+      case kGoto:
+      case kIf:
+      case kPackedSwitch:
+      case kReturn:
+      case kReturnVoid:
+      case kThrow:
+      case kTryBoundary:
+#if defined(ART_ENABLE_CODEGEN_x86)
+      case kX86PackedSwitch:
+#endif
+        return false;
+      default:
+        DCHECK(!IsControlFlow());
+        return !DoesAnyWrite() && !CanThrow();
+    }
   }
 
   bool IsDeadAndRemovable() const {
@@ -2691,7 +2719,7 @@ template <typename InnerIter> struct HSTLInstructionIterator;
 // Iterates over the instructions, while preserving the next instruction
 // in case the current instruction gets removed from the list by the user
 // of this iterator.
-class HInstructionIteratorPrefetchNext : public ValueObject {
+class HInstructionIteratorPrefetchNext final : public ValueObject {
  public:
   explicit HInstructionIteratorPrefetchNext(const HInstructionList& instructions)
       : instruction_(instructions.first_instruction_) {
@@ -2717,7 +2745,7 @@ class HInstructionIteratorPrefetchNext : public ValueObject {
 // Iterates over the instructions without saving the next instruction,
 // therefore handling changes in the graph potentially made by the user
 // of this iterator.
-class HInstructionIterator : public ValueObject {
+class HInstructionIterator final : public ValueObject {
  public:
   explicit HInstructionIterator(const HInstructionList& instructions)
       : instruction_(instructions.first_instruction_) {
@@ -2737,8 +2765,7 @@ class HInstructionIterator : public ValueObject {
   friend struct HSTLInstructionIterator<HInstructionIterator>;
 };
 
-
-class HBackwardInstructionIteratorPrefetchNext : public ValueObject {
+class HBackwardInstructionIteratorPrefetchNext final : public ValueObject {
  public:
   explicit HBackwardInstructionIteratorPrefetchNext(const HInstructionList& instructions)
       : instruction_(instructions.last_instruction_) {
@@ -2905,7 +2932,7 @@ class HExpression<0, Base> : public Base {
   friend class SsaBuilder;
 };
 
-class HMethodEntryHook : public HExpression<0> {
+class HMethodEntryHook final : public HExpression<0> {
  public:
   explicit HMethodEntryHook(uint32_t dex_pc)
       : HExpression(kMethodEntryHook, SideEffects::All(), dex_pc) {}
@@ -2922,7 +2949,7 @@ class HMethodEntryHook : public HExpression<0> {
   DEFAULT_COPY_CONSTRUCTOR(MethodEntryHook);
 };
 
-class HMethodExitHook : public HExpression<1> {
+class HMethodExitHook final : public HExpression<1> {
  public:
   HMethodExitHook(HInstruction* value, uint32_t dex_pc)
       : HExpression(kMethodExitHook, SideEffects::All(), dex_pc) {
@@ -2949,8 +2976,6 @@ class HReturnVoid final : public HExpression<0> {
       : HExpression(kReturnVoid, SideEffects::None(), dex_pc) {
   }
 
-  bool IsControlFlow() const override { return true; }
-
   DECLARE_INSTRUCTION(ReturnVoid);
 
  protected:
@@ -2965,8 +2990,6 @@ class HReturn final : public HExpression<1> {
       : HExpression(kReturn, SideEffects::None(), dex_pc) {
     SetRawInputAt(0, value);
   }
-
-  bool IsControlFlow() const override { return true; }
 
   DECLARE_INSTRUCTION(Return);
 
@@ -3082,8 +3105,6 @@ class HExit final : public HExpression<0> {
       : HExpression(kExit, SideEffects::None(), dex_pc) {
   }
 
-  bool IsControlFlow() const override { return true; }
-
   DECLARE_INSTRUCTION(Exit);
 
  protected:
@@ -3098,8 +3119,6 @@ class HGoto final : public HExpression<0> {
   }
 
   bool IsClonable() const override { return true; }
-  bool IsControlFlow() const override { return true; }
-
   HBasicBlock* GetSuccessor() const {
     return GetBlock()->GetSingleSuccessor();
   }
@@ -3371,7 +3390,6 @@ class HIf final : public HExpression<1> {
   }
 
   bool IsClonable() const override { return true; }
-  bool IsControlFlow() const override { return true; }
 
   HBasicBlock* IfTrueSuccessor() const {
     return GetBlock()->GetSuccessors()[0];
@@ -3422,8 +3440,6 @@ class HTryBoundary final : public HExpression<0> {
                     dex_pc) {
     SetPackedField<BoundaryKindField>(kind);
   }
-
-  bool IsControlFlow() const override { return true; }
 
   // Returns the block's non-exceptional successor (index zero).
   HBasicBlock* GetNormalFlowSuccessor() const { return GetBlock()->GetSuccessors()[0]; }
@@ -3670,8 +3686,6 @@ class HPackedSwitch final : public HExpression<1> {
 
   bool IsClonable() const override { return true; }
 
-  bool IsControlFlow() const override { return true; }
-
   int32_t GetStartValue() const { return start_value_; }
 
   uint32_t GetNumEntries() const { return num_entries_; }
@@ -3763,7 +3777,22 @@ class HBinaryOperation : public HExpression<2> {
   HInstruction* GetRight() const { return InputAt(1); }
   DataType::Type GetResultType() const { return GetType(); }
 
-  virtual bool IsCommutative() const { return false; }
+  bool IsCommutative() const {
+    switch (GetKind()) {
+      case kAdd:
+      case kAnd:
+      case kEqual:
+      case kMax:
+      case kMin:
+      case kMul:
+      case kNotEqual:
+      case kOr:
+      case kXor:
+        return true;
+      default:
+        return false;
+    }
+  }
 
   // Put constant on the right.
   // Returns whether order is changed.
@@ -3967,8 +3996,6 @@ class HEqual final : public HCondition {
       : HCondition(kEqual, first, second, dex_pc) {
   }
 
-  bool IsCommutative() const override { return true; }
-
   HConstant* Evaluate([[maybe_unused]] HNullConstant* x,
                       [[maybe_unused]] HNullConstant* y) const override {
     return MakeConstantCondition(true);
@@ -4011,8 +4038,6 @@ class HNotEqual final : public HCondition {
   HNotEqual(HInstruction* first, HInstruction* second, uint32_t dex_pc = kNoDexPc)
       : HCondition(kNotEqual, first, second, dex_pc) {
   }
-
-  bool IsCommutative() const override { return true; }
 
   HConstant* Evaluate([[maybe_unused]] HNullConstant* x,
                       [[maybe_unused]] HNullConstant* y) const override {
@@ -5286,8 +5311,6 @@ class HAdd final : public HBinaryOperation {
       : HBinaryOperation(kAdd, result_type, left, right, SideEffects::None(), dex_pc) {
   }
 
-  bool IsCommutative() const override { return true; }
-
   template <typename T> static T Compute(T x, T y) { return x + y; }
 
   HConstant* Evaluate(HIntConstant* x, HIntConstant* y) const override {
@@ -5347,8 +5370,6 @@ class HMul final : public HBinaryOperation {
        uint32_t dex_pc = kNoDexPc)
       : HBinaryOperation(kMul, result_type, left, right, SideEffects::None(), dex_pc) {
   }
-
-  bool IsCommutative() const override { return true; }
 
   template <typename T> static T Compute(T x, T y) { return x * y; }
 
@@ -5467,8 +5488,6 @@ class HMin final : public HBinaryOperation {
        uint32_t dex_pc)
       : HBinaryOperation(kMin, result_type, left, right, SideEffects::None(), dex_pc) {}
 
-  bool IsCommutative() const override { return true; }
-
   // Evaluation for integral values.
   template <typename T> static T ComputeIntegral(T x, T y) {
     return (x <= y) ? x : y;
@@ -5503,8 +5522,6 @@ class HMax final : public HBinaryOperation {
        HInstruction* right,
        uint32_t dex_pc)
       : HBinaryOperation(kMax, result_type, left, right, SideEffects::None(), dex_pc) {}
-
-  bool IsCommutative() const override { return true; }
 
   // Evaluation for integral values.
   template <typename T> static T ComputeIntegral(T x, T y) {
@@ -5702,8 +5719,6 @@ class HAnd final : public HBinaryOperation {
       : HBinaryOperation(kAnd, result_type, left, right, SideEffects::None(), dex_pc) {
   }
 
-  bool IsCommutative() const override { return true; }
-
   template <typename T> static T Compute(T x, T y) { return x & y; }
 
   HConstant* Evaluate(HIntConstant* x, HIntConstant* y) const override {
@@ -5728,8 +5743,6 @@ class HOr final : public HBinaryOperation {
       : HBinaryOperation(kOr, result_type, left, right, SideEffects::None(), dex_pc) {
   }
 
-  bool IsCommutative() const override { return true; }
-
   template <typename T> static T Compute(T x, T y) { return x | y; }
 
   HConstant* Evaluate(HIntConstant* x, HIntConstant* y) const override {
@@ -5753,8 +5766,6 @@ class HXor final : public HBinaryOperation {
        uint32_t dex_pc = kNoDexPc)
       : HBinaryOperation(kXor, result_type, left, right, SideEffects::None(), dex_pc) {
   }
-
-  bool IsCommutative() const override { return true; }
 
   template <typename T> static T Compute(T x, T y) { return x ^ y; }
 
@@ -5994,7 +6005,7 @@ class HNullCheck final : public HExpression<1> {
 
 // Embeds an ArtField and all the information required by the compiler. We cache
 // that information to avoid requiring the mutator lock every time we need it.
-class FieldInfo : public ValueObject {
+class FieldInfo final : public ValueObject {
  public:
   FieldInfo(ArtField* field,
             MemberOffset field_offset,
@@ -7575,8 +7586,6 @@ class HThrow final : public HExpression<1> {
     SetRawInputAt(0, exception);
   }
 
-  bool IsControlFlow() const override { return true; }
-
   bool NeedsEnvironment() const override { return true; }
 
   bool CanThrow() const override { return true; }
@@ -8140,7 +8149,7 @@ class HSelect final : public HExpression<3> {
   DEFAULT_COPY_CONSTRUCTOR(Select);
 };
 
-class MoveOperands : public ArenaObject<kArenaAllocMoveOperands> {
+class MoveOperands final : public ArenaObject<kArenaAllocMoveOperands> {
  public:
   MoveOperands(Location source,
                Location destination,
@@ -8471,7 +8480,7 @@ class CloneAndReplaceInstructionVisitor final : public HGraphDelegateVisitor {
 // Iterator over the blocks that are part of the loop; includes blocks which are part
 // of an inner loop. The order in which the blocks are iterated is on their
 // block id.
-class HBlocksInLoopIterator : public ValueObject {
+class HBlocksInLoopIterator final : public ValueObject {
  public:
   explicit HBlocksInLoopIterator(const HLoopInformation& info)
       : blocks_in_loop_(info.GetBlocks()),
@@ -8504,7 +8513,7 @@ class HBlocksInLoopIterator : public ValueObject {
 // Iterator over the blocks that are part of the loop; includes blocks which are part
 // of an inner loop. The order in which the blocks are iterated is reverse
 // post order.
-class HBlocksInLoopReversePostOrderIterator : public ValueObject {
+class HBlocksInLoopReversePostOrderIterator final : public ValueObject {
  public:
   explicit HBlocksInLoopReversePostOrderIterator(const HLoopInformation& info)
       : blocks_in_loop_(info.GetBlocks()),
@@ -8536,7 +8545,7 @@ class HBlocksInLoopReversePostOrderIterator : public ValueObject {
 
 // Iterator over the blocks that are part of the loop; includes blocks which are part
 // of an inner loop. The order in which the blocks are iterated is post order.
-class HBlocksInLoopPostOrderIterator : public ValueObject {
+class HBlocksInLoopPostOrderIterator final : public ValueObject {
  public:
   explicit HBlocksInLoopPostOrderIterator(const HLoopInformation& info)
       : blocks_in_loop_(info.GetBlocks()),

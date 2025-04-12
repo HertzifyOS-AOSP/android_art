@@ -36,6 +36,14 @@ class SsaLivenessAnalysis;
 
 static constexpr int kNoRegister = -1;
 
+// Constants describing positions assigned to various data for an instruction.
+static constexpr size_t kLivenessPositionsPerInstruction = 4u;
+static constexpr size_t kLivenessPositionsForTemp = kLivenessPositionsPerInstruction - 1u;
+static constexpr size_t kLivenessPositionsToBlock = kLivenessPositionsPerInstruction - 1u;
+static constexpr size_t kLivenessPositionOfNormalUse = 1u;  // Inside instruction.
+static constexpr size_t kLivenessPositionOfFixedOutput = kLivenessPositionsPerInstruction - 1u;
+static constexpr size_t kLivenessPositionForMoveAfter = kLivenessPositionsPerInstruction - 1u;
+
 class BlockInfo : public ArenaObject<kArenaAllocSsaLiveness> {
  public:
   BlockInfo(ScopedArenaAllocator* allocator, const HBasicBlock& block, size_t number_of_ssa_values)
@@ -228,11 +236,11 @@ inline IterationRange<Iterator> FindMatchingUseRange(Iterator first,
   return MakeIterationRange(begin, end);
 }
 
-class SafepointPosition : public ArenaObject<kArenaAllocSsaLiveness> {
+class SafepointPosition : public ArenaObject<kArenaAllocSsaLiveness>,
+                          public IntrusiveForwardListNode<SafepointPosition> {
  public:
   explicit SafepointPosition(HInstruction* instruction)
-      : instruction_(instruction),
-        next_(nullptr) {}
+      : instruction_(instruction) {}
 
   static size_t ComputePosition(HInstruction* instruction) {
     // We special case instructions emitted at use site, as their
@@ -241,22 +249,14 @@ class SafepointPosition : public ArenaObject<kArenaAllocSsaLiveness> {
       // Currently only applies to implicit null checks, which are emitted
       // at the next instruction.
       DCHECK(instruction->IsNullCheck()) << instruction->DebugName();
-      return instruction->GetLifetimePosition() + 2;
+      return instruction->GetLifetimePosition() + kLivenessPositionsPerInstruction;
     } else {
       return instruction->GetLifetimePosition();
     }
   }
 
-  void SetNext(SafepointPosition* next) {
-    next_ = next;
-  }
-
   size_t GetPosition() const {
     return ComputePosition(instruction_);
-  }
-
-  SafepointPosition* GetNext() const {
-    return next_;
   }
 
   LocationSummary* GetLocations() const {
@@ -269,10 +269,11 @@ class SafepointPosition : public ArenaObject<kArenaAllocSsaLiveness> {
 
  private:
   HInstruction* const instruction_;
-  SafepointPosition* next_;
 
   DISALLOW_COPY_AND_ASSIGN(SafepointPosition);
 };
+
+using SafepointPositionList = IntrusiveForwardList<SafepointPosition>;
 
 /**
  * An interval is a list of disjoint live ranges where an instruction is live.
@@ -308,7 +309,7 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
     size_t position = instruction->GetLifetimePosition();
     UsePosition* new_use = new (allocator_) UsePosition(instruction, temp_index, position);
     uses_.push_front(*new_use);
-    AddRange(position, position + 1);
+    AddRange(position, position + kLivenessPositionsForTemp);
   }
 
   // Record use of an input. The use will be recorded as an environment use if
@@ -325,7 +326,7 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
     }
 
     // Set the use within the instruction.
-    size_t position = actual_user->GetLifetimePosition() + 1;
+    size_t position = actual_user->GetLifetimePosition() + kLivenessPositionOfNormalUse;
     if (!is_environment) {
       if (locations->IsFixedInput(input_index) || locations->OutputUsesSameAs(input_index)) {
         // For fixed inputs and output same as input, the register allocator
@@ -349,7 +350,7 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
       // The user uses the instruction multiple times, and one use dies before the other.
       // We update the use list so that the latter is first.
       DCHECK(!is_environment);
-      DCHECK(uses_.front().GetPosition() + 1 == position);
+      DCHECK(uses_.front().GetPosition() + kLivenessPositionOfNormalUse == position);
       UsePositionList::iterator next_pos = uses_.begin();
       UsePositionList::iterator insert_pos;
       do {
@@ -468,8 +469,12 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
       // Instruction without uses.
       DCHECK(uses_.empty());
       DCHECK(from == defined_by_->GetLifetimePosition());
+      // TODO: The `kLivenessPositionsPerInstruction` below looks like a bug for calls coming
+      // from `RegisterAllocatorLinearScan::CheckForFixedOutput()` as the new range reaches
+      // into the next instruction. However, those call always take the `first_range_ != nullptr`
+      // path above. We should use another, simpler function for that.
       first_range_ = last_range_ = range_search_start_ =
-          new (allocator_) LiveRange(from, from + 2, nullptr);
+          new (allocator_) LiveRange(from, from + kLivenessPositionsPerInstruction, nullptr);
     }
   }
 
@@ -631,21 +636,10 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
   }
 
   bool HasWillCallSafepoint() const {
-    for (SafepointPosition* safepoint = first_safepoint_;
-         safepoint != nullptr;
-         safepoint = safepoint->GetNext()) {
-      if (safepoint->GetLocations()->WillCall()) return true;
-    }
-    return false;
-  }
-
-  SafepointPosition* FindSafepointJustBefore(size_t position) const {
-    for (SafepointPosition* safepoint = first_safepoint_, *previous = nullptr;
-         safepoint != nullptr;
-         previous = safepoint, safepoint = safepoint->GetNext()) {
-      if (safepoint->GetPosition() >= position) return previous;
-    }
-    return last_safepoint_;
+    return std::any_of(
+        safepoints_.begin(),
+        safepoints_.end(),
+        [](const SafepointPosition& safepoint) { return safepoint.GetLocations()->WillCall(); });
   }
 
   /**
@@ -666,18 +660,16 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
     }
 
     LiveInterval* new_interval = new (allocator_) LiveInterval(allocator_, type_);
-    SafepointPosition* new_last_safepoint = FindSafepointJustBefore(position);
-    if (new_last_safepoint == nullptr) {
-      new_interval->first_safepoint_ = first_safepoint_;
-      new_interval->last_safepoint_ = last_safepoint_;
-      first_safepoint_ = last_safepoint_ = nullptr;
-    } else if (last_safepoint_ != new_last_safepoint) {
-      new_interval->last_safepoint_ = last_safepoint_;
-      new_interval->first_safepoint_ = new_last_safepoint->GetNext();
-      DCHECK(new_interval->first_safepoint_ != nullptr);
-      last_safepoint_ = new_last_safepoint;
-      last_safepoint_->SetNext(nullptr);
+
+    SafepointPositionList::const_iterator before = safepoints_.before_begin();
+    for (auto it = safepoints_.begin(), end = safepoints_.end(); it != end; ++it) {
+      if (it->GetPosition() >= position) {
+        break;
+      }
+      before = it;
     }
+    new_interval->safepoints_.splice_after(
+        new_interval->safepoints_.before_begin(), safepoints_, before, safepoints_.end());
 
     new_interval->next_sibling_ = next_sibling_;
     next_sibling_ = new_interval;
@@ -926,8 +918,9 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
             && interval->SameRegisterKind(*this)
             && interval->GetRegister() == GetRegister()) {
           // We found the input that has the same register. Check if it is live after
-          // `defined_by`_.
-          return !interval->CoversSlow(defined_by_->GetLifetimePosition() + 1);
+          // `defined_by_`.
+          return !interval->CoversSlow(
+              defined_by_->GetLifetimePosition() + kLivenessPositionOfNormalUse);
         }
       }
     }
@@ -935,19 +928,17 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
     UNREACHABLE();
   }
 
-  void AddSafepoint(HInstruction* instruction) {
-    SafepointPosition* safepoint = new (allocator_) SafepointPosition(instruction);
-    if (first_safepoint_ == nullptr) {
-      first_safepoint_ = last_safepoint_ = safepoint;
-    } else {
-      DCHECK_LE(last_safepoint_->GetPosition(), safepoint->GetPosition());
-      last_safepoint_->SetNext(safepoint);
-      last_safepoint_ = safepoint;
-    }
+  SafepointPosition* CreateSafepointPosition(HInstruction* instruction) {
+    return new (allocator_) SafepointPosition(instruction);
   }
 
-  SafepointPosition* GetFirstSafepoint() const {
-    return first_safepoint_;
+  void SetSafepointPositions(SafepointPositionList&& list) {
+    DCHECK(safepoints_.empty());
+    safepoints_.swap(list);
+  }
+
+  const SafepointPositionList& GetSafepoints() const {
+    return safepoints_;
   }
 
   // Resets the starting point for range-searching queries to the first range.
@@ -995,20 +986,19 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
         first_range_(nullptr),
         last_range_(nullptr),
         range_search_start_(nullptr),
-        first_safepoint_(nullptr),
-        last_safepoint_(nullptr),
+        safepoints_(),
         uses_(),
         env_uses_(),
-        type_(type),
         next_sibling_(nullptr),
         parent_(this),
+        defined_by_(defined_by),
+        high_or_low_interval_(nullptr),
+        type_(type),
         register_(reg),
         spill_slot_(kNoSpillSlot),
         is_fixed_(is_fixed),
         is_temp_(is_temp),
-        is_high_interval_(is_high_interval),
-        high_or_low_interval_(nullptr),
-        defined_by_(defined_by) {}
+        is_high_interval_(is_high_interval) {}
 
   // Searches for a LiveRange that either covers the given position or is the
   // first next LiveRange. Returns null if no such LiveRange exists. Ranges
@@ -1109,21 +1099,27 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
   LiveRange* range_search_start_;
 
   // Safepoints where this interval is live.
-  SafepointPosition* first_safepoint_;
-  SafepointPosition* last_safepoint_;
+  SafepointPositionList safepoints_;
 
   // Uses of this interval. Only the parent interval keeps these lists.
   UsePositionList uses_;
   EnvUsePositionList env_uses_;
-
-  // The instruction type this interval corresponds to.
-  const DataType::Type type_;
 
   // Live interval that is the result of a split.
   LiveInterval* next_sibling_;
 
   // The first interval from which split intervals come from.
   LiveInterval* parent_;
+
+  // The instruction represented by this interval.
+  HInstruction* const defined_by_;
+
+  // If this interval needs a register pair, the high or low equivalent.
+  // `is_high_interval_` tells whether this holds the low or the high.
+  LiveInterval* high_or_low_interval_;
+
+  // The instruction type this interval corresponds to.
+  const DataType::Type type_;
 
   // The register allocated to this interval.
   int register_;
@@ -1139,13 +1135,6 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
 
   // Whether this interval is a synthesized interval for register pair.
   const bool is_high_interval_;
-
-  // If this interval needs a register pair, the high or low equivalent.
-  // `is_high_interval_` tells whether this holds the low or the high.
-  LiveInterval* high_or_low_interval_;
-
-  // The instruction represented by this interval.
-  HInstruction* const defined_by_;
 
   static constexpr int kNoRegister = -1;
   static constexpr int kNoSpillSlot = -1;
@@ -1185,8 +1174,7 @@ class SsaLivenessAnalysis : public ValueObject {
                      nullptr,
                      allocator_->Adapter(kArenaAllocSsaLiveness)),
         instructions_from_ssa_index_(allocator_->Adapter(kArenaAllocSsaLiveness)),
-        instructions_from_lifetime_position_(allocator_->Adapter(kArenaAllocSsaLiveness)),
-        number_of_ssa_values_(0) {
+        instructions_from_lifetime_position_(allocator_->Adapter(kArenaAllocSsaLiveness)) {
   }
 
   void Analyze();
@@ -1205,6 +1193,10 @@ class SsaLivenessAnalysis : public ValueObject {
 
   HInstruction* GetInstructionFromSsaIndex(size_t index) const {
     return instructions_from_ssa_index_[index];
+  }
+
+  ArrayRef<HInstruction* const> GetInstructionsFromSsaIndexes() const {
+    return ArrayRef<HInstruction* const>(instructions_from_ssa_index_);
   }
 
   HInstruction* GetInstructionFromPosition(size_t index) const {
@@ -1233,7 +1225,8 @@ class SsaLivenessAnalysis : public ValueObject {
   HInstruction* GetTempUser(LiveInterval* temp) const {
     // A temporary shares the same lifetime start as the instruction that requires it.
     DCHECK(temp->IsTemp());
-    HInstruction* user = GetInstructionFromPosition(temp->GetStart() / 2);
+    HInstruction* user =
+        GetInstructionFromPosition(temp->GetStart() / kLivenessPositionsPerInstruction);
     DCHECK_EQ(user, temp->GetUses().front().GetUser());
     return user;
   }
@@ -1244,12 +1237,8 @@ class SsaLivenessAnalysis : public ValueObject {
     return temp->GetUses().front().GetInputIndex();
   }
 
-  size_t GetMaxLifetimePosition() const {
-    return instructions_from_lifetime_position_.size() * 2 - 1;
-  }
-
   size_t GetNumberOfSsaValues() const {
-    return number_of_ssa_values_;
+    return instructions_from_ssa_index_.size();
   }
 
   static constexpr const char* kLivenessPassName = "liveness";
@@ -1280,9 +1269,9 @@ class SsaLivenessAnalysis : public ValueObject {
   static void ProcessEnvironment(HInstruction* instruction,
                                  HInstruction* actual_user,
                                  BitVectorView<size_t> live_in);
-  static void RecursivelyProcessInputs(HInstruction* instruction,
-                                       HInstruction* actual_user,
-                                       BitVectorView<size_t> live_in);
+  static void ProcessInputs(HInstruction* instruction,
+                            HInstruction* actual_user,
+                            BitVectorView<size_t> live_in);
 
   // Returns whether `instruction` in an HEnvironment held by `env_holder`
   // should be kept live by the HEnvironment.
@@ -1324,9 +1313,9 @@ class SsaLivenessAnalysis : public ValueObject {
   // Temporary array used when computing live_in, live_out, and kill sets.
   ScopedArenaVector<HInstruction*> instructions_from_ssa_index_;
 
-  // Temporary array used when inserting moves in the graph.
+  // Compressed map from lifetime position to instruction (nullptr for block start).
+  // Indexed by the lifetime position divided by `kLivenessPositionsPerInstruction`.
   ScopedArenaVector<HInstruction*> instructions_from_lifetime_position_;
-  size_t number_of_ssa_values_;
 
   friend class RegisterAllocatorTest;
 
