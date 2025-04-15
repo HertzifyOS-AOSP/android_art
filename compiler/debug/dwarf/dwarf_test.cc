@@ -45,7 +45,6 @@ TEST_F(DwarfTest, DebugFrame) {
   DW_CHECK(".debug_frame contents:");
   DW_CHECK("FDE");
   DW_CHECK_NEXT("DWARF32");
-  DW_CHECK_NEXT("DW_CFA_nop:");  // TODO: Why is a nop here.
   int pc = 0;
   for (int i : {0, 1, 0x3F, 0x40, 0xFF, 0x100, 0xFFFF, 0x10000}) {
     pc += i;
@@ -162,7 +161,6 @@ TEST_F(DwarfTest, x86_64_RegisterMapping) {
   }
   DW_CHECK("FDE");
   DW_CHECK_NEXT("DWARF32");
-  DW_CHECK_NEXT("DW_CFA_nop:");  // TODO: Why is a nop here.
   DW_CHECK_NEXT("DW_CFA_offset: RAX 0");
   DW_CHECK_NEXT("DW_CFA_offset: RCX 0");
   DW_CHECK_NEXT("DW_CFA_offset: RDX 0");
