@@ -222,13 +222,31 @@ void SsaLivenessAnalysis::ComputeLiveRanges() {
       // Process inputs of instructions.
       if (current->IsEmittedAtUseSite()) {
         if (kIsDebugBuild) {
-          DCHECK(!current->GetLocations()->Out().IsValid());
-          for (const HUseListNode<HInstruction*>& use : current->GetUses()) {
-            HInstruction* user = use.GetUser();
-            size_t index = use.GetIndex();
-            DCHECK(!user->GetLocations()->InAt(index).IsValid());
+          CHECK(!current->GetLocations()->Out().IsValid());
+          CHECK(!current->HasEnvironmentUses());
+          if (current->IsNullCheck()) {
+            // Implicit null check is replaced by its input in all users before register
+            // allocation, so it does not have any uses at this point.
+            CHECK(current->GetUses().empty());
+          } else {
+            // TODO: Should we allow dead instructions marked as "emitted at use site"?
+            CHECK(!current->GetUses().empty());
+            for (const HUseListNode<HInstruction*>& use : current->GetUses()) {
+              HInstruction* user = use.GetUser();
+              size_t index = use.GetIndex();
+              CHECK(!user->GetLocations()->InAt(index).IsValid());
+            }
+            if (!current->GetUses().HasExactlyOneElement()) {
+              // If there is more than one user, there can be no unallocated locations.
+              // We do not have a way to record different locations for different use sites.
+              for (size_t i : Range(current->GetLocations()->GetInputCount())) {
+                CHECK(!current->GetLocations()->InAt(i).IsUnallocated());
+              }
+              for (size_t i : Range(current->GetLocations()->GetTempCount())) {
+                CHECK(!current->GetLocations()->GetTemp(i).IsUnallocated());
+              }
+            }
           }
-          DCHECK(!current->HasEnvironmentUses());
         }
       } else {
         // Process the environment first, because we know their uses come after
