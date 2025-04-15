@@ -30,7 +30,8 @@ namespace dwarf {
 #ifndef ART_TARGET_ANDROID
 
 TEST_F(DwarfTest, DebugFrame) {
-  const bool is64bit = false;
+  const InstructionSet isa = InstructionSet::kX86;
+  const bool is64bit = Is64BitInstructionSet(isa);
 
   // Pick offset value which would catch Uleb vs Sleb errors.
   const int offset = 40000;
@@ -128,11 +129,12 @@ TEST_F(DwarfTest, DebugFrame) {
            ArrayRef<const uint8_t>(*opcodes.data()),
            &debug_frame_data_);
 
-  CheckObjdumpOutput(is64bit, "-debug-frame");
+  CheckObjdumpOutput(isa, "-debug-frame");
 }
 
 TEST_F(DwarfTest, DISABLED_DebugFrame64) {
-  constexpr bool is64bit = true;
+  const InstructionSet isa = InstructionSet::kX86_64;
+  const bool is64bit = Is64BitInstructionSet(isa);
   DebugFrameOpCodeWriter<> initial_opcodes;
   WriteCIE(is64bit, Reg(16), initial_opcodes, &debug_frame_data_);
   DebugFrameOpCodeWriter<> opcodes;
@@ -145,13 +147,14 @@ TEST_F(DwarfTest, DISABLED_DebugFrame64) {
            &debug_frame_data_);
   DW_CHECK("FDE cie=00000000 pc=100000000000000..300000000000000");
 
-  CheckObjdumpOutput(is64bit, "-debug-frame");
+  CheckObjdumpOutput(isa, "-debug-frame");
 }
 
 // Test x86_64 register mapping. It is the only non-trivial architecture.
 // ARM and X86 have: dwarf_reg = art_reg + constant.
 TEST_F(DwarfTest, x86_64_RegisterMapping) {
-  constexpr bool is64bit = true;
+  const InstructionSet isa = InstructionSet::kX86_64;
+  const bool is64bit = Is64BitInstructionSet(isa);
   DebugFrameOpCodeWriter<> opcodes;
   DW_CHECK(".debug_frame contents:");
   for (int i = 0; i < 16; i++) {
@@ -186,11 +189,12 @@ TEST_F(DwarfTest, x86_64_RegisterMapping) {
            ArrayRef<const uint8_t>(*opcodes.data()),
            &debug_frame_data_);
 
-  CheckObjdumpOutput(is64bit, "-debug-frame");
+  CheckObjdumpOutput(isa, "-debug-frame");
 }
 
 TEST_F(DwarfTest, DebugLine) {
-  const bool is64bit = false;
+  const InstructionSet isa = InstructionSet::kX86;
+  const bool is64bit = Is64BitInstructionSet(isa);
   const int code_factor_bits = 1;
   DebugLineOpCodeWriter<> opcodes(is64bit, code_factor_bits);
   DW_CHECK(".debug_line contents:");
@@ -241,12 +245,13 @@ TEST_F(DwarfTest, DebugLine) {
 
   WriteDebugLineTable(include_directories, files, opcodes, &debug_line_data_);
 
-  CheckObjdumpOutput(is64bit, "-debug-line");
+  CheckObjdumpOutput(isa, "-debug-line");
 }
 
 // DWARF has special one byte codes which advance PC and line at the same time.
 TEST_F(DwarfTest, DebugLineSpecialOpcodes) {
-  const bool is64bit = false;
+  const InstructionSet isa = InstructionSet::kX86;
+  const bool is64bit = Is64BitInstructionSet(isa);
   const int code_factor_bits = 1;
   uint32_t pc = 0x01000000;
   int line = 1;
@@ -278,11 +283,12 @@ TEST_F(DwarfTest, DebugLineSpecialOpcodes) {
   std::vector<FileEntry> files = { { "file.c", 0, 1000, 2000 } };
   WriteDebugLineTable(directories, files, opcodes, &debug_line_data_);
 
-  CheckObjdumpOutput(is64bit, "-debug-line");
+  CheckObjdumpOutput(isa, "-debug-line");
 }
 
 TEST_F(DwarfTest, DebugInfo) {
-  constexpr bool is64bit = false;
+  const InstructionSet isa = InstructionSet::kX86;
+  const bool is64bit = Is64BitInstructionSet(isa);
 
   DebugAbbrevWriter<> debug_abbrev(&debug_abbrev_data_);
   DW_CHECK(".debug_abbrev contents:");
@@ -334,7 +340,7 @@ TEST_F(DwarfTest, DebugInfo) {
 
   dwarf::WriteDebugInfoCU(/* debug_abbrev_offset= */ 0, info, &debug_info_data_);
 
-  CheckObjdumpOutput(is64bit, "-debug-info -debug-abbrev");
+  CheckObjdumpOutput(isa, "-debug-info -debug-abbrev");
 }
 
 #endif  // ART_TARGET_ANDROID
