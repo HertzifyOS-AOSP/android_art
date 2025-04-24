@@ -8414,9 +8414,7 @@ class HGraphVisitor : public ValueObject {
   // Visit functions for instruction classes.
 #define DECLARE_VISIT_INSTRUCTION(name, super)                                        \
   virtual void Visit##name(H##name* instr) { VisitInstruction(instr); }
-
-  FOR_EACH_INSTRUCTION(DECLARE_VISIT_INSTRUCTION)
-
+  FOR_EACH_CONCRETE_INSTRUCTION(DECLARE_VISIT_INSTRUCTION)
 #undef DECLARE_VISIT_INSTRUCTION
 
  protected:
@@ -8439,12 +8437,15 @@ class HGraphDelegateVisitor : public HGraphVisitor {
   virtual ~HGraphDelegateVisitor() {}
 
   // Visit functions that delegate to to super class.
-#define DECLARE_VISIT_INSTRUCTION(name, super)                                        \
+#define DECLARE_VISIT_ABSTRACT_INSTRUCTION(name, super)               \
+  virtual void Visit##name(H##name* instr) { Visit##super(instr); }
+  FOR_EACH_ABSTRACT_INSTRUCTION(DECLARE_VISIT_ABSTRACT_INSTRUCTION)
+#undef DECLARE_VISIT_ABSTRACT_INSTRUCTION
+
+#define DECLARE_VISIT_CONCRETE_INSTRUCTION(name, super)               \
   void Visit##name(H##name* instr) override { Visit##super(instr); }
-
-  FOR_EACH_INSTRUCTION(DECLARE_VISIT_INSTRUCTION)
-
-#undef DECLARE_VISIT_INSTRUCTION
+  FOR_EACH_CONCRETE_INSTRUCTION(DECLARE_VISIT_CONCRETE_INSTRUCTION)
+#undef DECLARE_VISIT_CONCRETE_INSTRUCTION
 
  private:
   DISALLOW_COPY_AND_ASSIGN(HGraphDelegateVisitor);
