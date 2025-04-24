@@ -318,15 +318,17 @@ art_cc_defaults {
 art_cc_defaults {
     name: "art_gtest_defaults",
     defaults: [
-        "art_test_defaults", // Must be first to make the -Wno-* overrides work.
-        "art_debug_defaults",
+        "art_test_defaults",
         "art_gtest_common_defaults",
-        "libartd-gtest_static_defaults",
+        "art_debug_defaults",
     ],
     test_suites: ["art-host-tests"],
     test_options: {
         test_suite_tag: ["art-host-gtest"],
     },
+    static_libs: [
+        "libartd-gtest",
+    ],
     // Reduce test executable size by disabling automatic export of static lib symbols.
     // Don't use --exclude-libs=ALL, because it breaks tests under ASAN by hiding __asan* symbols.
     ldflags: [
@@ -336,7 +338,6 @@ art_cc_defaults {
 
 art_cc_defaults {
     name: "art_standalone_gtest_defaults",
-
     defaults: [
         // Note: We don't include "art_debug_defaults" here, as standalone ART
         // gtests link with the "non-d" versions of the libraries contained in
@@ -344,19 +345,11 @@ art_cc_defaults {
         // (including the Release ART APEX).
         "art_standalone_test_defaults",
         "art_gtest_common_defaults",
-
-        // This dependency links the whole runtime statically into the test. Note that the boot
-        // classpath is not (normally) bundled with the test, so if the runtime is used to actually
-        // start a VM it may load the boot classpath from the device. Depending on the test
-        // configuration, that may not be in sync with the statically linked runtime.
-        "libart-gtest_static_defaults",
     ],
-
     test_suites: [
         "general-tests",
         "mts-art",
     ],
-
     // Support multilib variants (using different suffix per sub-architecture), which is needed on
     // build targets with secondary architectures, as the MTS test suite packaging logic flattens
     // all test artifacts into a single `testcases` directory.
@@ -369,7 +362,13 @@ art_cc_defaults {
             suffix: "64",
         },
     },
-
+    static_libs: [
+        // This dependency links the whole runtime statically into the test. Note that the boot
+        // classpath is not (normally) bundled with the test, so if the runtime is used to actually
+        // start a VM it may load the boot classpath from the device. Depending on the test
+        // configuration, that may not be in sync with the statically linked runtime.
+        "libart-gtest",
+    ],
     version_script: ":art-standalone-gtest-version",
 }
 
@@ -413,7 +412,7 @@ art_cc_defaults {
 }
 
 // Properties common to `libart-gtest` and `libartd-gtest`.
-cc_defaults {
+art_cc_defaults {
     name: "libart-gtest-common",
     defaults: [
         "art_defaults",
@@ -422,15 +421,10 @@ cc_defaults {
     srcs: [
         "common/gtest_main.cc",
     ],
-    header_libs: [
-        "libart_headers",
-        "libnativehelper_header_only",
-    ],
     whole_static_libs: [
         "libgtest_isolated",
     ],
-    shared_libs: [ // Since we're building static libs we're only using the headers from these.
-        "libdexfile",
+    shared_libs: [
         "liblog",
     ],
     target: {
@@ -446,26 +440,15 @@ cc_defaults {
     },
 }
 
-cc_library_static {
+art_cc_library_static {
     name: "libart-gtest",
     defaults: [
         "libart-gtest-common",
     ],
-}
-
-cc_defaults {
-    name: "libart-gtest_static_defaults",
-    defaults: [
-        "libart-compiler-gtest_static_defaults",
-        "libart-runtime-gtest_static_defaults",
-        "libartbase-art-gtest_static_defaults",
-        "libdexfile_static_defaults",
-    ],
     whole_static_libs: [
-        "libart-gtest",
-    ],
-    shared_libs: [
-        "liblog",
+        "libart-compiler-gtest",
+        "libart-runtime-gtest",
+        "libartbase-art-gtest",
     ],
 }
 
@@ -475,21 +458,10 @@ art_cc_library_static {
         "art_debug_defaults",
         "libart-gtest-common",
     ],
-}
-
-cc_defaults {
-    name: "libartd-gtest_static_defaults",
-    defaults: [
-        "libartbased-art-gtest_static_defaults",
-        "libartd-compiler-gtest_static_defaults",
-        "libartd-runtime-gtest_static_defaults",
-        "libdexfiled_static_defaults",
-    ],
     whole_static_libs: [
-        "libartd-gtest",
-    ],
-    shared_libs: [
-        "liblog",
+        "libartd-compiler-gtest",
+        "libartd-runtime-gtest",
+        "libartbased-art-gtest",
     ],
 }
 
