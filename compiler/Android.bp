@@ -537,9 +537,6 @@ art_cc_defaults {
 
     target: {
         host: {
-            shared_libs: [
-                "libartd-simulator",
-            ],
             required: ["art_boot_images"],
         },
     },
@@ -553,9 +550,6 @@ art_cc_test {
         "art_gtest_defaults",
         "art_compiler_tests_defaults",
     ],
-    static_libs: [
-        "libartd-simulator-container",
-    ],
 }
 
 // Standalone version of ART gtest `art_compiler_tests`, not bundled with the ART APEX on target.
@@ -566,9 +560,6 @@ art_cc_test {
         "art_compiler_tests_defaults",
     ],
     data: [":generate-boot-image"],
-    static_libs: [
-        "libart-simulator-container",
-    ],
     test_config: "art_standalone_compiler_tests.xml",
 }
 

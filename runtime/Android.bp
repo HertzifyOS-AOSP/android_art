@@ -983,6 +983,8 @@ art_cc_library_static {
         "libart-runtime-gtest-defaults",
         "libart-gtest-defaults",
         "libart-runtime-for-test_static_defaults",
+        // TODO(b/347036796): Added here temporarily - to be cleaned up in a later CL.
+        "libart-simulator-for-test_static_defaults",
     ],
 }
 
@@ -993,6 +995,8 @@ art_cc_library_static {
         "libart-runtime-gtest-defaults",
         "libart-gtest-defaults",
         "libartd-runtime-for-test_static_defaults",
+        // TODO(b/347036796): Added here temporarily - to be cleaned up in a later CL.
+        "libartd-simulator-for-test_static_defaults",
     ],
 }
 
