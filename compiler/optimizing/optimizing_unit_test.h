@@ -650,6 +650,25 @@ class OptimizingUnitTestHelper {
     return array_length;
   }
 
+  HStaticFieldGet* MakeSFieldGet(HBasicBlock* block,
+                                 HLoadClass* load_class,
+                                 ArtField* field,
+                                 DataType::Type field_type,
+                                 uint32_t dex_pc = kNoDexPc) {
+    CHECK(field->IsStatic());
+    HStaticFieldGet* sget = new (GetAllocator()) HStaticFieldGet(load_class,
+                                                                 field,
+                                                                 field_type,
+                                                                 field->GetOffset(),
+                                                                 field->IsVolatile(),
+                                                                 kUnknownFieldIndex,
+                                                                 kUnknownClassDefIndex,
+                                                                 graph_->GetDexFile(),
+                                                                 dex_pc);
+    AddOrInsertInstruction(block, sget);
+    return sget;
+  }
+
   HNullCheck* MakeNullCheck(HBasicBlock* block,
                             HInstruction* value,
                             std::initializer_list<HInstruction*> env = {},

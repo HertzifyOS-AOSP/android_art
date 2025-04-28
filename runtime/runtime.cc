@@ -52,6 +52,7 @@
 #include "art_field-inl.h"
 #include "art_method-inl.h"
 #include "asm_support.h"
+#include "assume_value_signatures.h"
 #include "base/aborting.h"
 #include "base/arena_allocator.h"
 #include "base/atomic.h"
@@ -548,6 +549,7 @@ Runtime::~Runtime() {
   arena_pool_.reset();
   jit_arena_pool_.reset();
   protected_fault_page_.Reset();
+  assume_value_field_signatures_.clear();
   MemMap::Shutdown();
 
   // TODO: acquire a static mutex on Runtime to avoid racing.
@@ -1537,6 +1539,11 @@ void Runtime::InitializeApexVersions() {
       GetApexVersions(ArrayRef<const std::string>(Runtime::Current()->GetBootClassPathLocations()));
 }
 
+std::optional<AssumeValueSignature> Runtime::LookupAssumeValueSignature(ArtField* field) const {
+  auto it = assume_value_field_signatures_.find(field);
+  return it != assume_value_field_signatures_.end() ? std::optional(*it->second) : std::nullopt;
+}
+
 void Runtime::ReloadAllFlags(const std::string& caller) {
   FlagBase::ReloadAllFlags(caller);
 }
@@ -2222,6 +2229,17 @@ bool Runtime::Init(RuntimeArgumentMap&& runtime_options_in) {
     // Load eagerly in Zygote to improve app startup times. This will make
     // subsequent dlopens for the library no-ops.
     dlopen(plugin_name, RTLD_NOW | RTLD_LOCAL);
+  }
+
+  for (const auto& signature : AssumeValueSignatures::kSignatures) {
+    ArtField* field = signature.LookupField();
+    if (field != nullptr) {
+      assume_value_field_signatures_.insert_or_assign(field, &signature);
+    } else {
+      // Don't treat this as an error; assumed values are purely an optimization, and we reserve
+      // the right to selectively ignore/deprecate optimizations for certain fields.
+      VLOG(compiler) << "Failed to find field corresponding to " << signature.AsKey();
+    }
   }
 
   VLOG(startup) << "Runtime::Init exiting";

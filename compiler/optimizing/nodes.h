@@ -6534,6 +6534,11 @@ class HStaticFieldGet final : public HExpression<1, HFieldAccess> {
     SetPackedField<TypeField>(new_type);
   }
 
+  HLoadClass* GetLoadClass() const {
+    DCHECK(InputAt(0)->IsLoadClass());
+    return InputAt(0)->AsLoadClass();
+  }
+
   DECLARE_INSTRUCTION(StaticFieldGet);
 
  protected:
