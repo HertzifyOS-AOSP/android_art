@@ -1416,11 +1416,35 @@ art_cc_test {
     test_config: "art-gtests-target-chroot.xml",
 }
 
+// Convert ART apex to zip format so that it can be easily consumed in tradefed.
+// TODO: We should create the zip directly from the needed files and remove testing apex.
+cc_genrule {
+    name: "art-test-target-apex",
+    srcs: [
+        ":com.android.art.testing",
+    ],
+    tools: [
+        "deapexer",
+        "debugfs_static",
+        "fsck.erofs",
+        "soong_zip",
+    ],
+    cmd: "OUTPUT_DIR=$(genDir)/extracted && " +
+        "mkdir -p $$OUTPUT_DIR && " +
+        "$(location deapexer) " +
+        "  --debugfs_path $(location debugfs_static) " +
+        "  --fsckerofs_path $(location fsck.erofs) " +
+        "  extract $(in) $$OUTPUT_DIR && " +
+        "$(location soong_zip) -o $(out) -P apex/com.android.art -C $$OUTPUT_DIR -D $$OUTPUT_DIR",
+    out: ["art-test-target-apex.zip"],
+}
+
 art_cc_test {
     name: "ArtTest",
     data: [
         // We need the ART testing apex, which contains debug binaries and other utilities.
         ":com.android.art.testing",
+        ":art-test-target-apex",
         // Archive which contains all run-test data and test-specific bash scripts to run them.
         ":art-test-target-fg",
     ],
