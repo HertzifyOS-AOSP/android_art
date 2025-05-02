@@ -6983,7 +6983,6 @@ void ClassLinker::FillIMTAndConflictTables(ObjPtr<mirror::Class> klass) {
                        conflict_method,
                        klass,
                        /*create_conflict_tables=*/true,
-                       /*ignore_copied_methods=*/false,
                        &new_conflict,
                        &imt_data[0]);
   }
@@ -7045,7 +7044,6 @@ void ClassLinker::FillIMTFromIfTable(ObjPtr<mirror::IfTable> if_table,
                                      ArtMethod* imt_conflict_method,
                                      ObjPtr<mirror::Class> klass,
                                      bool create_conflict_tables,
-                                     bool ignore_copied_methods,
                                      /*out*/bool* new_conflict,
                                      /*out*/ArtMethod** imt) {
   uint32_t conflict_counts[ImTable::kSize] = {};
@@ -7069,9 +7067,6 @@ void ClassLinker::FillIMTFromIfTable(ObjPtr<mirror::IfTable> if_table,
     for (size_t j = 0; j < method_array_count; ++j) {
       ArtMethod* implementation_method =
           method_array->GetElementPtrSize<ArtMethod*>(j, image_pointer_size_);
-      if (ignore_copied_methods && implementation_method->IsCopied()) {
-        continue;
-      }
       DCHECK(implementation_method != nullptr);
       // Miranda methods cannot be used to implement an interface method, but they are safe to put
       // in the IMT since their entrypoint is the interface trampoline. If we put any copied methods
@@ -7127,9 +7122,6 @@ void ClassLinker::FillIMTFromIfTable(ObjPtr<mirror::IfTable> if_table,
       for (size_t j = 0; j < method_array_count; ++j) {
         ArtMethod* implementation_method =
             method_array->GetElementPtrSize<ArtMethod*>(j, image_pointer_size_);
-        if (ignore_copied_methods && implementation_method->IsCopied()) {
-          continue;
-        }
         DCHECK(implementation_method != nullptr);
         ArtMethod* interface_method = interface->GetVirtualMethod(j, image_pointer_size_);
         const uint32_t imt_index = interface_method->GetImtIndex();
@@ -9160,7 +9152,6 @@ bool ClassLinker::LinkMethodsHelper<kPointerSize>::LinkMethods(
                                             runtime_->GetImtConflictMethod(),
                                             klass.Get(),
                                             /*create_conflict_tables=*/false,
-                                            /*ignore_copied_methods=*/false,
                                             out_new_conflict,
                                             out_imt);
         }
