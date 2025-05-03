@@ -752,12 +752,6 @@ class EXPORT MANAGED Class final : public Object {
   ALWAYS_INLINE ArraySlice<ArtMethod> GetDirectMethodsSlice(PointerSize pointer_size)
       REQUIRES_SHARED(Locks::mutator_lock_);
 
-  ALWAYS_INLINE ArtMethod* GetDirectMethod(size_t i, PointerSize pointer_size)
-      REQUIRES_SHARED(Locks::mutator_lock_);
-
-  // Use only when we are allocating populating the method arrays.
-  ALWAYS_INLINE ArtMethod* GetDirectMethodUnchecked(size_t i, PointerSize pointer_size)
-        REQUIRES_SHARED(Locks::mutator_lock_);
   ALWAYS_INLINE ArtMethod* GetVirtualMethodUnchecked(size_t i, PointerSize pointer_size)
         REQUIRES_SHARED(Locks::mutator_lock_);
 
@@ -799,9 +793,6 @@ class EXPORT MANAGED Class final : public Object {
         PointerSize pointer_size)
       REQUIRES_SHARED(Locks::mutator_lock_);
 
-  // The index in the methods_ array where the first copied method is.
-  ALWAYS_INLINE uint32_t GetCopiedMethodsStartOffset() REQUIRES_SHARED(Locks::mutator_lock_);
-
   template<VerifyObjectFlags kVerifyFlags = kDefaultVerifyFlags>
   ALWAYS_INLINE ArraySlice<ArtMethod> GetCopiedMethodsSlice(PointerSize pointer_size)
       REQUIRES_SHARED(Locks::mutator_lock_);
@@ -825,6 +816,9 @@ class EXPORT MANAGED Class final : public Object {
 
   // Returns the number of declared virtual methods.
   ALWAYS_INLINE uint32_t NumDeclaredVirtualMethods() REQUIRES_SHARED(Locks::mutator_lock_);
+
+  // Returns the number of declared methods.
+  ALWAYS_INLINE uint32_t NumDeclaredMethods() REQUIRES_SHARED(Locks::mutator_lock_);
 
   ALWAYS_INLINE uint32_t NumMethods() REQUIRES_SHARED(Locks::mutator_lock_);
   static ALWAYS_INLINE uint32_t NumMethods(LengthPrefixedArray<ArtMethod>* methods)
@@ -1037,6 +1031,7 @@ class EXPORT MANAGED Class final : public Object {
 
   // Get fields of the class.
   LengthPrefixedArray<ArtField>* GetFieldsPtr() REQUIRES_SHARED(Locks::mutator_lock_);
+  LengthPrefixedArray<ArtField>* GetFieldsPtrUnchecked() REQUIRES_SHARED(Locks::mutator_lock_);
 
   ALWAYS_INLINE IterationRange<StrideIterator<ArtField>> GetFields()
       REQUIRES_SHARED(Locks::mutator_lock_);
@@ -1424,16 +1419,8 @@ class EXPORT MANAGED Class final : public Object {
 
   void CheckObjectAlloc() REQUIRES_SHARED(Locks::mutator_lock_);
 
-  // Unchecked editions is for root visiting.
-  LengthPrefixedArray<ArtField>* GetFieldsPtrUnchecked() REQUIRES_SHARED(Locks::mutator_lock_);
   IterationRange<StrideIterator<ArtField>> GetFieldsUnchecked()
       REQUIRES_SHARED(Locks::mutator_lock_);
-
-  // The index in the methods_ array where the first declared virtual method is.
-  ALWAYS_INLINE uint32_t GetVirtualMethodsStartOffset() REQUIRES_SHARED(Locks::mutator_lock_);
-
-  // The index in the methods_ array where the first direct method is.
-  ALWAYS_INLINE uint32_t GetDirectMethodsStartOffset() REQUIRES_SHARED(Locks::mutator_lock_);
 
   bool ProxyDescriptorEquals(ObjPtr<mirror::Class> match) REQUIRES_SHARED(Locks::mutator_lock_);
   bool ProxyDescriptorEquals(std::string_view match) REQUIRES_SHARED(Locks::mutator_lock_);
@@ -1586,14 +1573,6 @@ class EXPORT MANAGED Class final : public Object {
   // See the real definition in subtype_check_bits_and_status.h
   // typeof(status_) is actually SubtypeCheckBitsAndStatus.
   uint32_t status_;
-
-  // The offset of the first virtual method that is copied from an interface. This includes miranda,
-  // default, and default-conflict methods. Having a hard limit of ((2 << 16) - 1) for methods
-  // defined on a single class is well established in Java so we will use only uint16_t's here.
-  uint16_t copied_methods_offset_;
-
-  // The offset of the first declared virtual methods in the methods_ array.
-  uint16_t virtual_methods_offset_;
 
   // The following data exist in real class objects.
   // Embedded Vtable length, for class object that's instantiable, fixed size.

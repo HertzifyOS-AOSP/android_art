@@ -655,10 +655,12 @@ class EXPORT Thread {
    *
    * Returns a value from 1 to 10 (compatible with java.lang.Thread values).
    */
-  int GetNativePriority() const;
+  int GetNativePriority() const { return NicenessToPriority(GetNativeNiceness()); }
 
   /*
-   * Return Posix niceness instead of Java priority. A very thin wrapper over getpriority().
+   * Return Posix niceness instead of Java priority. A very thin wrapper over getpriority().  May
+   * be inconsistent with PaletteSchedSetPriority, especially if that doesn't actually adjust
+   * priorities.
    */
   int GetNativeNiceness() const;
 
@@ -1581,6 +1583,11 @@ class EXPORT Thread {
   void RemoveSuspendTrigger() {
     tlsPtr_.suspend_trigger.store(reinterpret_cast<uintptr_t*>(&tlsPtr_.suspend_trigger),
                                   std::memory_order_relaxed);
+  }
+  // Check the suspend trigger value. This is not the way we normally check for suspension, but
+  // can be used to explicitly propagate the value to the suspend check register.
+  bool IsSuspendTriggerSet() {
+    return tlsPtr_.suspend_trigger.load(std::memory_order_relaxed) == nullptr;
   }
 
   // Trigger a suspend check by making the suspend_trigger_ TLS value an invalid pointer.
