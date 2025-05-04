@@ -5015,15 +5015,17 @@ int* Thread::GetPriorityMap() {
         ++iters;
         saw_difference = false;
         CHECK_DEFERRED_ABORT(iters <= kMaxIters, "iters > kMaxIters");
-        for (int p = kMinThreadPriority; p <= kMaxThreadPriority; ++p) {
+        // Start checking from higher priorities, since that is most likely to fail, and we may
+        // have trouble undoing the damage if we don't detect the problem immediately.
+        for (int p = kMaxThreadPriority; p >= kMinThreadPriority; --p) {
           int ret = PaletteSchedSetPriority(me, p);
           if (ret == PALETTE_STATUS_OK) {
             errno = 0;
             pm[p] = getpriority(PRIO_PROCESS, 0 /* self */);
             // If we always get the same value, we're dealing with a fake, and need to fake a
             // consistent result here.
-            if (!saw_difference && pm[p] != pm[kMinThreadPriority]) {
-              if (p == kMinThreadPriority + 1) {
+            if (!saw_difference && pm[p] != pm[kMaxThreadPriority]) {
+              if (p == kMaxThreadPriority - 1) {
                 saw_difference = true;
               } else {
                 // We saw several identical values, which is wrong.
@@ -5037,7 +5039,7 @@ int* Thread::GetPriorityMap() {
             if (saw_difference) {
               // With a non-fake PaletteSchedSetPriority the map should be strictly monotonically
               // decreasing.
-              if (p > kMinThreadPriority && pm[p] >= pm[p - 1]) {
+              if (p < kMaxThreadPriority && pm[p] <= pm[p + 1]) {
                 // Maybe somebody else mucked with our priority? Start over.
                 map_consistent = false;
                 break;
