@@ -43,6 +43,10 @@ static bool IsLowOfUnalignedPairInterval(LiveInterval* low) {
   return GetHighForLowRegister(low->GetRegister()) != low->GetHighInterval()->GetRegister();
 }
 
+struct RegisterAllocatorLinearScan::SpillSlotData {
+  size_t end = 0u;
+};
+
 class RegisterAllocatorLinearScan::LinearScan {
  public:
   LinearScan(RegisterAllocatorLinearScan* register_allocator, RegisterType register_type)
@@ -78,14 +82,14 @@ class RegisterAllocatorLinearScan::LinearScan {
         : codegen->GetBlockedFloatingPointRegisters();
   }
 
-  static ScopedArenaVector<size_t>* GetSpillSlots(
+  static ScopedArenaVector<SpillSlotData>* GetSpillSlots(
       RegisterAllocatorLinearScan* register_allocator, RegisterType register_type) {
     return register_type == RegisterType::kCoreRegister
         ? &register_allocator->int_spill_slots_
         : &register_allocator->float_spill_slots_;
   }
 
-  static ScopedArenaVector<size_t>* GetWideSpillSlots(
+  static ScopedArenaVector<SpillSlotData>* GetWideSpillSlots(
       RegisterAllocatorLinearScan* register_allocator, RegisterType register_type) {
     return register_type == RegisterType::kCoreRegister
         ? &register_allocator->long_spill_slots_
@@ -109,7 +113,7 @@ class RegisterAllocatorLinearScan::LinearScan {
         : &register_allocator->physical_fp_register_intervals_;
   }
 
-  ALWAYS_INLINE ScopedArenaVector<size_t>* GetSpillSlotsForType(DataType::Type type) {
+  ALWAYS_INLINE ScopedArenaVector<SpillSlotData>* GetSpillSlotsForType(DataType::Type type) {
     switch (type) {
       case DataType::Type::kFloat64:
       case DataType::Type::kInt64:
@@ -194,8 +198,8 @@ class RegisterAllocatorLinearScan::LinearScan {
 
   // Spill slots for normal and wide intervals, pointing to appropriately typed slots
   // in the `RegisterAllocatorLinearScan`.
-  ScopedArenaVector<size_t>* const spill_slots_;
-  ScopedArenaVector<size_t>* const wide_spill_slots_;
+  ScopedArenaVector<SpillSlotData>* const spill_slots_;
+  ScopedArenaVector<SpillSlotData>* const wide_spill_slots_;
 
   // Currently processed list of unhandled intervals. Retrieved either from
   // `unhandled_core_intervals_` or `unhandled_fp_intervals_`.
@@ -675,6 +679,14 @@ class AllRangesIterator : public ValueObject {
   DISALLOW_COPY_AND_ASSIGN(AllRangesIterator);
 };
 
+inline size_t RegisterAllocatorLinearScan::GetNumberOfSpillSlots() const {
+  return int_spill_slots_.size() +
+         long_spill_slots_.size() +
+         float_spill_slots_.size() +
+         double_spill_slots_.size() +
+         catch_phi_spill_slots_;
+}
+
 bool RegisterAllocatorLinearScan::ValidateInternal(RegisterType current_register_type,
                                                    bool log_fatal_on_failure) const {
   auto should_process = [current_register_type](LiveInterval* interval) {
@@ -929,23 +941,25 @@ bool RegisterAllocatorLinearScan::LinearScan::TryUsingSpillSlotHint(LiveInterval
   }
 
   // Check that the required spill slots are available at the start of the `current` interval.
-  ScopedArenaVector<size_t>* spill_slots = GetSpillSlotsForType(current->GetType());
+  ScopedArenaVector<SpillSlotData>* spill_slots = GetSpillSlotsForType(current->GetType());
   size_t number_of_spill_slots_needed = current->NumberOfSpillSlotsNeeded();
   DCHECK_LE(hint + number_of_spill_slots_needed, spill_slots->size());
   DCHECK(current->GetParent() == current);
   size_t start = current->GetStart();
-  ArrayRef<size_t> range =
-      ArrayRef<size_t>(*spill_slots).SubArray(hint, number_of_spill_slots_needed);
-  if (std::any_of(range.begin(), range.end(), [=](size_t end) { return end > start; })) {
+  ArrayRef<SpillSlotData> range =
+      ArrayRef<SpillSlotData>(*spill_slots).SubArray(hint, number_of_spill_slots_needed);
+  if (std::any_of(range.begin(),
+                  range.end(),
+                  [=](const SpillSlotData& data) { return data.end > start; })) {
     return false;
   }
 
   // Use the spill slots and split the `current` interval if there is any register use.
   DCHECK(current->GetLastSibling() == current);
   size_t end = current->GetEnd();
-  for (size_t& slot_end : range) {
-    DCHECK_LE(slot_end, start);
-    slot_end = end;
+  for (SpillSlotData& data : range) {
+    DCHECK_LE(data.end, start);
+    data.end = end;
   }
   current->SetSpillSlot(hint);
   size_t first_register_use = current->FirstRegisterUse();
@@ -1469,7 +1483,7 @@ void RegisterAllocatorLinearScan::LinearScan::AllocateSpillSlotFor(LiveInterval*
     return;
   }
 
-  ScopedArenaVector<size_t>* spill_slots = GetSpillSlotsForType(interval->GetType());
+  ScopedArenaVector<SpillSlotData>* spill_slots = GetSpillSlotsForType(interval->GetType());
   size_t number_of_spill_slots_needed = parent->NumberOfSpillSlotsNeeded();
   size_t start = parent->GetStart();
   size_t slot = 0;
@@ -1484,9 +1498,11 @@ void RegisterAllocatorLinearScan::LinearScan::AllocateSpillSlotFor(LiveInterval*
     if (hint_phi_interval != nullptr && hint_phi_interval->HasSpillSlotOrHint()) {
       size_t hint = hint_phi_interval->GetSpillSlotHint();
       DCHECK_LE(hint + number_of_spill_slots_needed, spill_slots->size());
-      ArrayRef<const size_t> range =
-          ArrayRef<const size_t>(*spill_slots).SubArray(hint, number_of_spill_slots_needed);
-      if (std::all_of(range.begin(), range.end(), [=](size_t end) { return end <= start; })) {
+      ArrayRef<const SpillSlotData> range =
+          ArrayRef<const SpillSlotData>(*spill_slots).SubArray(hint, number_of_spill_slots_needed);
+      if (std::all_of(range.begin(),
+                      range.end(),
+                      [=](const SpillSlotData& data) { return data.end <= start; })) {
         used_hint = true;
         slot = hint;
       }
@@ -1498,7 +1514,7 @@ void RegisterAllocatorLinearScan::LinearScan::AllocateSpillSlotFor(LiveInterval*
     for (size_t e = spill_slots->size(); slot < e; ++slot) {
       bool found = true;
       for (size_t s = slot, u = std::min(slot + number_of_spill_slots_needed, e); s < u; s++) {
-        if ((*spill_slots)[s] > start) {
+        if ((*spill_slots)[s].end > start) {
           found = false;  // failure
           break;
         }
@@ -1518,7 +1534,7 @@ void RegisterAllocatorLinearScan::LinearScan::AllocateSpillSlotFor(LiveInterval*
   // Set slots to end.
   size_t end = interval->GetLastSibling()->GetEnd();
   for (size_t s : Range(slot, slot + number_of_spill_slots_needed)) {
-    (*spill_slots)[s] = end;
+    (*spill_slots)[s].end = end;
   }
 
   // Note that the exact spill slot location will be computed when we resolve,
