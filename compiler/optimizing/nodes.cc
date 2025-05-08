@@ -311,30 +311,34 @@ static bool UpdateDominatorOfSuccessor(HBasicBlock* block, HBasicBlock* successo
 
 void HGraph::ComputeDominanceInformation() {
   DCHECK(reverse_post_order_.empty());
-  reverse_post_order_.reserve(blocks_.size());
+  const size_t size = blocks_.size();
+  reverse_post_order_.reserve(size);
   reverse_post_order_.push_back(entry_block_);
 
-  // Allocate memory from local ScopedArenaAllocator.
-  ScopedArenaAllocator allocator(GetArenaStack());
-  // Number of visits of a given node, indexed by block id.
-  ScopedArenaVector<size_t> visits(blocks_.size(), 0u, allocator.Adapter(kArenaAllocGraphBuilder));
-  // Number of successors visited from a given node, indexed by block id.
-  ScopedArenaVector<size_t> successors_visited(blocks_.size(),
-                                               0u,
-                                               allocator.Adapter(kArenaAllocGraphBuilder));
-  // Nodes for which we need to visit successors.
-  ScopedArenaVector<HBasicBlock*> worklist(allocator.Adapter(kArenaAllocGraphBuilder));
-  constexpr size_t kDefaultWorklistSize = 8;
-  worklist.reserve(kDefaultWorklistSize);
-  worklist.push_back(entry_block_);
+  {
+    // Allocate memory from local ScopedArenaAllocator.
+    ScopedArenaAllocator allocator(GetArenaStack());
+    // Number of visits of a given node, indexed by block id.
+    ScopedArenaVector<size_t> visits(size, 0u, allocator.Adapter(kArenaAllocGraphBuilder));
+    // Number of successors visited from a given node, indexed by block id.
+    ScopedArenaVector<size_t> successors_visited(
+        size, 0u, allocator.Adapter(kArenaAllocGraphBuilder));
+    // Nodes for which we need to visit successors.
+    ScopedArenaVector<HBasicBlock*> worklist(allocator.Adapter(kArenaAllocGraphBuilder));
+    worklist.reserve(size);
+    worklist.push_back(entry_block_);
 
-  while (!worklist.empty()) {
-    HBasicBlock* current = worklist.back();
-    uint32_t current_id = current->GetBlockId();
-    if (successors_visited[current_id] == current->GetSuccessors().size()) {
-      worklist.pop_back();
-    } else {
+    // Cached for the check below.
+    HBasicBlock* exit = GetExitBlock();
+
+    while (!worklist.empty()) {
+      HBasicBlock* current = worklist.back();
+      uint32_t current_id = current->GetBlockId();
+      DCHECK_LT(successors_visited[current_id], current->GetSuccessors().size());
       HBasicBlock* successor = current->GetSuccessors()[successors_visited[current_id]++];
+      if (successors_visited[current_id] == current->GetSuccessors().size()) {
+        worklist.pop_back();
+      }
       UpdateDominatorOfSuccessor(current, successor);
 
       // Once all the forward edges have been visited, we know the immediate
@@ -342,7 +346,11 @@ void HGraph::ComputeDominanceInformation() {
       if (++visits[successor->GetBlockId()] ==
           successor->GetPredecessors().size() - successor->NumberOfBackEdges()) {
         reverse_post_order_.push_back(successor);
-        worklist.push_back(successor);
+        // The exit block is the only one with no successors. Will be encountered only one time per
+        // graph, at the end.
+        if (LIKELY(successor != exit)) {
+          worklist.push_back(successor);
+        }
       }
     }
   }
