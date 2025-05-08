@@ -416,15 +416,6 @@ void HGraph::SplitCriticalEdge(HBasicBlock* block, HBasicBlock* successor) {
   }
 }
 
-HBasicBlock* HGraph::SplitEdgeAndUpdateRPO(HBasicBlock* block, HBasicBlock* successor) {
-  HBasicBlock* new_block = SplitEdge(block, successor);
-  // In the RPO we have {... , block, ... , successor}. We want to insert `new_block` right after
-  // `block` to have a consistent RPO without recomputing the whole graph's RPO.
-  reverse_post_order_.insert(
-      reverse_post_order_.begin() + IndexOfElement(reverse_post_order_, block) + 1, new_block);
-  return new_block;
-}
-
 // Reorder phi inputs to match reordering of the block's predecessors.
 static void FixPhisAfterPredecessorsReodering(HBasicBlock* block, size_t first, size_t second) {
   for (HInstructionIteratorPrefetchNext it(block->GetPhis()); !it.Done(); it.Advance()) {
@@ -2126,9 +2117,7 @@ void HInstruction::MoveBeforeFirstUserAndOutOfLoops() {
   MoveBefore(insert_pos);
 }
 
-HBasicBlock* HBasicBlock::SplitBefore(HInstruction* cursor, bool require_graph_not_in_ssa_form) {
-  DCHECK_IMPLIES(require_graph_not_in_ssa_form, !graph_->IsInSsaForm())
-      << "Support for SSA form not implemented.";
+HBasicBlock* HBasicBlock::SplitBefore(HInstruction* cursor) {
   DCHECK_EQ(cursor->GetBlock(), this);
 
   HBasicBlock* new_block =
