@@ -1467,21 +1467,21 @@ void HInstruction::ReplaceUsesDominatedBy(HInstruction* dominator,
       return;
     }
     HGraph* graph = GetBlock()->GetGraph();
-    visited_blocks = ArenaBitVector::CreateFixedSize(
-        graph->GetAllocator(), graph->GetBlocks().size(), kArenaAllocMisc);
+    const size_t size = graph->GetBlocks().size();
+    visited_blocks = ArenaBitVector::CreateFixedSize(graph->GetAllocator(), size, kArenaAllocMisc);
     ScopedArenaAllocator allocator(graph->GetArenaStack());
-    ScopedArenaQueue<const HBasicBlock*> worklist(allocator.Adapter(kArenaAllocMisc));
-    worklist.push(dominator_block);
+    ScopedArenaVector<const HBasicBlock*> worklist(allocator.Adapter(kArenaAllocMisc));
+    worklist.reserve(size);
+    worklist.push_back(dominator_block);
+    visited_blocks.SetBit(dominator_block->GetBlockId());
 
     while (!worklist.empty()) {
-      const HBasicBlock* current = worklist.front();
-      worklist.pop();
-      visited_blocks.SetBit(current->GetBlockId());
+      const HBasicBlock* current = worklist.back();
+      worklist.pop_back();
       for (HBasicBlock* dominated : current->GetDominatedBlocks()) {
-        if (visited_blocks.IsBitSet(dominated->GetBlockId())) {
-          continue;
-        }
-        worklist.push(dominated);
+        DCHECK(!visited_blocks.IsBitSet(dominated->GetBlockId()));
+        visited_blocks.SetBit(dominated->GetBlockId());
+        worklist.push_back(dominated);
       }
     }
   };
