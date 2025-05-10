@@ -18,20 +18,21 @@
 #define ART_DEX2OAT_LINKER_OAT_WRITER_H_
 
 #include <stdint.h>
+
 #include <cstddef>
-#include <list>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 #include "base/array_ref.h"
 #include "base/dchecked_vector.h"
-#include "base/os.h"
 #include "base/mem_map.h"
+#include "base/os.h"
 #include "base/safe_map.h"
 #include "debug/debug_info.h"
 #include "dex/method_reference.h"
-#include "dex/string_reference.h"
 #include "dex/proto_reference.h"
+#include "dex/string_reference.h"
 #include "dex/type_reference.h"
 #include "linker/relative_patcher.h"  // For RelativePatcherTargetProvider.
 #include "mirror/class.h"
@@ -536,6 +537,19 @@ class OatWriter {
   // is the target offset for patching, starting at `bss_start_ + bss_roots_offset_`.
   SafeMap<ProtoReference, size_t, ProtoReferenceValueComparator> bss_method_type_entries_;
 
+  // These `xxx_cached_` versions of the above SafeMaps are a way to speed up getters after we
+  // computed and ordered the values.
+  template <typename KeyType>
+  using BssCacheMap = std::unordered_map<KeyType, typename std::map<KeyType, size_t>::iterator>;
+  BssCacheMap<MethodReference> app_image_rel_ro_method_entries_cached_;
+  BssCacheMap<MethodReference> bss_method_entries_cached_;
+  BssCacheMap<TypeReference> app_image_rel_ro_type_entries_cached_;
+  BssCacheMap<TypeReference> bss_type_entries_cached_;
+  BssCacheMap<TypeReference> bss_public_type_entries_cached_;
+  BssCacheMap<TypeReference> bss_package_type_entries_cached_;
+  BssCacheMap<StringReference> bss_string_entries_cached_;
+  BssCacheMap<ProtoReference> bss_method_type_entries_cached_;
+
   // Offset of the oat data from the start of the mmapped region of the elf file.
   size_t oat_data_offset_;
 
@@ -630,12 +644,10 @@ class OatWriter {
   // Profile info used to generate new layout of files.
   ProfileCompilationInfo* profile_compilation_info_;
 
-  using OrderedMethodList = std::vector<OrderedMethodData>;
-
   // List of compiled methods, sorted by the order defined in OrderedMethodData.
   // Methods can be inserted more than once in case of duplicated methods.
   // This pointer is only non-null after InitOatCodeDexFiles succeeds.
-  std::unique_ptr<OrderedMethodList> ordered_methods_;
+  std::vector<OrderedMethodData> ordered_methods_;
 
   DISALLOW_COPY_AND_ASSIGN(OatWriter);
 };
