@@ -23,6 +23,7 @@
 #include "base/bit_vector-inl.h"
 #include "base/pointer_size.h"
 #include "code_generator.h"
+#include "com_android_art_flags.h"
 #include "linear_order.h"
 #include "register_allocation_resolver.h"
 #include "register_allocator-inl.h"
@@ -108,6 +109,30 @@ class RegisterAllocatorLinearScan::LinearScan {
         : &register_allocator->physical_fp_register_intervals_;
   }
 
+  ALWAYS_INLINE ScopedArenaVector<size_t>* GetSpillSlotsForType(DataType::Type type) {
+    switch (type) {
+      case DataType::Type::kFloat64:
+      case DataType::Type::kInt64:
+        return wide_spill_slots_;
+      case DataType::Type::kUint32:
+      case DataType::Type::kUint64:
+      case DataType::Type::kVoid:
+        // Let the compiler optimize this away in release build.
+        DCHECK(false) << "Unexpected type for interval " << type;
+        FALLTHROUGH_INTENDED;
+      case DataType::Type::kFloat32:
+      case DataType::Type::kReference:
+      case DataType::Type::kInt32:
+      case DataType::Type::kUint16:
+      case DataType::Type::kUint8:
+      case DataType::Type::kInt8:
+      case DataType::Type::kBool:
+      case DataType::Type::kInt16:
+        return spill_slots_;
+    }
+  }
+
+  bool TryUsingSpillSlotHint(LiveInterval* interval);
   bool TryAllocateFreeReg(LiveInterval* interval);
   bool AllocateBlockedReg(LiveInterval* interval);
   int FindAvailableRegisterPair(ArrayRef<size_t> next_use, size_t starting_at) const;
@@ -750,7 +775,7 @@ void RegisterAllocatorLinearScan::LinearScan::DumpAllIntervals(std::ostream& str
 void RegisterAllocatorLinearScan::LinearScan::Run() {
   size_t last_position = std::numeric_limits<size_t>::max();
   while (!unhandled_.empty()) {
-    // (1) Remove interval with the lowest start position from unhandled.
+    // Remove interval with the lowest start position from unhandled.
     LiveInterval* current = unhandled_.back();
     unhandled_.pop_back();
 
@@ -771,9 +796,8 @@ void RegisterAllocatorLinearScan::LinearScan::Run() {
       // active_ below shouldn't need to be re-checked.
       size_t inactive_intervals_to_handle = inactive_.size();
 
-      // (2) Remove currently active intervals that are dead at this position.
-      //     Move active intervals that have a lifetime hole at this position
-      //     to inactive.
+      // Remove currently active intervals that are dead at this position.
+      // Move active intervals that have a lifetime hole at this position to inactive.
       auto active_kept_end = std::remove_if(
           active_.begin(),
           active_.end(),
@@ -790,8 +814,8 @@ void RegisterAllocatorLinearScan::LinearScan::Run() {
           });
       active_.erase(active_kept_end, active_.end());
 
-      // (3) Remove currently inactive intervals that are dead at this position.
-      //     Move inactive intervals that cover this position to active.
+      // Remove currently inactive intervals that are dead at this position.
+      // Move inactive intervals that cover this position to active.
       auto inactive_to_handle_end = inactive_.begin() + inactive_intervals_to_handle;
       auto inactive_kept_end = std::remove_if(
           inactive_.begin(),
@@ -832,16 +856,22 @@ void RegisterAllocatorLinearScan::LinearScan::Run() {
       continue;
     }
 
-    // (4) Try to find an available register.
+    // For a Phi which has all inputs in the same spill slot as its spill slot hint, use that hint.
+    if (com::android::art::flags::reg_alloc_spill_slot_reuse() &&
+        current->HasSpillSlotHint() &&
+        TryUsingSpillSlotHint(current)) {
+      continue;
+    }
+
+    // Try to find an available register.
     bool success = TryAllocateFreeReg(current);
 
-    // (5) If no register could be found, we need to spill.
+    // If no register could be found, we need to spill.
     if (!success) {
       success = AllocateBlockedReg(current);
     }
 
-    // (6) If the interval had a register allocated, add it to the list of active
-    //     intervals.
+    // If the interval had a register allocated, add it to the list of active intervals.
     if (success) {
       codegen_->AddAllocatedRegister((register_type_ == RegisterType::kCoreRegister)
           ? Location::RegisterLocation(current->GetRegister())
@@ -876,6 +906,56 @@ static void FreeIfNotCoverAt(LiveInterval* interval, size_t position, ArrayRef<s
       free_until[interval->GetHighInterval()->GetRegister()] = free_until[interval->GetRegister()];
     }
   }
+}
+
+bool RegisterAllocatorLinearScan::LinearScan::TryUsingSpillSlotHint(LiveInterval* current) {
+  DCHECK(current->HasSpillSlotHint());
+  int hint = current->GetSpillSlotHint();
+  DCHECK(current->GetDefinedBy() != nullptr);
+  HBasicBlock* block = current->GetDefinedBy()->GetBlock();
+  DCHECK(current->GetDefinedBy()->IsPhi());
+  auto inputs = current->GetDefinedBy()->AsPhi()->GetInputs();
+  DCHECK_EQ(inputs.size(), block->GetPredecessors().size());
+
+  // Check if all inputs have the same spill slot as `hint` and that none of them
+  // has a register allocated before the incoming edge.
+  for (auto [predecessor, input_index] : ZipCount(block->GetPredecessors())) {
+    DCHECK_EQ(predecessor->GetNormalSuccessors().size(), 1u);
+    LiveInterval* input_li = inputs[input_index]->GetLiveInterval();
+    if (input_li->GetSpillSlot() != hint ||
+        input_li->GetSiblingAt(predecessor->GetLifetimeEnd() - 1)->HasRegister()) {
+      return false;
+    }
+  }
+
+  // Check that the required spill slots are available at the start of the `current` interval.
+  ScopedArenaVector<size_t>* spill_slots = GetSpillSlotsForType(current->GetType());
+  size_t number_of_spill_slots_needed = current->NumberOfSpillSlotsNeeded();
+  DCHECK_LE(hint + number_of_spill_slots_needed, spill_slots->size());
+  DCHECK(current->GetParent() == current);
+  size_t start = current->GetStart();
+  ArrayRef<size_t> range =
+      ArrayRef<size_t>(*spill_slots).SubArray(hint, number_of_spill_slots_needed);
+  if (std::any_of(range.begin(), range.end(), [=](size_t end) { return end > start; })) {
+    return false;
+  }
+
+  // Use the spill slots and split the `current` interval if there is any register use.
+  DCHECK(current->GetLastSibling() == current);
+  size_t end = current->GetEnd();
+  for (size_t& slot_end : range) {
+    DCHECK_LE(slot_end, start);
+    slot_end = end;
+  }
+  current->SetSpillSlot(hint);
+  size_t first_register_use = current->FirstRegisterUse();
+  if (first_register_use != kNoLifetime) {
+    LiveInterval* split = SplitBetween(current, current->GetStart(), first_register_use - 1);
+    DCHECK(current != split);
+    AddSorted(&unhandled_, split);
+  }
+  handled_.push_back(current);
+  return true;
 }
 
 // Find a free register. If multiple are found, pick the register that
@@ -1389,60 +1469,69 @@ void RegisterAllocatorLinearScan::LinearScan::AllocateSpillSlotFor(LiveInterval*
     return;
   }
 
-  ScopedArenaVector<size_t>* spill_slots = nullptr;
-  switch (interval->GetType()) {
-    case DataType::Type::kFloat64:
-    case DataType::Type::kInt64:
-      spill_slots = wide_spill_slots_;
-      break;
-    case DataType::Type::kUint32:
-    case DataType::Type::kUint64:
-    case DataType::Type::kVoid:
-      // Let the compiler optimize this away in release build.
-      DCHECK(false) << "Unexpected type for interval " << interval->GetType();
-      FALLTHROUGH_INTENDED;
-    case DataType::Type::kFloat32:
-    case DataType::Type::kReference:
-    case DataType::Type::kInt32:
-    case DataType::Type::kUint16:
-    case DataType::Type::kUint8:
-    case DataType::Type::kInt8:
-    case DataType::Type::kBool:
-    case DataType::Type::kInt16:
-      spill_slots = spill_slots_;
-      break;
+  ScopedArenaVector<size_t>* spill_slots = GetSpillSlotsForType(interval->GetType());
+  size_t number_of_spill_slots_needed = parent->NumberOfSpillSlotsNeeded();
+  size_t start = parent->GetStart();
+  size_t slot = 0;
+  bool used_hint = false;
+
+  if (com::android::art::flags::reg_alloc_spill_slot_reuse()) {
+    LiveInterval* hint_phi_interval = parent->GetHintPhiInterval();
+    // If the immediate hint Phi does not have a spill hint, we could try to follow the
+    // hint Phi chain to a Phi that does. However, we would need to make sure we don't go
+    // over a Phi loop forever. And we would need to investigate if the additional spill
+    // slot sharing we can find this way is worth the increase in compilation time.
+    if (hint_phi_interval != nullptr && hint_phi_interval->HasSpillSlotOrHint()) {
+      size_t hint = hint_phi_interval->GetSpillSlotHint();
+      DCHECK_LE(hint + number_of_spill_slots_needed, spill_slots->size());
+      ArrayRef<const size_t> range =
+          ArrayRef<const size_t>(*spill_slots).SubArray(hint, number_of_spill_slots_needed);
+      if (std::all_of(range.begin(), range.end(), [=](size_t end) { return end <= start; })) {
+        used_hint = true;
+        slot = hint;
+      }
+    }
   }
 
   // Find first available spill slots.
-  size_t number_of_spill_slots_needed = parent->NumberOfSpillSlotsNeeded();
-  size_t slot = 0;
-  for (size_t e = spill_slots->size(); slot < e; ++slot) {
-    bool found = true;
-    for (size_t s = slot, u = std::min(slot + number_of_spill_slots_needed, e); s < u; s++) {
-      if ((*spill_slots)[s] > parent->GetStart()) {
-        found = false;  // failure
-        break;
+  if (!used_hint) {
+    for (size_t e = spill_slots->size(); slot < e; ++slot) {
+      bool found = true;
+      for (size_t s = slot, u = std::min(slot + number_of_spill_slots_needed, e); s < u; s++) {
+        if ((*spill_slots)[s] > start) {
+          found = false;  // failure
+          break;
+        }
+      }
+      if (found) {
+        break;  // success
       }
     }
-    if (found) {
-      break;  // success
+
+    // Need new spill slots?
+    size_t upper = slot + number_of_spill_slots_needed;
+    if (upper > spill_slots->size()) {
+      spill_slots->resize(upper);
     }
   }
 
-  // Need new spill slots?
-  size_t upper = slot + number_of_spill_slots_needed;
-  if (upper > spill_slots->size()) {
-    spill_slots->resize(upper);
-  }
   // Set slots to end.
   size_t end = interval->GetLastSibling()->GetEnd();
-  for (size_t s = slot; s < upper; s++) {
+  for (size_t s : Range(slot, slot + number_of_spill_slots_needed)) {
     (*spill_slots)[s] = end;
   }
 
   // Note that the exact spill slot location will be computed when we resolve,
   // that is when we know the number of spill slots for each type.
   parent->SetSpillSlot(slot);
+
+  if (com::android::art::flags::reg_alloc_spill_slot_reuse()) {
+    LiveInterval* hint_phi_interval = parent->GetHintPhiInterval();
+    while (hint_phi_interval != nullptr && !hint_phi_interval->HasSpillSlotOrHint()) {
+      hint_phi_interval->SetSpillSlotHint(slot);
+      hint_phi_interval = hint_phi_interval->GetHintPhiInterval();
+    }
+  }
 }
 
 void RegisterAllocatorLinearScan::AllocateSpillSlotForCatchPhi(HPhi* phi) {
