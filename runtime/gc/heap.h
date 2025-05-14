@@ -965,7 +965,7 @@ class Heap {
 
   // Create a new alloc space and compact default alloc space to it.
   EXPORT HomogeneousSpaceCompactResult PerformHomogeneousSpaceCompact()
-      REQUIRES(!*gc_complete_lock_, !process_state_update_lock_);
+      REQUIRES(!*gc_complete_lock_, !process_state_update_lock_, !pending_task_lock_);
   EXPORT bool SupportHomogeneousSpaceCompactAndCollectorTransitions() const;
 
   // Install an allocation listener.
@@ -1017,6 +1017,7 @@ class Heap {
   class HeapTrimTask;
   class TriggerPostForkCCGcTask;
   class ReduceTargetFootprintTask;
+  class TimeBasedGcThresholdCheckTask;
 
   // Compact source space to target space. Returns the collector used.
   collector::GarbageCollector* Compact(space::ContinuousMemMapAllocSpace* target_space,
@@ -1075,7 +1076,8 @@ class Heap {
       REQUIRES_SHARED(Locks::mutator_lock_);
 
   // Checks whether we should garbage collect:
-  ALWAYS_INLINE bool ShouldConcurrentGCForJava(size_t new_num_bytes_allocated);
+  enum NeedGc { kNeedGc, kNoNeedGc, kNeedGcThresholdCheck };
+  ALWAYS_INLINE NeedGc ShouldConcurrentGCForJava(size_t new_num_bytes_allocated);
   float NativeMemoryOverTarget(size_t current_native_bytes, bool is_gc_concurrent);
   void CheckGCForNative(Thread* self)
       REQUIRES(!*pending_task_lock_, !*gc_complete_lock_, !process_state_update_lock_);
@@ -1221,7 +1223,7 @@ class Heap {
   // collector_type_running_ is kCollectorTypeNone.
   void GrowForUtilization(collector::GarbageCollector* collector_ran,
                           size_t bytes_allocated_before_gc = 0)
-      REQUIRES(!process_state_update_lock_);
+      REQUIRES(!process_state_update_lock_, !pending_task_lock_);
 
   size_t GetPercentFree();
 
@@ -1320,6 +1322,16 @@ class Heap {
   void SetDefaultConcurrentStartBytes() REQUIRES(!*gc_complete_lock_);
   // This version assumes no concurrent updaters.
   void SetDefaultConcurrentStartBytesLocked();
+
+  // The TimeBasedGcThresholdCheck is a heap task that checks if the GC
+  // threshold for time based GC (if enabled) has been exceeded by passage of
+  // time. The task will schedule follow up checks as needed, but an explicit
+  // check should be requested if the threshold has changed or enough bytes
+  // have been allocated that the next check needs to be performed earlier
+  // than previously scheduled. The next_time_based_gc_threshold_check_ field
+  // records the NanoTime for the next time the check is schedule to run.
+  EXPORT void RequestTimeBasedGcThresholdCheck(Thread* self) REQUIRES(!*pending_task_lock_);
+  void TimeBasedGcThresholdCheck(Thread* self) REQUIRES(!*pending_task_lock_);
 
   // All-known continuous spaces, where objects lie within fixed bounds.
   std::vector<space::ContinuousSpace*> continuous_spaces_ GUARDED_BY(Locks::mutator_lock_);
@@ -1621,6 +1633,11 @@ class Heap {
   // The NanoTime when we started the most recent GC.
   uint64_t last_gc_start_time_ = 0;
 
+  // The NanoTime of the next scheduled time-based gc threshold check.
+  uint64_t next_time_based_gc_threshold_check_ = 0;
+
+  size_t bytes_allocated_at_last_gc_threshold_check_ = 0;
+
   // How much more we grow the heap when we are a foreground app instead of background.
   double foreground_heap_growth_multiplier_;
 
@@ -1691,6 +1708,8 @@ class Heap {
   // Active tasks which we can modify (change target time, desired collector type, etc..).
   CollectorTransitionTask* pending_collector_transition_ GUARDED_BY(pending_task_lock_);
   HeapTrimTask* pending_heap_trim_ GUARDED_BY(pending_task_lock_);
+  TimeBasedGcThresholdCheckTask* pending_time_based_gc_threshold_check_
+      GUARDED_BY(pending_task_lock_);
 
   // Whether or not we use homogeneous space compaction to avoid OOM errors.
   bool use_homogeneous_space_compaction_for_oom_;

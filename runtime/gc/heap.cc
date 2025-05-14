@@ -413,6 +413,7 @@ Heap::Heap(size_t initial_size,
       max_gc_requested_(0u),
       pending_collector_transition_(nullptr),
       pending_heap_trim_(nullptr),
+      pending_time_based_gc_threshold_check_(nullptr),
       use_homogeneous_space_compaction_for_oom_(use_homogeneous_space_compaction_for_oom),
       use_generational_gc_(use_generational_gc),
       running_collection_is_blocking_(false),
@@ -3903,6 +3904,8 @@ void Heap::GrowForUtilization(collector::GarbageCollector* collector_ran,
         min_foreground_time_based_gc_threshold_ =
             (multiplier <= 1.0) ? time_based_gc_threshold_ * foreground_heap_growth_multiplier_ : 0;
         time_based_gc_threshold_ *= multiplier;
+
+        RequestTimeBasedGcThresholdCheck(Thread::Current());
       }
 
       const uint64_t freed_bytes = current_gc_iteration_.GetFreedBytes() +
@@ -4238,6 +4241,101 @@ void Heap::RevokeAllThreadLocalBuffers() {
   if (region_space_ != nullptr) {
     CHECK_EQ(region_space_->RevokeAllThreadLocalBuffers(), 0U);
   }
+}
+
+class Heap::TimeBasedGcThresholdCheckTask : public HeapTask {
+ public:
+  explicit TimeBasedGcThresholdCheckTask(uint64_t target_time) : HeapTask(target_time) {}
+
+  void Run(Thread* self) override {
+    gc::Heap* heap = Runtime::Current()->GetHeap();
+    heap->TimeBasedGcThresholdCheck(self);
+  }
+};
+
+void Heap::RequestTimeBasedGcThresholdCheck(Thread* self) {
+  if (!CanAddHeapTask(self)) {
+    return;
+  }
+
+  uint64_t target_time = NanoTime();
+  MutexLock mu(self, *pending_task_lock_);
+
+  next_time_based_gc_threshold_check_ = target_time;
+  bytes_allocated_at_last_gc_threshold_check_ = 0;
+
+  if (pending_time_based_gc_threshold_check_ == nullptr) {
+    pending_time_based_gc_threshold_check_ = new TimeBasedGcThresholdCheckTask(target_time);
+    task_processor_->AddTask(self, pending_time_based_gc_threshold_check_);
+    return;
+  }
+
+  task_processor_->UpdateTargetRunTime(self, pending_time_based_gc_threshold_check_, target_time);
+}
+
+void Heap::TimeBasedGcThresholdCheck(Thread* self) {
+  ScopedTrace trace(__FUNCTION__);
+
+  if (time_based_gc_threshold_ == 0) {
+    // Time based GC triggering isn't enabled. Nothing to do here but remove the task.
+    MutexLock mu(self, *pending_task_lock_);
+    pending_time_based_gc_threshold_check_ = nullptr;
+    return;
+  }
+
+  size_t bytes_allocated = GetBytesAllocated();
+  size_t bytes_allocated_since_last_gc_kb = (bytes_allocated - num_bytes_alive_after_gc_) / KB;
+  uint64_t now = NanoTime();
+  uint64_t time_since_last_gc_ms = NsToMs(now - last_gc_start_time_);
+  if (bytes_allocated_since_last_gc_kb * time_since_last_gc_ms >= time_based_gc_threshold_) {
+    ScopedTrace t2("PureTimeGcTrigger");
+    RequestConcurrentGC(self, kGcCauseBackground, false, GetCurrentGcNum());
+
+    MutexLock mu(self, *pending_task_lock_);
+    pending_time_based_gc_threshold_check_ = nullptr;
+    return;
+  }
+
+  MutexLock mu(self, *pending_task_lock_);
+  if (bytes_allocated_since_last_gc_kb == 0 || !CanAddHeapTask(self) ||
+      !task_processor_->IsRunning()) {
+    // The timeout threshold will not be reached until another allocation
+    // takes place.
+    next_time_based_gc_threshold_check_ = std::numeric_limits<uint64_t>::max();
+    pending_time_based_gc_threshold_check_ = nullptr;
+    return;
+  }
+
+  uint64_t time_delta_ms = time_based_gc_threshold_ / bytes_allocated_since_last_gc_kb;
+  if (bytes_allocated > bytes_allocated_at_last_gc_threshold_check_) {
+    // There have been allocations since the last check, which suggests the
+    // application is actively allocating objects. Schedule the next check
+    // earlier than we would otherwise to avoid having to reschedule the task
+    // on every allocation.
+    //
+    // Say T time has passed and B bytes have been allocated since the last
+    // GC and our threshold is M. If we keep allocating at the same rate,
+    // we'll reach the threshold when K*T time has passed and K*B bytes have
+    // been allocated for some value K. Schedule the next check for time K*T.
+    //
+    //   (K*T) * (K*B) = M
+    //   K = sqrt(M/(T*B))
+    //   K*T = sqrt(T*M/B)
+    //
+    // Where T is time_since_last_gc_ms and M/B is what we calculated for the
+    // original time_delta_ms value.
+    time_delta_ms = static_cast<uint64_t>(std::sqrt(time_since_last_gc_ms * time_delta_ms));
+  }
+  uint64_t target_time = last_gc_start_time_ + MsToNs(time_delta_ms);
+  next_time_based_gc_threshold_check_ = target_time;
+  bytes_allocated_at_last_gc_threshold_check_ = bytes_allocated;
+
+  // Throttle threshold checks to avoid spamming them. Being within 10ms of
+  // the pure time trigger is plenty good.
+  target_time = std::max(target_time, now + MsToNs(10));
+
+  pending_time_based_gc_threshold_check_ = new TimeBasedGcThresholdCheckTask(target_time);
+  task_processor_->AddTask(self, pending_time_based_gc_threshold_check_);
 }
 
 // For GC triggering purposes, we count old (pre-last-GC) and new native allocations as
