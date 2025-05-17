@@ -48,6 +48,19 @@ flag {
   is_exported: true
 }
 
+# Flag for better spill slot reuse in the register allocator.
+flag {
+  name: "reg_alloc_spill_slot_reuse"
+  namespace: "art_performance"
+  description: "Flag to control spill slot reuse in register allocator"
+  bug: "264678256"
+  is_fixed_read_only: true
+  is_exported: false
+  metadata {
+      purpose: PURPOSE_BUGFIX
+  }
+}
+
 # TODO(b/352723620): Ramp this fully, then add tests with it.
 flag {
   name: "test"
@@ -117,6 +130,15 @@ flag {
   namespace: "system_performance"
   description: "Flag to enable use of SDK_INT as a compile-time constant"
   bug: "204924812"
+  is_fixed_read_only: true
+  is_exported: false
+}
+
+flag {
+  name: "enforce_permitted_subclasses_checks"
+  namespace: "core_libraries"
+  description: "Flag to enable enforcement of the sealed classes annotations"
+  bug: "416480439"
   is_fixed_read_only: true
   is_exported: false
 }

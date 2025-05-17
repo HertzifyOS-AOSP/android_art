@@ -27,7 +27,7 @@
 
 #include "base/macros.h"
 #include "base/indenter.h"
-#include "base/malloc_arena_pool.h"
+#include "base/calloc_arena_pool.h"
 #include "base/scoped_arena_allocator.h"
 #include "builder.h"
 #include "common_compiler_test.h"
@@ -139,7 +139,7 @@ class ArenaPoolAndAllocator {
   ScopedArenaAllocator* GetScopedAllocator() { return &scoped_allocator_; }
 
  private:
-  MallocArenaPool pool_;
+  CallocArenaPool pool_;
   ArenaAllocator allocator_;
   ArenaStack arena_stack_;
   ScopedArenaAllocator scoped_allocator_;
@@ -788,7 +788,9 @@ class OptimizingUnitTestHelper {
                  DataType::Type result_type,
                  HInstruction* input,
                  uint32_t dex_pc = kNoDexPc) {
-    static_assert(std::is_base_of_v<HUnaryOperation, Type>);
+    static_assert(std::is_base_of_v<HUnaryOperation, Type> ||
+                  // TODO: Make `HTypeConversion` inherit `HUnaryOperation`.
+                  std::is_same_v<HTypeConversion, Type>);
     Type* insn = new (GetAllocator()) Type(result_type, input, dex_pc);
     AddOrInsertInstruction(block, insn);
     return insn;
