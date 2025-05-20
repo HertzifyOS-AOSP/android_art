@@ -332,26 +332,6 @@ void PreZygoteForkNativeBridge() {
   }
 }
 
-static void SetCpuAbi(JNIEnv* env, jclass build_class, const char* field, const char* value) {
-  if (value != nullptr) {
-    jfieldID field_id = env->GetStaticFieldID(build_class, field, "Ljava/lang/String;");
-    if (field_id == nullptr) {
-      env->ExceptionClear();
-      ALOGW("Could not find %s field.", field);
-      return;
-    }
-
-    jstring str = env->NewStringUTF(value);
-    if (str == nullptr) {
-      env->ExceptionClear();
-      ALOGW("Could not create string %s.", value);
-      return;
-    }
-
-    env->SetStaticObjectField(build_class, field_id, str);
-  }
-}
-
 // Set up the environment for the bridged app.
 static void SetupEnvironment(const NativeBridgeCallbacks* cbs, JNIEnv* env, const char* isa) {
   // Need a JNIEnv* to do anything.
@@ -373,20 +353,6 @@ static void SetupEnvironment(const NativeBridgeCallbacks* cbs, JNIEnv* env, cons
     ALOGW("Out of memory while setting up app environment.");
     env->ExceptionClear();
     return;
-  }
-
-  // Reset CPU_ABI & CPU_ABI2 to values required by the apps running with native bridge.
-  if (env_values->cpu_abi != nullptr || env_values->cpu_abi2 != nullptr ||
-      env_values->abi_count >= 0) {
-    jclass bclass_id = env->FindClass("android/os/Build");
-    if (bclass_id != nullptr) {
-      SetCpuAbi(env, bclass_id, "CPU_ABI", env_values->cpu_abi);
-      SetCpuAbi(env, bclass_id, "CPU_ABI2", env_values->cpu_abi2);
-    } else {
-      // For example in a host test environment.
-      env->ExceptionClear();
-      ALOGW("Could not find Build class.");
-    }
   }
 
   if (env_values->os_arch != nullptr) {
