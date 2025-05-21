@@ -19,7 +19,6 @@
 
 #include <iostream>
 
-#include "base/arena_bit_vector.h"
 #include "base/array_ref.h"
 #include "base/bit_vector.h"
 #include "base/intrusive_forward_list.h"
@@ -46,19 +45,9 @@ static constexpr size_t kLivenessPositionForMoveAfter = kLivenessPositionsPerIns
 
 class BlockInfo : public ArenaObject<kArenaAllocSsaLiveness> {
  public:
-  BlockInfo(ScopedArenaAllocator* allocator, const HBasicBlock& block, size_t number_of_ssa_values)
-      : block_(block),
-        live_in_(ArenaBitVector::CreateFixedSize(
-            allocator, number_of_ssa_values, kArenaAllocSsaLiveness)),
-        live_out_(ArenaBitVector::CreateFixedSize(
-            allocator, number_of_ssa_values, kArenaAllocSsaLiveness)),
-        kill_(ArenaBitVector::CreateFixedSize(
-            allocator, number_of_ssa_values, kArenaAllocSsaLiveness)) {
-    UNUSED(block_);
-  }
+  BlockInfo(ScopedArenaAllocator* allocator, size_t number_of_ssa_values);
 
  private:
-  const HBasicBlock& block_;
   BitVectorView<size_t> live_in_;
   BitVectorView<size_t> live_out_;
   BitVectorView<size_t> kill_;

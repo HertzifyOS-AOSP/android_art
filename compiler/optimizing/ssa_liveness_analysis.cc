@@ -16,6 +16,7 @@
 
 #include "ssa_liveness_analysis.h"
 
+#include "base/arena_bit_vector.h"
 #include "base/bit_vector-inl.h"
 #include "code_generator.h"
 #include "com_android_art_flags.h"
@@ -23,6 +24,15 @@
 #include "nodes.h"
 
 namespace art HIDDEN {
+
+inline BlockInfo::BlockInfo(ScopedArenaAllocator* allocator, size_t number_of_ssa_values)
+    : live_in_(ArenaBitVector::CreateFixedSize(
+          allocator, number_of_ssa_values, kArenaAllocSsaLiveness)),
+      live_out_(ArenaBitVector::CreateFixedSize(
+          allocator, number_of_ssa_values, kArenaAllocSsaLiveness)),
+      kill_(ArenaBitVector::CreateFixedSize(
+          allocator, number_of_ssa_values, kArenaAllocSsaLiveness)) {
+}
 
 void SsaLivenessAnalysis::Analyze() {
   // Compute the linear order directly in the graph's data structure
@@ -92,7 +102,7 @@ void SsaLivenessAnalysis::ComputeLiveness() {
   size_t number_of_ssa_values = GetNumberOfSsaValues();
   for (HBasicBlock* block : graph_->GetLinearOrder()) {
     block_infos_[block->GetBlockId()] =
-        new (allocator_) BlockInfo(allocator_, *block, number_of_ssa_values);
+        new (allocator_) BlockInfo(allocator_, number_of_ssa_values);
   }
 
   // Compute the live ranges, as well as the initial live_in, live_out, and kill sets.
