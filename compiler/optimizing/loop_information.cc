@@ -63,7 +63,7 @@ void HLoopInformation::PopulateRecursive(HBasicBlock* block) {
   }
 
   blocks_.SetBit(block->GetBlockId());
-  block->SetInLoop(this);
+  MarkInLoop(block);
   if (block->IsLoopHeader()) {
     // We're visiting loops in post-order, so inner loops must have been
     // populated already.
@@ -96,7 +96,7 @@ void HLoopInformation::PopulateIrreducibleRecursive(HBasicBlock* block, ArenaBit
     HBasicBlock* pre_header = block->GetPredecessors()[0];
     PopulateIrreducibleRecursive(pre_header, finalized);
     if (blocks_.IsBitSet(pre_header->GetBlockId())) {
-      block->SetInLoop(this);
+      MarkInLoop(block);
       blocks_.SetBit(block_id);
       finalized->SetBit(block_id);
       is_finalized = true;
@@ -112,7 +112,7 @@ void HLoopInformation::PopulateIrreducibleRecursive(HBasicBlock* block, ArenaBit
     for (HBasicBlock* predecessor : block->GetPredecessors()) {
       PopulateIrreducibleRecursive(predecessor, finalized);
       if (!is_finalized && blocks_.IsBitSet(predecessor->GetBlockId())) {
-        block->SetInLoop(this);
+        MarkInLoop(block);
         blocks_.SetBit(block_id);
         finalized->SetBit(block_id);
         is_finalized = true;
@@ -135,7 +135,7 @@ void HLoopInformation::Populate() {
   // "Advanced Compiler Design & Implementation" (Muchnick) p192.
   HGraph* graph = header_->GetGraph();
   blocks_.SetBit(header_->GetBlockId());
-  header_->SetInLoop(this);
+  MarkInLoop(header_);
 
   bool is_irreducible_loop = HasBackEdgeNotDominatedByHeader();
 
@@ -237,7 +237,6 @@ bool HLoopInformation::DominatesAllBackEdges(HBasicBlock* block) {
   return true;
 }
 
-
 bool HLoopInformation::HasExitEdge() const {
   // Determine if this loop has at least one exit edge.
   HBlocksInLoopReversePostOrderIterator it_loop(*this);
@@ -249,6 +248,23 @@ bool HLoopInformation::HasExitEdge() const {
     }
   }
   return false;
+}
+
+inline void HLoopInformation::MarkInLoop(HBasicBlock* block) {
+  if (!block->IsInLoop()) {
+    block->SetLoopInformation(this);
+  } else if (block->IsLoopHeader()) {
+    // Nothing to do. This just means `*this` is an outer loop.
+  } else if (block->GetLoopInformation()->Contains(*GetHeader())) {
+    // The `block` is currently part of an outer loop. Make it part of this inner loop.
+    // Note that a non loop header having a loop information means this loop information
+    // has already been populated
+    block->SetLoopInformation(this);
+  } else {
+    // The `block` is part of an inner loop. Do not update the loop information.
+    // Note that we cannot do the check `Contains(block->GetLoopInformation()->GetHeader())`
+    // at this point, because this function is being called while populating `*this`.
+  }
 }
 
 }  // namespace art

@@ -1056,26 +1056,6 @@ class HBasicBlock final : public ArenaObject<kArenaAllocBasicBlock> {
     return loop_information_;
   }
 
-  // Set the loop_information_ on this block. Overrides the current
-  // loop_information if it is an outer loop of the passed loop information.
-  // Note that this method is called while creating the loop information.
-  void SetInLoop(HLoopInformation* info) {
-    if (IsLoopHeader()) {
-      // Nothing to do. This just means `info` is an outer loop.
-    } else if (!IsInLoop()) {
-      loop_information_ = info;
-    } else if (loop_information_->Contains(*info->GetHeader())) {
-      // Block is currently part of an outer loop. Make it part of this inner loop.
-      // Note that a non loop header having a loop information means this loop information
-      // has already been populated
-      loop_information_ = info;
-    } else {
-      // Block is part of an inner loop. Do not update the loop information.
-      // Note that we cannot do the check `info->Contains(loop_information_)->GetHeader()`
-      // at this point, because this method is being called while populating `info`.
-    }
-  }
-
   // Raw update of the loop information.
   void SetLoopInformation(HLoopInformation* info) {
     loop_information_ = info;
