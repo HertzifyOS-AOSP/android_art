@@ -11,16 +11,6 @@ func init() {
 	testInstallInfoGobRegId = gobtools.RegisterType(func() gobtools.CustomDec { return new(testInstallInfo) })
 }
 
-func (r testInstallInfo) GobEncode() ([]byte, error) {
-	buf := new(bytes.Buffer)
-
-	if err := r.Encode(buf); err != nil {
-		return nil, err
-	}
-
-	return buf.Bytes(), nil
-}
-
 func (r testInstallInfo) Encode(buf *bytes.Buffer) error {
 	var err error
 
@@ -53,11 +43,6 @@ func (r testInstallInfo) Encode(buf *bytes.Buffer) error {
 		}
 	}
 	return err
-}
-
-func (r *testInstallInfo) GobDecode(b []byte) error {
-	buf := bytes.NewReader(b)
-	return r.Decode(buf)
 }
 
 func (r *testInstallInfo) Decode(buf *bytes.Reader) error {
