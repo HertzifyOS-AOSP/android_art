@@ -2060,10 +2060,10 @@ bool DexFileVerifier::CheckIntraAnnotationItem() {
 
   // Check visibility
   uint8_t visibility = *(ptr_++);
-  switch (visibility) {
-    case DexFile::kDexVisibilityBuild:
-    case DexFile::kDexVisibilityRuntime:
-    case DexFile::kDexVisibilitySystem:
+  switch (static_cast<DexFile::DexVisibility>(visibility)) {
+    case DexFile::DexVisibility::kBuild:
+    case DexFile::DexVisibility::kRuntime:
+    case DexFile::DexVisibility::kSystem:
       break;
     default:
       ErrorStringPrintf("Bad annotation visibility: %x", visibility);
