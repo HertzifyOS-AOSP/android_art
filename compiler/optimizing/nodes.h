@@ -817,26 +817,6 @@ class HBasicBlock final : public ArenaObject<kArenaAllocBasicBlock> {
            && (loop_info == nullptr || !loop_info->IsBackEdge(*this));
   }
 
-  void AddBackEdge(HBasicBlock* back_edge) {
-    if (loop_information_ == nullptr) {
-      loop_information_ = new (graph_->GetAllocator()) HLoopInformation(this, graph_);
-    }
-    DCHECK_EQ(loop_information_->GetHeader(), this);
-    loop_information_->AddBackEdge(back_edge);
-  }
-
-  // Registers a back edge; if the block was not a loop header before the call associates a newly
-  // created loop info with it.
-  //
-  // Used in SuperblockCloner to preserve LoopInformation object instead of reseting loop
-  // info for all blocks during back edges recalculation.
-  void AddBackEdgeWhileUpdating(HBasicBlock* back_edge) {
-    if (loop_information_ == nullptr || loop_information_->GetHeader() != this) {
-      loop_information_ = new (graph_->GetAllocator()) HLoopInformation(this, graph_);
-    }
-    loop_information_->AddBackEdge(back_edge);
-  }
-
   HGraph* GetGraph() const { return graph_; }
   void SetGraph(HGraph* graph) { graph_ = graph; }
 
@@ -857,10 +837,6 @@ class HBasicBlock final : public ArenaObject<kArenaAllocBasicBlock> {
   }
 
   void ClearDominanceInformation();
-
-  int NumberOfBackEdges() const {
-    return IsLoopHeader() ? loop_information_->NumberOfBackEdges() : 0;
-  }
 
   HInstruction* GetFirstInstruction() const { return instructions_.first_instruction_; }
   HInstruction* GetLastInstruction() const { return instructions_.last_instruction_; }

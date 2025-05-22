@@ -61,6 +61,17 @@ inline int32_t HGraph::AllocateInstructionId() {
   return current_instruction_id_++;
 }
 
+// Register a back edge; if the block was not a loop header before the call,
+// associate a newly created loop info with it.
+void AddBackEdge(HBasicBlock* block, HBasicBlock* back_edge) {
+  if (block->GetLoopInformation() == nullptr) {
+    HGraph* graph = block->GetGraph();
+    block->SetLoopInformation(new (graph->GetAllocator()) HLoopInformation(block, graph));
+  }
+  DCHECK_EQ(block->GetLoopInformation()->GetHeader(), block);
+  block->GetLoopInformation()->AddBackEdge(back_edge);
+}
+
 void HGraph::FindBackEdges(/*out*/ BitVectorView<size_t> visited) {
   // "visited" must be empty on entry, it's an output argument for all visited (i.e. live) blocks.
   DCHECK(!visited.IsAnyBitSet());
@@ -93,7 +104,7 @@ void HGraph::FindBackEdges(/*out*/ BitVectorView<size_t> visited) {
       uint32_t successor_id = successor->GetBlockId();
       if (visiting.IsBitSet(successor_id)) {
         DCHECK(ContainsElement(worklist, successor));
-        successor->AddBackEdge(current);
+        AddBackEdge(successor, current);
       } else if (!visited.IsBitSet(successor_id)) {
         visited.SetBit(successor_id);
         visiting.SetBit(successor_id);
@@ -343,8 +354,10 @@ void HGraph::ComputeDominanceInformation() {
 
       // Once all the forward edges have been visited, we know the immediate
       // dominator of the block. We can then start visiting its successors.
-      if (++visits[successor->GetBlockId()] ==
-          successor->GetPredecessors().size() - successor->NumberOfBackEdges()) {
+      size_t successor_visits_needed =
+          successor->GetPredecessors().size() -
+          (successor->IsLoopHeader() ? successor->GetLoopInformation()->NumberOfBackEdges() : 0u);
+      if (++visits[successor->GetBlockId()] == successor_visits_needed) {
         reverse_post_order_.push_back(successor);
         // The exit block is the only one with no successors. Will be encountered only one time per
         // graph, at the end.
@@ -2922,7 +2935,7 @@ HBasicBlock* HGraph::TransformLoopForVectorization(HBasicBlock* header,
       loop->GetSuspendCheck()->GetEnvironment(), header);
 
   // Update loop information.
-  new_header->AddBackEdge(new_body);
+  AddBackEdge(new_header, new_body);
   new_header->GetLoopInformation()->SetSuspendCheck(suspend_check);
   new_header->GetLoopInformation()->Populate();
   new_pre_header->SetLoopInformation(loop->GetPreHeader()->GetLoopInformation());  // outward
