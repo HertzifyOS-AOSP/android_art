@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 The Android Open Source Project
+ * Copyright (C) 2025 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,19 +14,23 @@
  * limitations under the License.
  */
 
-#include <jni.h>
+#include "assume_value_options.h"
 
-extern void register_micro_native_methods(JNIEnv* env);
+#include "base/logging.h"
+#include "com_android_art_flags.h"
 
-jint JNI_OnLoad(JavaVM* vm, void* /*reserved*/) {
-  JNIEnv* env;
-  if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
-    return -1;
+namespace art_flags = com::android::art::flags;
+
+namespace art HIDDEN {
+
+bool AssumeValueOptions::MaybeSetAssumedValue(const detail::AssumeValueSignature& signature,
+                                              int32_t value) {
+  if (kSdkInt.Equals(signature)) {
+    DCHECK(art_flags::compile_sdk_int_constant());
+    sdk_int_ = value;
+    return true;
   }
-
-  // List of functions to call to register methods explicitly.
-  // Otherwise we use the regular JNI naming conventions to register implicitly.
-  register_micro_native_methods(env);
-
-  return JNI_VERSION_1_6;
+  return false;
 }
+
+}  // namespace art

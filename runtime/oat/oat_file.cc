@@ -97,7 +97,7 @@
 // dlopen_ext support from bionic.
 #ifdef ART_TARGET_ANDROID
 #include "android/dlext.h"
-#include "nativeloader/dlext_namespaces.h"
+#include "bionic/dlext_namespaces.h"
 #endif
 
 namespace art HIDDEN {
@@ -2332,9 +2332,6 @@ void OatDexFile::InitializeTypeLookupTable() {
       // TODO: Clean this up to create the type lookup table after the dex file has been created?
       if (StandardDexFile::IsMagicValid(dex_header->magic_)) {
         dex_data -= dex_header->HeaderOffset();
-      }
-      if (CompactDexFile::IsMagicValid(dex_header->magic_)) {
-        dex_data += dex_header->data_off_;
       }
       lookup_table_ = TypeLookupTable::Open(dex_data, lookup_table_data_, num_class_defs);
     }
