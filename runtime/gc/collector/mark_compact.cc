@@ -2235,7 +2235,8 @@ void MarkCompact::UpdateInstanceFieldsReferences(mirror::Object* obj,
           // This case is probably never going to happen, where there is at
           // least one non-overlapping page between reference_instance_offsets_
           // and last word of overflow-bitmap. Such page(s) can have static
-          // references on them, but that won't cause recursive page-move.
+          // references on them, but that won't cause recursive page-move. Test
+          // coverage for this case is in 160-read-barrier-stress art-test.
           //
           // Move all but last page and consume bitmap words from them.
           auto* bitmap_last_word_page =
