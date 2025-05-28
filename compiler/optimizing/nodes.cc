@@ -39,6 +39,7 @@
 #include "intrinsic_objects.h"
 #include "intrinsics.h"
 #include "intrinsics_list.h"
+#include "loop_information-inl.h"
 #include "mirror/class-inl.h"
 #include "scoped_thread_state_change-inl.h"
 #include "ssa_builder.h"
