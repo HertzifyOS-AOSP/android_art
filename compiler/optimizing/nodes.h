@@ -756,21 +756,8 @@ static constexpr uint32_t kInvalidBlockId = static_cast<uint32_t>(-1);
 
 class HBasicBlock final : public ArenaObject<kArenaAllocBasicBlock> {
  public:
-  explicit HBasicBlock(HGraph* graph, uint32_t dex_pc = kNoDexPc)
-      : graph_(graph),
-        predecessors_(graph->GetAllocator()->Adapter(kArenaAllocPredecessors)),
-        successors_(graph->GetAllocator()->Adapter(kArenaAllocSuccessors)),
-        loop_information_(nullptr),
-        dominator_(nullptr),
-        dominated_blocks_(graph->GetAllocator()->Adapter(kArenaAllocDominated)),
-        block_id_(kInvalidBlockId),
-        dex_pc_(dex_pc),
-        lifetime_start_(kNoLifetime),
-        lifetime_end_(kNoLifetime),
-        try_catch_information_(nullptr) {
-    predecessors_.reserve(kDefaultNumberOfPredecessors);
-    successors_.reserve(kDefaultNumberOfSuccessors);
-    dominated_blocks_.reserve(kDefaultNumberOfDominatedBlocks);
+  static HBasicBlock* Create(ArenaAllocator* allocator, HGraph* graph, uint32_t dex_pc = kNoDexPc) {
+    return new (allocator) HBasicBlock(allocator, graph, dex_pc);
   }
 
   const ArenaVector<HBasicBlock*>& GetPredecessors() const {
@@ -1076,6 +1063,23 @@ class HBasicBlock final : public ArenaObject<kArenaAllocBasicBlock> {
   bool HasSinglePhi() const;
 
  private:
+  HBasicBlock(ArenaAllocator* allocator, HGraph* graph, uint32_t dex_pc)
+      : graph_(graph),
+        predecessors_(allocator->Adapter(kArenaAllocPredecessors)),
+        successors_(allocator->Adapter(kArenaAllocSuccessors)),
+        loop_information_(nullptr),
+        dominator_(nullptr),
+        dominated_blocks_(allocator->Adapter(kArenaAllocDominated)),
+        block_id_(kInvalidBlockId),
+        dex_pc_(dex_pc),
+        lifetime_start_(kNoLifetime),
+        lifetime_end_(kNoLifetime),
+        try_catch_information_(nullptr) {
+    predecessors_.reserve(kDefaultNumberOfPredecessors);
+    successors_.reserve(kDefaultNumberOfSuccessors);
+    dominated_blocks_.reserve(kDefaultNumberOfDominatedBlocks);
+  }
+
   HGraph* graph_;
   ArenaVector<HBasicBlock*> predecessors_;
   ArenaVector<HBasicBlock*> successors_;
