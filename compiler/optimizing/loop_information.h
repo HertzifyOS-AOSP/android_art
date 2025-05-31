@@ -102,19 +102,19 @@ class HLoopInformation final : public ArenaObject<kArenaAllocLoopInfo> {
   // Returns true if instruction is not defined within this loop.
   bool IsDefinedOutOfTheLoop(HInstruction* instruction) const;
 
-  const ArenaBitVector& GetBlocks() const { return blocks_; }
+  const ArenaBitVector& GetBlockMask() const { return block_mask_; }
 
   void Add(HBasicBlock* block);
   void Remove(HBasicBlock* block);
 
   void ClearAllBlocks() {
-    blocks_.ClearAllBits();
+    block_mask_.ClearAllBits();
   }
 
   bool HasBackEdgeNotDominatedByHeader() const;
 
   bool IsPopulated() const {
-    return blocks_.GetHighestBitSet() != -1;
+    return block_mask_.GetHighestBitSet() != -1;
   }
 
   bool DominatesAllBackEdges(HBasicBlock* block);
@@ -126,6 +126,10 @@ class HLoopInformation final : public ArenaObject<kArenaAllocLoopInfo> {
     back_edges_.clear();
     ClearAllBlocks();
   }
+
+  auto GetBlocks() const;  // In block id order.
+  auto GetBlocksPostOrder() const;
+  auto GetBlocksReversePostOrder() const;
 
  private:
   // Internal recursive implementation of `Populate`.
@@ -141,7 +145,7 @@ class HLoopInformation final : public ArenaObject<kArenaAllocLoopInfo> {
   bool irreducible_;
   bool contains_irreducible_loop_;
   ArenaVector<HBasicBlock*> back_edges_;
-  ArenaBitVector blocks_;
+  ArenaBitVector block_mask_;
 
   DISALLOW_COPY_AND_ASSIGN(HLoopInformation);
 };

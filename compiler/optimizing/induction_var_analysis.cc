@@ -18,6 +18,7 @@
 
 #include "base/scoped_arena_containers.h"
 #include "induction_var_range.h"
+#include "loop_information-inl.h"
 
 namespace art HIDDEN {
 
@@ -252,8 +253,7 @@ void HInductionVarAnalysis::VisitLoop(const HLoopInformation* loop) {
   // Find strongly connected components (SSCs) in the SSA graph of this loop using Tarjan's
   // algorithm. Due to the descendant-first nature, classification happens "on-demand".
   size_t global_depth = 0;
-  for (HBlocksInLoopIterator it_loop(*loop); !it_loop.Done(); it_loop.Advance()) {
-    HBasicBlock* loop_block = it_loop.Current();
+  for (HBasicBlock* loop_block : loop->GetBlocks()) {
     DCHECK(loop_block->IsInLoop());
     if (loop_block->GetLoopInformation() != loop) {
       continue;  // Inner loops visited later.
@@ -270,6 +270,14 @@ void HInductionVarAnalysis::VisitLoop(const HLoopInformation* loop) {
 
   // Determine the loop's trip-count.
   VisitControl(loop);
+}
+
+void HInductionVarAnalysis::ReVisitLoop(const HLoopInformation* loop) {
+  induction_.erase(loop);
+  for (HInstructionIterator it(loop->GetHeader()->GetPhis()); !it.Done(); it.Advance()) {
+    cycles_.erase(it.Current()->AsPhi());
+  }
+  VisitLoop(loop);
 }
 
 size_t HInductionVarAnalysis::TryVisitNodes(
