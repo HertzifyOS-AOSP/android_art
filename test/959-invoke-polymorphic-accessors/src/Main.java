@@ -20,6 +20,21 @@ import java.lang.reflect.Field;
 
 public class Main {
 
+    private static final boolean STATIC_FINAL_CAN_BE_MODIFIED;
+
+    static {
+        boolean canBeModified = false;
+        try {
+            Field f = Main.class.getDeclaredField("STATIC_FINAL_CAN_BE_MODIFIED");
+            f.setAccessible(true);
+            f.setBoolean(null, true);
+            canBeModified = true;
+        } catch (Exception e) {
+            canBeModified = false;
+        }
+        STATIC_FINAL_CAN_BE_MODIFIED = canBeModified;
+    }
+
     public static class ValueHolder {
         public boolean m_z = false;
         public byte m_b = 0;
@@ -968,17 +983,19 @@ public class Main {
                 } catch (IllegalAccessException expected) {}
                 int actual = (int) MethodHandles.lookup().unreflectGetter(f).invokeExact();
                 assertEquals(ValueHolder.s_fi, actual);
-                f.setAccessible(true);
-                try {
-                    MethodHandles.lookup().unreflectSetter(f);
-                    fail();
-                } catch (IllegalAccessException expected) {}
-                f.setAccessible(false);
-                try {
-                    MethodHandles.lookup().unreflectSetter(f);
-                    fail();
-                } catch (IllegalAccessException expected) {}
-                MethodHandles.lookup().unreflectGetter(f);
+                if (!STATIC_FINAL_CAN_BE_MODIFIED) {
+                    f.setAccessible(true);
+                    try {
+                        MethodHandles.lookup().unreflectSetter(f);
+                        fail();
+                    } catch (IllegalAccessException expected) {}
+                    f.setAccessible(false);
+                    try {
+                        MethodHandles.lookup().unreflectSetter(f);
+                        fail();
+                    } catch (IllegalAccessException expected) {}
+                    MethodHandles.lookup().unreflectGetter(f);
+                }
             }
             {
                 // private field test
@@ -1019,10 +1036,12 @@ public class Main {
                     fail();
                 } catch (IllegalAccessException expected) {}
                 f.setAccessible(true);
-                try {
-                    MethodHandles.lookup().unreflectSetter(f);
-                    fail();
-                } catch (IllegalAccessException expected) {}
+                if (!STATIC_FINAL_CAN_BE_MODIFIED) {
+                    try {
+                        MethodHandles.lookup().unreflectSetter(f);
+                        fail();
+                    } catch (IllegalAccessException expected) {}
+                }
                 assertEquals(false, (boolean) MethodHandles.lookup().unreflectGetter(f).invokeExact()
                 );
                 f.setAccessible(false);
