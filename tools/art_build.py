@@ -435,6 +435,13 @@ class Builder:
                 "extract-host-tzdata-data",
             ],
         ))
+        # build-art-host-gtests depends on build-art-host  and
+        #    $(ART_TEST_HOST_GTEST_DEPENDENCIES)
+        # ART_TEST_HOST_GTEST_DEPENDENCIES := $(HOST_I18N_DATA)
+        self.add_target(Target(
+            name="build-art-host-gtests",
+            dependencies=["build-art-host", "extract-host-i18n-data"],
+        ))
         self.add_target(Target(
             name="build-art-target",
             make_targets=(
@@ -677,6 +684,11 @@ def parse_command_line_arguments(builder: Builder) -> argparse.ArgumentParser:
         help="Build build-art-host components (activates internal target)."
     )
     parser.add_argument(
+        "--build-art-host-gtests",
+        action="store_true",
+        help="Build build-art-host-gtests components (internal target)."
+    )
+    parser.add_argument(
         "--build-art-target",
         action="store_true",
         help="Build build-art-target components (activates internal target)."
@@ -705,6 +717,8 @@ def parse_command_line_arguments(builder: Builder) -> argparse.ArgumentParser:
 
     if args.build_art_host:
         builder.enabled_internal_targets.append("build-art-host")
+    if args.build_art_host_gtests:
+        builder.enabled_internal_targets.append("build-art-host-gtests")
     if args.build_art_target:
         builder.enabled_internal_targets.append("build-art-target")
     if args.build_art:
