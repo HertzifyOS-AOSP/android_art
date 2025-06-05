@@ -15,6 +15,7 @@
  */
 
 #include "com_android_art_flags.h"
+#include "com_android_libcore.h"
 #include "gtest/gtest.h"
 
 namespace art {
@@ -22,5 +23,7 @@ namespace art {
 static_assert(COM_ANDROID_ART_FLAGS_TEST == true);
 
 TEST(AconfigFlagsTest, TestFlag) { EXPECT_TRUE(com::android::art::flags::test()); }
+
+TEST(AconfigFlagsTest, TestLibcoreVApisFlag) { EXPECT_TRUE(com::android::libcore::v_apis()); }
 
 }  // namespace art

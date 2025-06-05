@@ -142,9 +142,11 @@ cc_defaults {
             // libdexfile, and dexdump.
             static_libs: [
                 "art-aconfig-flags-lib",
+                "libcore-aconfig-flags-native-lib",
             ],
             export_static_lib_headers: [
                 "art-aconfig-flags-lib",
+                "libcore-aconfig-flags-native-lib",
             ],
         },
         linux: {
@@ -154,9 +156,11 @@ cc_defaults {
             // libdexfile, and dexdump.
             static_libs: [
                 "art-aconfig-flags-lib",
+                "libcore-aconfig-flags-native-lib",
             ],
             export_static_lib_headers: [
                 "art-aconfig-flags-lib",
+                "libcore-aconfig-flags-native-lib",
             ],
         },
     },
