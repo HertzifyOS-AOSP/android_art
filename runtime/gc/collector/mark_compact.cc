@@ -791,6 +791,7 @@ void MarkCompact::InitializePhase() {
   black_page_count_ = 0;
   bytes_scanned_ = 0;
   freed_objects_ = 0;
+  conc_compaction_started_ = false;
   // The first buffer is used by gc-thread.
   compaction_buffer_counter_.store(1, std::memory_order_relaxed);
   black_allocations_begin_ = bump_pointer_space_->Limit();
@@ -2959,9 +2960,8 @@ size_t MarkCompact::MoveIoctl(void* dst, void* src, size_t len, bool tolerate_en
                                .len = len,
                                .mode = 0,
                                .move = 0};
-  int iters = 0;
+  uint32_t ebusy_iters = 0;
   while (ioctl(uffd_, UFFDIO_MOVE, &uffd_move) != 0) {
-    iters++;
     if (errno == EEXIST) {
       DCHECK_EQ(uffd_move.move, -EEXIST);
       uffd_move.move = gPageSize;
@@ -2979,11 +2979,6 @@ size_t MarkCompact::MoveIoctl(void* dst, void* src, size_t len, bool tolerate_en
       DCHECK_NE(uffd_move.move, 0);
       if (uffd_move.move < 0) {
         uffd_move.move = 0;
-        if (iters == 10) {
-          LOG(FATAL) << __FUNCTION__ << ": repeated ioctls not working with EAGAIN"
-                     << " dst:" << dst << " src:" << src << " len:" << len
-                     << " tolerate_enoent:" << tolerate_enoent;
-        }
       } else {
         break;
       }
@@ -2996,23 +2991,23 @@ size_t MarkCompact::MoveIoctl(void* dst, void* src, size_t len, bool tolerate_en
       }
       break;
     } else if (errno == EBUSY) {
-      // There are a couple of situations in which MOVE ioctl can return EBUSY.
-      // The most relevant to this GC is where the page is not exclusively
-      // mapped in the process. This can happen if the page is Copy-on-Write
-      // shared with another process (like zygote), or if the page is in the
-      // process of getting swapped out. Both these situations can be handled
-      // by writing to the page. However, the page is shared by multiple
-      // threads. So we use a CAS to make sure we don't corrupt the data on it.
-      // We rely on the fact that a compare-and-exchange instruction causes the
-      // page to be exclusively mapped, even when the store isn't performed.
-      auto atomic_src = std::atomic_ref<size_t>(*static_cast<size_t*>(src));
-      size_t expected = 0;
-      atomic_src.compare_exchange_strong(expected, 0, std::memory_order_relaxed);
-      uffd_move.move = 0;
-      if (iters == 10) {
-        LOG(FATAL) << __FUNCTION__ << ": repeated ioctls not working with EBUSY"
-                   << " dst:" << dst << " src:" << src << " len:" << len
-                   << " tolerate_enoent:" << tolerate_enoent;
+      // The ioctl returns EBUSY for a couple of reasons. The most common is
+      // where a page is being written-back to the swap. Ideally, we should just
+      // wait a little and retry. However, for mutators that's not a good idea
+      // as they are jank sensitive as well as maybe runnable and hence waiting
+      // may delay responding to suspension requests. With COPY ioctl we can be
+      // sure that it will succeed.
+      // GC-thread, on the other hand, can wait. The exception being when it
+      // causes SIGBUS during thread-flips. Also, waiting for really long is
+      // undesirable.
+      Thread* self = Thread::Current();
+      if (self == thread_running_gc_ && conc_compaction_started_ && ebusy_iters < 10) {
+        DCHECK_NE(self->GetState(), ThreadState::kRunnable);
+        BackOff</*kYieldMax=*/5, /*kSleepUs=*/1000>(ebusy_iters++);
+        uffd_move.move = 0;
+      } else {
+        uffd_move.move = CopyIoctl(dst, src, gPageSize, true, tolerate_enoent);
+        break;
       }
     } else {
       CHECK_EQ(uffd_move.move, -errno);
@@ -5041,6 +5036,7 @@ void MarkCompact::CompactionPhase() {
     RecordFree(ObjectBytePair(freed_objects_, freed_bytes));
   }
 
+  conc_compaction_started_ = true;
   {
     ReaderMutexLock rmu(thread_running_gc_, *Locks::heap_bitmap_lock_);
     CompactMovingSpace<kUffdMode>(compaction_buffers_map_.Begin());
