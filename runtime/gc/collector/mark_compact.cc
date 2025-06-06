@@ -3880,36 +3880,16 @@ void MarkCompact::UpdateNonMovingSpaceBlackAllocations() {
 
 class MarkCompact::ImmuneSpaceUpdateObjVisitor {
  public:
-  ImmuneSpaceUpdateObjVisitor(MarkCompact* collector, bool visit_native_roots)
-      : collector_(collector),
-        moving_space_begin_(collector->black_dense_end_),
-        moving_space_end_(collector->moving_space_end_),
-        visit_native_roots_(visit_native_roots) {}
+  explicit ImmuneSpaceUpdateObjVisitor(MarkCompact* collector) : collector_(collector) {}
 
   void operator()(mirror::Object* obj) const ALWAYS_INLINE
       REQUIRES(Locks::mutator_lock_, Locks::heap_bitmap_lock_) {
-    obj->VisitReferences<false, kVerifyNone, kWithoutReadBarrier>(*this, *this);
-    // We only need to visit native-roots of dirty dex-caches. Furthermore, only
-    // those native dex-cache arrays need to be visited in the compaction pause
-    // which are allocated before zygote-fork, as the others are visited later
-    // concurrently. We identify the post-zygote native-roots using the ranges
-    // listed in 'linear_alloc_spaces_data_'.
-    if (visit_native_roots_ && obj->IsDexCache()) {
-      auto should_visit = [this](void* ptr) {
-        if (ptr == nullptr) {
-          return false;
-        }
-        for (auto& data : collector_->linear_alloc_spaces_data_) {
-          // Ensure native-roots array is not in any of the post-zygote-fork
-          // linear-alloc spaces (usually there is only one).
-          if (static_cast<uint8_t*>(ptr) >= data.begin_ && static_cast<uint8_t*>(ptr) < data.end_) {
-            return false;
-          }
-        }
-        return true;
-      };
-      obj->AsDexCache()->VisitNativeRoots<kVerifyNone, kWithoutReadBarrier>(*this, should_visit);
-    }
+    RefsUpdateVisitor</*kCheckBegin*/false, /*kCheckEnd*/false> visitor(collector_,
+                                                                        obj,
+                                                                        /*begin_*/nullptr,
+                                                                        /*end_*/nullptr);
+    collector_->UpdateRefsForCompaction</*kFetchObjSize=*/false, /*kObjInBlackDense=*/false>(
+        obj, visitor, MemberOffset(0), MemberOffset(-1));
   }
 
   static void Callback(mirror::Object* obj, void* arg)
@@ -3917,38 +3897,8 @@ class MarkCompact::ImmuneSpaceUpdateObjVisitor {
     reinterpret_cast<ImmuneSpaceUpdateObjVisitor*>(arg)->operator()(obj);
   }
 
-  void operator()(mirror::Object* obj,
-                  MemberOffset offset,
-                  [[maybe_unused]] bool is_static) const ALWAYS_INLINE
-      REQUIRES_SHARED(Locks::mutator_lock_) REQUIRES_SHARED(Locks::heap_bitmap_lock_) {
-    collector_->UpdateRef(obj, offset, moving_space_begin_, moving_space_end_);
-  }
-
-  void operator()([[maybe_unused]] ObjPtr<mirror::Class> klass,
-                  ObjPtr<mirror::Reference> ref) const ALWAYS_INLINE
-      REQUIRES_SHARED(Locks::mutator_lock_) REQUIRES_SHARED(Locks::heap_bitmap_lock_) {
-    collector_->UpdateRef(
-        ref.Ptr(), mirror::Reference::ReferentOffset(), moving_space_begin_, moving_space_end_);
-  }
-
-  void VisitRootIfNonNull(mirror::CompressedReference<mirror::Object>* root) const ALWAYS_INLINE
-      REQUIRES_SHARED(Locks::mutator_lock_) {
-    if (!root->IsNull()) {
-      VisitRoot(root);
-    }
-  }
-
-  void VisitRoot(mirror::CompressedReference<mirror::Object>* root) const ALWAYS_INLINE
-      REQUIRES_SHARED(Locks::mutator_lock_) {
-    DCHECK(!visit_native_roots_);
-    collector_->UpdateRoot(root, moving_space_begin_, moving_space_end_);
-  }
-
  private:
   MarkCompact* const collector_;
-  uint8_t* const moving_space_begin_;
-  uint8_t* const moving_space_end_;
-  bool visit_native_roots_;
 };
 
 class MarkCompact::ClassLoaderRootsUpdater : public ClassLoaderVisitor {
@@ -4177,6 +4127,7 @@ void MarkCompact::CompactionPause() {
                        + thread_running_gc_->GetUsableStackSize<kNativeStackType>();
   }
   {
+    TimingLogger::ScopedTiming t2("(Paused)UpdateCompactionDataStructures", GetTimings());
     ReaderMutexLock rmu(thread_running_gc_, *Locks::heap_bitmap_lock_);
     // Refresh data-structures to catch-up on allocations that may have
     // happened since marking-phase pause.
@@ -4205,7 +4156,6 @@ void MarkCompact::CompactionPause() {
     // Start updating roots and system weaks now.
     heap_->GetReferenceProcessor()->UpdateRoots(this);
   }
-  bool has_zygote_space = heap_->HasZygoteSpace();
   {
     // TODO: Immune space updation has to happen either before or after
     // remapping pre-compact pages to from-space. And depending on when it's
@@ -4221,7 +4171,7 @@ void MarkCompact::CompactionPause() {
       // place and that the classes/dex-caches in immune-spaces may have allocations
       // (ArtMethod/ArtField arrays, dex-cache array, etc.) in the
       // non-userfaultfd visited private-anonymous mappings. Visit them here.
-      ImmuneSpaceUpdateObjVisitor visitor(this, has_zygote_space);
+      ImmuneSpaceUpdateObjVisitor visitor(this);
       if (table != nullptr) {
         table->ProcessCards();
         table->VisitObjects(ImmuneSpaceUpdateObjVisitor::Callback, &visitor);
@@ -4238,6 +4188,7 @@ void MarkCompact::CompactionPause() {
   }
 
   {
+    TimingLogger::ScopedTiming t2("(Paused)UpdateRoots", GetTimings());
     runtime->VisitConcurrentRoots(this, kVisitRootFlagAllRoots);
     runtime->VisitNonThreadRoots(this);
     {
@@ -4249,6 +4200,7 @@ void MarkCompact::CompactionPause() {
     }
     SweepSystemWeaks(thread_running_gc_, runtime, /*paused=*/true);
 
+    bool has_zygote_space = heap_->HasZygoteSpace();
     GcVisitedArenaPool* arena_pool =
         static_cast<GcVisitedArenaPool*>(runtime->GetLinearAllocArenaPool());
     // Update immune/pre-zygote class-tables in case class redefinition took
@@ -4304,12 +4256,12 @@ void MarkCompact::CompactionPause() {
               REQUIRES_SHARED(Locks::mutator_lock_) {
             // The pre-zygote fork arenas are not visited concurrently in the
             // zygote children processes. The native roots of the dirty objects
-            // are visited during immune space visit above.
+            // are visited during immune space visit below.
             if (!arena.IsPreZygoteForkArena()) {
               uint8_t* last_byte = arena.GetLastUsedByte();
               auto ret = linear_alloc_arenas_.insert({&arena, last_byte});
               CHECK(ret.second);
-            } else if (!has_zygote_space) {
+            } else if (!arena.IsSingleObjectArena() || !has_zygote_space) {
               // Pre-zygote class-table and intern-table don't need to be updated.
               // TODO: Explore the possibility of using /proc/self/pagemap to
               // fetch which pages in these arenas are private-dirty and then only
