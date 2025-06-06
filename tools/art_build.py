@@ -569,14 +569,6 @@ class Builder:
         """Defines built-in targets using build_vars and stores build_vars."""
         self.build_vars = build_vars
 
-        # These test_* lists are placeholders; actual dependencies might differ.
-        test_art_target_deps = [
-            "com.android.art.testing",
-            "com.android.conscrypt",
-            "com.android.i18n",
-        ]
-        test_target_core_img_outs = ["core-oj", "core-libart"]
-
         # ART_HOST_DEPENDENCIES
         all_art_host_deps_make_targets = []
         all_art_host_deps_make_targets.extend(
@@ -662,11 +654,12 @@ class Builder:
         self.add_target(
             Target(
                 name="build-art-target",
-                make_targets=(
-                    ["art-script"]
-                    + test_art_target_deps
-                    + test_target_core_img_outs
-                ),
+                make_targets=([
+                    "art-script",
+                    "com.android.art.testing",
+                    "com.android.conscrypt",
+                    "com.android.i18n",
+                ]),
             )
         )
         self.add_target(
