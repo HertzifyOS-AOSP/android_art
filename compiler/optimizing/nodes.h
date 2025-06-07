@@ -46,6 +46,7 @@
 #include "entrypoints/quick/quick_entrypoints_enum.h"
 #include "handle.h"
 #include "handle_cache.h"
+#include "instruction_list.h"
 #include "intrinsics_enum.h"
 #include "locations.h"
 #include "loop_information.h"
@@ -94,7 +95,6 @@ static const int kDefaultNumberOfSuccessors = 2;
 static const int kDefaultNumberOfPredecessors = 2;
 static const int kDefaultNumberOfExceptionalPredecessors = 0;
 static const int kDefaultNumberOfDominatedBlocks = 1;
-static const int kDefaultNumberOfBackEdges = 1;
 
 // The maximum (meaningful) distance (31) that can be used in an integer shift/rotate operation.
 static constexpr int32_t kMaxIntShiftDistance = 0x1f;
@@ -153,53 +153,6 @@ template <typename T>
 static inline typename std::make_unsigned<T>::type MakeUnsigned(T x) {
   return static_cast<typename std::make_unsigned<T>::type>(x);
 }
-
-class HInstructionList final : public ValueObject {
- public:
-  HInstructionList() : first_instruction_(nullptr), last_instruction_(nullptr) {}
-
-  void AddInstruction(HInstruction* instruction);
-  void RemoveInstruction(HInstruction* instruction);
-
-  // Insert `instruction` before/after an existing instruction `cursor`.
-  void InsertInstructionBefore(HInstruction* instruction, HInstruction* cursor);
-  void InsertInstructionAfter(HInstruction* instruction, HInstruction* cursor);
-
-  // Return true if this list contains `instruction`.
-  bool Contains(HInstruction* instruction) const;
-
-  // Return true if `instruction1` is found before `instruction2` in
-  // this instruction list and false otherwise.  Abort if none
-  // of these instructions is found.
-  bool FoundBefore(const HInstruction* instruction1,
-                   const HInstruction* instruction2) const;
-
-  bool IsEmpty() const { return first_instruction_ == nullptr; }
-  void Clear() { first_instruction_ = last_instruction_ = nullptr; }
-
-  // Update the block of all instructions to be `block`.
-  void SetBlockOfInstructions(HBasicBlock* block) const;
-
-  void AddAfter(HInstruction* cursor, const HInstructionList& instruction_list);
-  void AddBefore(HInstruction* cursor, const HInstructionList& instruction_list);
-  void Add(const HInstructionList& instruction_list);
-
-  // Return the number of instructions in the list. This is an expensive operation.
-  size_t CountSize() const;
-
- private:
-  HInstruction* first_instruction_;
-  HInstruction* last_instruction_;
-
-  friend class HBasicBlock;
-  friend class HGraph;
-  friend class HInstruction;
-  friend class HInstructionIteratorPrefetchNext;
-  friend class HInstructionIterator;
-  friend class HBackwardInstructionIteratorPrefetchNext;
-
-  DISALLOW_COPY_AND_ASSIGN(HInstructionList);
-};
 
 // Control-flow graph of a method. Contains a list of basic blocks.
 class HGraph : public ArenaObject<kArenaAllocGraph> {
@@ -756,21 +709,8 @@ static constexpr uint32_t kInvalidBlockId = static_cast<uint32_t>(-1);
 
 class HBasicBlock final : public ArenaObject<kArenaAllocBasicBlock> {
  public:
-  explicit HBasicBlock(HGraph* graph, uint32_t dex_pc = kNoDexPc)
-      : graph_(graph),
-        predecessors_(graph->GetAllocator()->Adapter(kArenaAllocPredecessors)),
-        successors_(graph->GetAllocator()->Adapter(kArenaAllocSuccessors)),
-        loop_information_(nullptr),
-        dominator_(nullptr),
-        dominated_blocks_(graph->GetAllocator()->Adapter(kArenaAllocDominated)),
-        block_id_(kInvalidBlockId),
-        dex_pc_(dex_pc),
-        lifetime_start_(kNoLifetime),
-        lifetime_end_(kNoLifetime),
-        try_catch_information_(nullptr) {
-    predecessors_.reserve(kDefaultNumberOfPredecessors);
-    successors_.reserve(kDefaultNumberOfSuccessors);
-    dominated_blocks_.reserve(kDefaultNumberOfDominatedBlocks);
+  static HBasicBlock* Create(ArenaAllocator* allocator, HGraph* graph, uint32_t dex_pc = kNoDexPc) {
+    return new (allocator) HBasicBlock(allocator, graph, dex_pc);
   }
 
   const ArenaVector<HBasicBlock*>& GetPredecessors() const {
@@ -808,14 +748,6 @@ class HBasicBlock final : public ArenaObject<kArenaAllocBasicBlock> {
   bool IsSingleReturn() const;
   bool IsSingleReturnOrReturnVoidAllowingPhis() const;
   bool IsSingleTryBoundary() const;
-
-  // Returns true if this block emits nothing but a jump.
-  bool IsSingleJump() const {
-    HLoopInformation* loop_info = GetLoopInformation();
-    return (IsSingleGoto() || IsSingleTryBoundary())
-           // Back edges generate a suspend check.
-           && (loop_info == nullptr || !loop_info->IsBackEdge(*this));
-  }
 
   HGraph* GetGraph() const { return graph_; }
   void SetGraph(HGraph* graph) { graph_ = graph; }
@@ -1076,6 +1008,23 @@ class HBasicBlock final : public ArenaObject<kArenaAllocBasicBlock> {
   bool HasSinglePhi() const;
 
  private:
+  HBasicBlock(ArenaAllocator* allocator, HGraph* graph, uint32_t dex_pc)
+      : graph_(graph),
+        predecessors_(allocator->Adapter(kArenaAllocPredecessors)),
+        successors_(allocator->Adapter(kArenaAllocSuccessors)),
+        loop_information_(nullptr),
+        dominator_(nullptr),
+        dominated_blocks_(allocator->Adapter(kArenaAllocDominated)),
+        block_id_(kInvalidBlockId),
+        dex_pc_(dex_pc),
+        lifetime_start_(kNoLifetime),
+        lifetime_end_(kNoLifetime),
+        try_catch_information_(nullptr) {
+    predecessors_.reserve(kDefaultNumberOfPredecessors);
+    successors_.reserve(kDefaultNumberOfSuccessors);
+    dominated_blocks_.reserve(kDefaultNumberOfDominatedBlocks);
+  }
+
   HGraph* graph_;
   ArenaVector<HBasicBlock*> predecessors_;
   ArenaVector<HBasicBlock*> successors_;
@@ -1097,31 +1046,6 @@ class HBasicBlock final : public ArenaObject<kArenaAllocBasicBlock> {
   friend class OptimizingUnitTestHelper;
 
   DISALLOW_COPY_AND_ASSIGN(HBasicBlock);
-};
-
-// Iterates over the LoopInformation of all loops which contain 'block'
-// from the innermost to the outermost.
-class HLoopInformationOutwardIterator final : public ValueObject {
- public:
-  explicit HLoopInformationOutwardIterator(const HBasicBlock& block)
-      : current_(block.GetLoopInformation()) {}
-
-  bool Done() const { return current_ == nullptr; }
-
-  void Advance() {
-    DCHECK(!Done());
-    current_ = current_->GetPreHeader()->GetLoopInformation();
-  }
-
-  HLoopInformation* Current() const {
-    DCHECK(!Done());
-    return current_;
-  }
-
- private:
-  HLoopInformation* current_;
-
-  DISALLOW_COPY_AND_ASSIGN(HLoopInformationOutwardIterator);
 };
 
 #define FOR_EACH_CONCRETE_INSTRUCTION_SCALAR_COMMON(M)                  \
@@ -1949,9 +1873,6 @@ class HInstruction : public ArenaObject<kArenaAllocInstruction> {
   bool IsInBlock() const { return block_ != nullptr; }
   bool IsInLoop() const { return block_->IsInLoop(); }
   bool IsLoopHeaderPhi() const { return IsPhi() && block_->IsLoopHeader(); }
-  bool IsIrreducibleLoopHeaderPhi() const {
-    return IsLoopHeaderPhi() && GetBlock()->GetLoopInformation()->IsIrreducible();
-  }
 
   virtual ArrayRef<HUserRecord<HInstruction*>> GetInputRecords() = 0;
 
