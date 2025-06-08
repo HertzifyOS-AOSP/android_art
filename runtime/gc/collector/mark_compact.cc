@@ -2951,7 +2951,7 @@ size_t MarkCompact::ZeropageIoctl(void* addr,
   }
 }
 
-size_t MarkCompact::MoveIoctl(void* dst, void* src, size_t len, bool tolerate_enoent) {
+size_t MarkCompact::MoveIoctl(void* dst, void* src, size_t len, bool tolerate_einval) {
   DCHECK_ALIGNED_PARAM(dst, gPageSize);
   DCHECK_ALIGNED_PARAM(src, gPageSize);
   DCHECK_ALIGNED_PARAM(len, gPageSize);
@@ -2982,7 +2982,7 @@ size_t MarkCompact::MoveIoctl(void* dst, void* src, size_t len, bool tolerate_en
       } else {
         break;
       }
-    } else if (errno == EINVAL && tolerate_enoent) {
+    } else if (errno == EINVAL && tolerate_einval) {
       // Unlike other ioctls, MOVE returns EINVAL when the memory range is found
       // to be not registered with userfaultfd context associated with 'uffd_'
       // file descriptor.
@@ -3006,7 +3006,7 @@ size_t MarkCompact::MoveIoctl(void* dst, void* src, size_t len, bool tolerate_en
         BackOff</*kYieldMax=*/5, /*kSleepUs=*/1000>(ebusy_iters++);
         uffd_move.move = 0;
       } else {
-        uffd_move.move = CopyIoctl(dst, src, gPageSize, true, tolerate_enoent);
+        uffd_move.move = CopyIoctl(dst, src, gPageSize, true, tolerate_einval);
         break;
       }
     } else {
@@ -4367,49 +4367,65 @@ void MarkCompact::KernelPreparation() {
   TimingLogger::ScopedTiming t("(Paused)KernelPreparation", GetTimings());
   uint8_t* moving_space_begin = bump_pointer_space_->Begin();
   size_t moving_space_size = bump_pointer_space_->Capacity();
-  size_t moving_space_register_sz = (moving_first_objs_count_ + black_page_count_) * gPageSize;
-  DCHECK_LE(moving_space_register_sz, moving_space_size);
+  // When using MOVE ioctl, we can serve new-page fault requests using the
+  // recycled pages. This helps in many ways:
+  // 1. madvise overhead gets reduced. This is particularly helpful when the
+  // gc-thread is not getting enough cpu-time due to CPU contention. We hold on
+  // to from-space pages. This way we avoid increasing RSS at an already
+  // constraint time for the device.
+  // 2. Simplify the userfaultfd registration. As explained in the following
+  // comments, anon_vma issue arises when not registering the entire VMA.
+  // Furthermore, we avoid the need for madvise to ensure that the moving space
+  // is entirely unmapped. We can use the same trick that we use for
+  // linear-alloc (uffd register first and then mremap).
+  if (use_move_ioctl_ && IsValidFd(uffd_)) {
+    RegisterUffd(moving_space_begin, moving_space_size);
+  }
 
   KernelPrepareRangeForUffd(moving_space_begin, from_space_begin_, moving_space_size);
 
   if (IsValidFd(uffd_)) {
-    if (moving_space_register_sz > 0) {
-      // mremap clears 'anon_vma' field of anonymous mappings. If we
-      // uffd-register only the used portion of the space, then the vma gets
-      // split (between used and unused portions) and as soon as pages are
-      // mapped to the vmas, they get different `anon_vma` assigned, which
-      // ensures that the two vmas cannot merge after we uffd-unregister the
-      // used portion. OTOH, registering the entire space avoids the split, but
-      // unnecessarily causes userfaults on allocations.
-      // By faulting-in a page we force the kernel to allocate 'anon_vma' *before*
-      // the vma-split in uffd-register. This ensures that when we unregister
-      // the used portion after compaction, the two split vmas merge. This is
-      // necessary for the mremap of the next GC cycle to not fail due to having
-      // more than one vma in the source range.
-      //
-      // Fault in address aligned to PMD size so that in case THP is enabled,
-      // we don't mistakenly fault a page in beginning portion that will be
-      // registered with uffd. If the alignment takes us beyond the space, then
-      // fault the first page and madvise it.
-      size_t pmd_size = Heap::GetPMDSize();
-      uint8_t* fault_in_addr = AlignUp(moving_space_begin + moving_space_register_sz, pmd_size);
-      if (bump_pointer_space_->Contains(reinterpret_cast<mirror::Object*>(fault_in_addr))) {
-        *const_cast<volatile uint8_t*>(fault_in_addr) = 0;
-      } else {
-        DCHECK_ALIGNED_PARAM(moving_space_begin, gPageSize);
-        *const_cast<volatile uint8_t*>(moving_space_begin) = 0;
-        madvise(moving_space_begin, pmd_size, MADV_DONTNEED);
+    if (!use_move_ioctl_) {
+      size_t moving_space_register_sz = (moving_first_objs_count_ + black_page_count_) * gPageSize;
+      DCHECK_LE(moving_space_register_sz, moving_space_size);
+      if (moving_space_register_sz > 0) {
+        // mremap clears 'anon_vma' field of anonymous mappings. If we
+        // uffd-register only the used portion of the space, then the vma gets
+        // split (between used and unused portions) and as soon as pages are
+        // mapped to the vmas, they get different `anon_vma` assigned, which
+        // ensures that the two vmas cannot merge after we uffd-unregister the
+        // used portion. OTOH, registering the entire space avoids the split, but
+        // unnecessarily causes userfaults on allocations.
+        // By faulting-in a page we force the kernel to allocate 'anon_vma' *before*
+        // the vma-split in uffd-register. This ensures that when we unregister
+        // the used portion after compaction, the two split vmas merge. This is
+        // necessary for the mremap of the next GC cycle to not fail due to having
+        // more than one vma in the source range.
+        //
+        // Fault in address aligned to PMD size so that in case THP is enabled,
+        // we don't mistakenly fault a page in beginning portion that will be
+        // registered with uffd. If the alignment takes us beyond the space, then
+        // fault the first page and madvise it.
+        size_t pmd_size = Heap::GetPMDSize();
+        uint8_t* fault_in_addr = AlignUp(moving_space_begin + moving_space_register_sz, pmd_size);
+        if (bump_pointer_space_->Contains(reinterpret_cast<mirror::Object*>(fault_in_addr))) {
+          *const_cast<volatile uint8_t*>(fault_in_addr) = 0;
+        } else {
+          DCHECK_ALIGNED_PARAM(moving_space_begin, gPageSize);
+          *const_cast<volatile uint8_t*>(moving_space_begin) = 0;
+          madvise(moving_space_begin, pmd_size, MADV_DONTNEED);
+        }
+        // Register the moving space with userfaultfd.
+        RegisterUffd(moving_space_begin, moving_space_register_sz);
+        // madvise ensures that if any page gets mapped (only possible if some
+        // thread is reading the page(s) without trying to make sense as we hold
+        // mutator-lock exclusively) between mremap and uffd-registration, then
+        // it gets zapped so that the map is empty and ready for userfaults. If
+        // we could mremap after uffd-registration (like in case of linear-alloc
+        // space below) then we wouldn't need it. But since we don't register the
+        // entire space, we can't do that.
+        madvise(moving_space_begin, moving_space_register_sz, MADV_DONTNEED);
       }
-      // Register the moving space with userfaultfd.
-      RegisterUffd(moving_space_begin, moving_space_register_sz);
-      // madvise ensures that if any page gets mapped (only possible if some
-      // thread is reading the page(s) without trying to make sense as we hold
-      // mutator-lock exclusively) between mremap and uffd-registration, then
-      // it gets zapped so that the map is empty and ready for userfaults. If
-      // we could mremap after uffd-registration (like in case of linear-alloc
-      // space below) then we wouldn't need it. But since we don't register the
-      // entire space, we can't do that.
-      madvise(moving_space_begin, moving_space_register_sz, MADV_DONTNEED);
     }
     // Prepare linear-alloc for concurrent compaction.
     for (auto& data : linear_alloc_spaces_data_) {
@@ -4537,6 +4553,18 @@ bool MarkCompact::SigbusHandler(siginfo_t* info) {
   }
 }
 
+size_t MarkCompact::ZeroAndMoveFreePage(uint8_t* dst, bool tolerate_einval) {
+  DCHECK(use_move_ioctl_);
+  uint8_t* free_page = GetFreePagesForMapping(gPageSize, /*atomic=*/true);
+  if (free_page != nullptr) {
+    DCHECK_ALIGNED_PARAM(free_page, gPageSize);
+    free_page += from_space_slide_diff_;
+    std::memset(free_page, 0x0, gPageSize);
+    return MoveIoctl(dst, free_page, gPageSize, tolerate_einval);
+  }
+  return std::numeric_limits<size_t>::max();
+}
+
 void MarkCompact::ConcurrentlyProcessMovingPage(uint8_t* fault_page,
                                                 uint8_t* buf,
                                                 size_t nr_moving_space_used_pages,
@@ -4544,11 +4572,17 @@ void MarkCompact::ConcurrentlyProcessMovingPage(uint8_t* fault_page,
   Thread* self = Thread::Current();
   uint8_t* unused_space_begin = moving_space_begin_ + nr_moving_space_used_pages * gPageSize;
   DCHECK(IsAlignedParam(unused_space_begin, gPageSize));
+  DCHECK_ALIGNED_PARAM(fault_page, gPageSize);
   if (fault_page >= unused_space_begin) {
-    // There is a race which allows more than one thread to install a
-    // zero-page. But we can tolerate that. So absorb the EEXIST returned by
-    // the ioctl and move on.
-    ZeropageIoctl(fault_page, gPageSize, /*tolerate_eexist=*/true, tolerate_enoent);
+    // MoveIoctl() returns 0 if the VMA gets unregistered from uffd, in which
+    // case, we should just return from the signal handler.
+    if (!use_move_ioctl_ ||
+        ZeroAndMoveFreePage(fault_page, tolerate_enoent) == std::numeric_limits<size_t>::max()) {
+      // There is a race which allows more than one thread to install a
+      // zero-page. But we can tolerate that. So absorb the EEXIST returned by
+      // the ioctl and move on.
+      ZeropageIoctl(fault_page, gPageSize, /*tolerate_eexist=*/true, tolerate_enoent);
+    }
     return;
   }
   size_t page_idx = DivideByPageSize(fault_page - moving_space_begin_);
@@ -4557,15 +4591,15 @@ void MarkCompact::ConcurrentlyProcessMovingPage(uint8_t* fault_page,
   if (first_obj == nullptr) {
     DCHECK_GT(fault_page, post_compact_end_);
     if (use_move_ioctl_) {
-      uint8_t* free_page = GetFreePagesForMapping(gPageSize, /*atomic=*/true);
-      if (free_page != nullptr) {
-        DCHECK_ALIGNED_PARAM(free_page, gPageSize);
-        free_page += from_space_slide_diff_;
-        std::memset(free_page, 0x0, gPageSize);
-        if (MoveIoctl(fault_page, free_page, gPageSize, tolerate_enoent) == gPageSize) {
-          moving_pages_status_[page_idx].store(static_cast<uint8_t>(PageState::kProcessedAndMapped),
-                                               std::memory_order_release);
-        }
+      size_t ret = ZeroAndMoveFreePage(fault_page, tolerate_enoent);
+      if (ret == 0) {
+        // This indicates that the VMA got unregistered from uffd. We should just
+        // return to mutator execution. If the page is still not mapped, then the
+        // kernel itself will handle the page-fault.
+        return;
+      } else if (ret < std::numeric_limits<size_t>::max()) {
+        moving_pages_status_[page_idx].store(static_cast<uint8_t>(PageState::kProcessedAndMapped),
+                                             std::memory_order_release);
         return;
       }
     }
@@ -4817,9 +4851,12 @@ void MarkCompact::ConcurrentlyProcessLinearAllocPage(uint8_t* fault_page, bool t
   if (arena_iter == linear_alloc_arenas_.end() ||
       arena_iter->first->IsWaitingForDeletion() ||
       arena_iter->second <= fault_page) {
-    // Fault page isn't in any of the arenas that existed before we started
-    // compaction. So map zeropage and return.
-    ZeropageIoctl(fault_page, gPageSize, /*tolerate_eexist=*/true, tolerate_enoent);
+    if (!use_move_ioctl_ ||
+        ZeroAndMoveFreePage(fault_page, tolerate_enoent) == std::numeric_limits<size_t>::max()) {
+      // Fault page isn't in any of the arenas that existed before we started
+      // compaction. So map zeropage and return.
+      ZeropageIoctl(fault_page, gPageSize, /*tolerate_eexist=*/true, tolerate_enoent);
+    }
   } else {
     // Find the linear-alloc space containing fault-page
     LinearAllocSpaceData* space_data = nullptr;
@@ -5111,9 +5148,11 @@ void MarkCompact::CompactionPhase() {
 
   // Unregister moving-space
   size_t moving_space_size = bump_pointer_space_->Capacity();
-  size_t used_size = (moving_first_objs_count_ + black_page_count_) * gPageSize;
-  if (used_size > 0) {
-    UnregisterUffd(bump_pointer_space_->Begin(), used_size);
+  size_t unregister_size = use_move_ioctl_
+                               ? moving_space_size
+                               : (moving_first_objs_count_ + black_page_count_) * gPageSize;
+  if (LIKELY(unregister_size > 0)) {
+    UnregisterUffd(bump_pointer_space_->Begin(), unregister_size);
   }
   // Unregister linear-alloc spaces
   for (auto& data : linear_alloc_spaces_data_) {
