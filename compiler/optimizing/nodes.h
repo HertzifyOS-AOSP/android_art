@@ -90,12 +90,6 @@ namespace mirror {
 class DexCache;
 }  // namespace mirror
 
-static const int kDefaultNumberOfBlocks = 8;
-static const int kDefaultNumberOfSuccessors = 2;
-static const int kDefaultNumberOfPredecessors = 2;
-static const int kDefaultNumberOfExceptionalPredecessors = 0;
-static const int kDefaultNumberOfDominatedBlocks = 1;
-
 // The maximum (meaningful) distance (31) that can be used in an integer shift/rotate operation.
 static constexpr int32_t kMaxIntShiftDistance = 0x1f;
 // The maximum (meaningful) distance (63) that can be used in a long shift/rotate operation.
@@ -103,8 +97,6 @@ static constexpr int32_t kMaxLongShiftDistance = 0x3f;
 
 static constexpr uint32_t kUnknownFieldIndex = static_cast<uint32_t>(-1);
 static constexpr uint16_t kUnknownClassDefIndex = static_cast<uint16_t>(-1);
-
-static constexpr InvokeType kInvalidInvokeType = static_cast<InvokeType>(-1);
 
 static constexpr uint32_t kNoDexPc = -1;
 
@@ -163,7 +155,7 @@ class HGraph : public ArenaObject<kArenaAllocGraph> {
          const DexFile& dex_file,
          uint32_t method_idx,
          InstructionSet instruction_set,
-         InvokeType invoke_type = kInvalidInvokeType,
+         InvokeType invoke_type,
          bool dead_reference_safe = false,
          bool debuggable = false,
          CompilationKind compilation_kind = CompilationKind::kOptimized,
@@ -495,6 +487,8 @@ class HGraph : public ArenaObject<kArenaAllocGraph> {
   bool IsUsefulOptimizing() const { return useful_optimizing_; }
 
  private:
+  static const size_t kDefaultNumberOfBlocks = 8u;
+
   void RemoveDeadBlocksInstructionsAsUsersAndDisconnect(BitVectorView<const size_t> visited) const;
   void RemoveDeadBlocks(BitVectorView<const size_t> visited);
 
@@ -1008,6 +1002,10 @@ class HBasicBlock final : public ArenaObject<kArenaAllocBasicBlock> {
   bool HasSinglePhi() const;
 
  private:
+  static const size_t kDefaultNumberOfSuccessors = 2u;
+  static const size_t kDefaultNumberOfPredecessors = 2u;
+  static const size_t kDefaultNumberOfDominatedBlocks = 1u;
+
   HBasicBlock(ArenaAllocator* allocator, HGraph* graph, uint32_t dex_pc)
       : graph_(graph),
         predecessors_(allocator->Adapter(kArenaAllocPredecessors)),

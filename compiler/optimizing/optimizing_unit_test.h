@@ -248,8 +248,8 @@ class OptimizingUnitTestHelper {
         std::make_shared<MemoryDexFileContainer>(dex_data, sizeof(StandardDexFile::Header));
     dex_files_.emplace_back(new StandardDexFile(dex_data,
                                                 "no_location",
-                                                /*location_checksum*/ 0,
-                                                /*oat_dex_file*/ nullptr,
+                                                /*location_checksum=*/ 0,
+                                                /*oat_dex_file=*/ nullptr,
                                                 std::move(container)));
 
     graph_ = new (allocator) HGraph(
@@ -257,8 +257,9 @@ class OptimizingUnitTestHelper {
         pool_and_allocator_->GetArenaStack(),
         handles,
         *dex_files_.back(),
-        /*method_idx*/-1,
-        kRuntimeISA);
+        /*method_idx=*/ -1,
+        kRuntimeISA,
+        kInvalidInvokeType);
     return graph_;
   }
 
@@ -999,6 +1000,8 @@ class OptimizingUnitTestHelper {
   }
 
  protected:
+  static constexpr InvokeType kInvalidInvokeType = static_cast<InvokeType>(-1);
+
   bool CheckGraph(HGraph* graph, std::ostream& oss) {
     GraphChecker checker(graph);
     checker.Run();
