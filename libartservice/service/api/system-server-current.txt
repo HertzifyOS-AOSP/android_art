@@ -70,6 +70,8 @@ package com.android.server.art {
   }
 
   public class ReasonMapping {
+    method @FlaggedApi("com.android.art.flags.updatable_filter_and_reason") public static int getCompilationReasonValueForFrameworkStatsReporting(@NonNull String);
+    method @FlaggedApi("com.android.art.flags.updatable_filter_and_reason") public static int getCompilerFilterValueForFrameworkStatsReporting(@NonNull String);
     field public static final String REASON_BG_DEXOPT = "bg-dexopt";
     field public static final String REASON_BOOT_AFTER_MAINLINE_UPDATE = "boot-after-mainline-update";
     field public static final String REASON_BOOT_AFTER_OTA = "boot-after-ota";
