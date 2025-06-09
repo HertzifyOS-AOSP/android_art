@@ -34,6 +34,7 @@ import android.os.UserHandle;
 import androidx.annotation.RequiresApi;
 
 import com.android.internal.annotations.VisibleForTesting;
+import com.android.modules.utils.build.SdkLevel;
 import com.android.modules.utils.pm.PackageStateModulesUtils;
 import com.android.server.art.model.ArtFlags;
 import com.android.server.art.model.Config;
@@ -181,7 +182,7 @@ public class PrimaryDexopter extends Dexopter<DetailedPrimaryDexInfo> {
 
     @Override
     protected void onDexoptStart(@NonNull DetailedPrimaryDexInfo dexInfo) throws RemoteException {
-        if (!mInjector.isPreReboot() && android.content.pm.Flags.cloudCompilationPm()) {
+        if (!mInjector.isPreReboot() && SdkLevel.isAtLeastB()) {
             boolean isInDalvikCache = isInDalvikCache();
             for (Abi abi : getAllAbis(dexInfo)) {
                 maybeCreateSdc(dexInfo, abi.isa(), isInDalvikCache);
