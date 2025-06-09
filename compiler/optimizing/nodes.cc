@@ -116,8 +116,8 @@ void HGraph::FindBackEdges(/*out*/ BitVectorView<size_t> visited) {
 }
 
 // Remove the environment use records of the instruction for users.
-void RemoveEnvironmentUses(HInstruction* instruction) {
-  for (HEnvironment* environment = instruction->GetEnvironment();
+void HInstruction::RemoveEnvironmentUses() {
+  for (HEnvironment* environment = GetEnvironment();
        environment != nullptr;
        environment = environment->GetParent()) {
     for (size_t i = 0, e = environment->Size(); i < e; ++i) {
@@ -157,11 +157,6 @@ void ResetEnvironmentInputRecords(HInstruction* instruction) {
   }
 }
 
-static void RemoveAsUser(HInstruction* instruction) {
-  instruction->RemoveAsUserOfAllInputs();
-  RemoveEnvironmentUses(instruction);
-}
-
 void HGraph::RemoveDeadBlocksInstructionsAsUsersAndDisconnect(
     BitVectorView<const size_t> visited) const {
   for (size_t i = 0; i < blocks_.size(); ++i) {
@@ -171,11 +166,11 @@ void HGraph::RemoveDeadBlocksInstructionsAsUsersAndDisconnect(
 
       // Remove as user.
       for (HInstructionIteratorPrefetchNext it(block->GetPhis()); !it.Done(); it.Advance()) {
-        RemoveAsUser(it.Current());
+        it.Current()->RemoveAsUser();
       }
       for (HInstructionIteratorPrefetchNext it(block->GetInstructions()); !it.Done();
            it.Advance()) {
-        RemoveAsUser(it.Current());
+        it.Current()->RemoveAsUser();
       }
 
       // Remove non-catch phi uses, and disconnect the block.
@@ -954,7 +949,7 @@ static void Remove(HInstructionList* instruction_list,
   if (ensure_safety) {
     DCHECK(instruction->GetUses().empty());
     DCHECK(instruction->GetEnvUses().empty());
-    RemoveAsUser(instruction);
+    instruction->RemoveAsUser();
   }
 }
 
@@ -1150,7 +1145,7 @@ bool HInstruction::StrictlyDominates(HInstruction* other_instruction) const {
 }
 
 void HInstruction::RemoveEnvironment() {
-  RemoveEnvironmentUses(this);
+  RemoveEnvironmentUses();
   environment_ = nullptr;
 }
 

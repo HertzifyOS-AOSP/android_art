@@ -2049,6 +2049,13 @@ class HInstruction : public ArenaObject<kArenaAllocInstruction> {
     }
   }
 
+  void RemoveAsUser() {
+    RemoveAsUserOfAllInputs();
+    RemoveEnvironmentUses();
+  }
+
+  void RemoveEnvironmentUses();
+
   const HUseList<HInstruction*>& GetUses() const { return uses_; }
   const HUseList<HEnvironment*>& GetEnvUses() const { return env_uses_; }
 
@@ -8365,7 +8372,6 @@ inline bool IsAddOrSub(const HInstruction* instruction) {
   return instruction->IsAdd() || instruction->IsSub();
 }
 
-void RemoveEnvironmentUses(HInstruction* instruction);
 bool HasEnvironmentUsedByOthers(HInstruction* instruction);
 void ResetEnvironmentInputRecords(HInstruction* instruction);
 
