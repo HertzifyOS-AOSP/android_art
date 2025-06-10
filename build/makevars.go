@@ -75,7 +75,7 @@ func makeVarsProvider(ctx android.MakeVarsContext) {
 	ctx.Strict("ART_TESTCASES_CONTENT", strings.Join(copy_cmds, " "))
 
 	// Add prebuilt tools.
-	clang_path := filepath.Join(config.ClangDefaultBase, ctx.Config().PrebuiltOS(), config.ClangDefaultVersion)
+	clang_path := filepath.Join(config.ClangDefaultBase, ctx.Config().PrebuiltOS(), config.ClangVersion(ctx))
 	copy_cmds = []string{}
 	for _, tool := range prebuiltToolsForTests {
 		src := filepath.Join(clang_path, "/", tool)
