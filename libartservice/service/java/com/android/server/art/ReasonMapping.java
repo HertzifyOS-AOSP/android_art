@@ -18,6 +18,7 @@ package com.android.server.art;
 
 import static com.android.server.art.model.ArtFlags.PriorityClassApi;
 
+import android.annotation.FlaggedApi;
 import android.annotation.NonNull;
 import android.annotation.StringDef;
 import android.annotation.SystemApi;
@@ -27,6 +28,7 @@ import android.text.TextUtils;
 
 import androidx.annotation.RequiresApi;
 
+import com.android.art.flags.Flags;
 import com.android.server.art.model.ArtFlags;
 import com.android.server.pm.PackageManagerLocal;
 
