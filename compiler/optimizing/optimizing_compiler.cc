@@ -70,6 +70,8 @@ static constexpr size_t kArenaAllocatorMemoryReportThreshold = 8 * MB;
 
 static constexpr const char* kPassNameSeparator = "$";
 
+static constexpr InvokeType kInvalidInvokeType = static_cast<InvokeType>(-1);
+
 /**
  * Filter to apply to the visualizer. Methods whose name contain that filter will
  * be dumped.

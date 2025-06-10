@@ -158,6 +158,7 @@ art_cc_defaults {
         "optimizing/data_type.cc",
         "optimizing/dead_code_elimination.cc",
         "optimizing/escape.cc",
+        "optimizing/graph.cc",
         "optimizing/graph_checker.cc",
         "optimizing/graph_visualizer.cc",
         "optimizing/gvn.cc",
@@ -302,6 +303,7 @@ gensrcs {
     tools: ["generate_operator_out"],
     srcs: [
         "linker/linker_patch.h",
+        "optimizing/graph.h",
         "optimizing/locations.h",
         "optimizing/nodes.h",
         "optimizing/optimizing_compiler_stats.h",

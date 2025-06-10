@@ -26,19 +26,65 @@ from typing import Callable, Dict, List, Optional
 I18N_APEX = "com.android.i18n"
 TZDATA_APEX = "com.android.tzdata"
 CORE_IMG_JARS: List[str] = [
-    'core-oj',
-    'core-libart',
-    'okhttp',
-    'bouncycastle',
-    'apache-xml',
+    "core-oj",
+    "core-libart",
+    "okhttp",
+    "bouncycastle",
+    "apache-xml",
 ]
 HOSTDEX_JARS: List[tuple[str, str]] = [
     ("com.android.conscrypt", "conscrypt"),
     ("com.android.i18n", "core-icu4j"),
 ]
-
+ART_CORE_EXECUTABLES: List[str] = [
+    "dalvikvm",
+    "dexlist",
+]
+ART_CORE_DEBUGGABLE_EXECUTABLES_COMMON: List[str] = [
+    "dex2oat",
+    "dexoptanalyzer",
+    "imgdiag",
+    "oatdump",
+    "profman",
+]
+ART_CORE_DEBUGGABLE_EXECUTABLES_HOST: List[str] = (
+    ART_CORE_DEBUGGABLE_EXECUTABLES_COMMON
+)
+ART_CORE_SHARED_LIBRARIES: List[str] = [
+    "libjavacore",
+    "libopenjdk",
+    "libopenjdkjvm",
+    "libopenjdkjvmti",
+    "libjdwp",
+]
+ART_CORE_SHARED_DEBUG_LIBRARIES: List[str] = [
+    "libopenjdkd",
+    "libopenjdkjvmd",
+    "libopenjdkjvmtid",
+]
+ART_HOST_CORE_SHARED_LIBRARIES: List[str] = ART_CORE_SHARED_LIBRARIES + [
+    "libicuuc-host",
+    "libicui18n-host",
+    "libicu_jni",
+]
 # Define a more specific type for build variables, which are strings.
 BuildVarsDict = Dict[str, str]
+# A list of build variables that are essential for this script.
+# The script will exit if these variables are not found or are empty.
+REQUIRED_BUILD_VARS: List[str] = [
+    "OUT_DIR",
+    "HOST_OUT",
+    "HOST_OUT_JAVA_LIBRARIES",
+    "HOST_OUT_SHARED_LIBRARIES",
+    "TARGET_OUT",
+    "TARGET_ARCH",
+]
+# A list of optional build variables. These are retrieved but not required
+# to be present in the build environment.
+OPTIONAL_BUILD_VARS: List[str] = [
+    "HOST_2ND_ARCH",
+    "2ND_HOST_OUT_SHARED_LIBRARIES",
+]
 
 
 def run_subprocess(
@@ -50,12 +96,12 @@ def run_subprocess(
     """Runs a subprocess command (always with shell=False). Exits on failure.
 
     Args:
-        command: The command to execute as a list of strings. The first
-                 element is the program, subsequent are arguments.
+        command: The command to execute as a list of strings. The first element
+          is the program, subsequent are arguments.
         cwd: The current working directory for the subprocess.
         env: Environment variables to set for the subprocess.
         capture_stdout: If True, stdout will be captured. stderr passes through.
-                        Defaults to False (both stdout/stderr pass through).
+          Defaults to False (both stdout/stderr pass through).
     """
     current_env = os.environ.copy()
     if env:
@@ -89,7 +135,9 @@ def run_subprocess(
             print("  (Stderr from the subprocess should have already printed")
             print("   to the console above.)")
         else:
-            print("  (Stdout and stderr from the subprocess should have already")
+            print(
+                "  (Stdout and stderr from the subprocess should have already"
+            )
             print("   printed to the console above.)")
         sys.exit(1)
     except Exception as e:
@@ -97,10 +145,9 @@ def run_subprocess(
         sys.exit(1)
 
 
-def _build_dumpvars_command(
-    vars_to_get: List[str]
-) -> List[str]:
+def _build_dumpvars_command(vars_to_get: List[str]) -> List[str]:
     """Constructs the command list for soong_ui.bash --dumpvars-mode.
+
     Assumes CWD is the Android root.
     """
     soong_ui_path: str = "build/soong/soong_ui.bash"
@@ -110,7 +157,7 @@ def _build_dumpvars_command(
     command_list: List[str] = [
         soong_ui_path,
         "--dumpvars-mode",
-        f"--vars={vars_string}"
+        f"--vars={vars_string}",
     ]
     return command_list
 
@@ -148,39 +195,40 @@ def _parse_dumpvars_output(output_string: str) -> BuildVarsDict:
         else:
             # Lines without '=' are unexpected for variable output, might be
             # warnings/info from the build system itself.
-            print(f"Error: Unparseable line from dumpvars output: "
-                  f"'{line}'")
+            print(f"Error: Unparseable line from dumpvars output: '{line}'")
             sys.exit(1)
 
     return parsed_vars
 
 
-def get_android_build_vars(
-    vars_to_get: List[str]
-) -> BuildVarsDict:
-    """Dumps specified variables from the Android build system.
-    Assumes CWD is already the Android root and necessary TARGET_* env vars
-    are set.
+def get_android_build_vars() -> BuildVarsDict:
+    """Dumps variables from the Android build system.
+
+    Retrieves variables defined in the global REQUIRED_BUILD_VARS and
+    OPTIONAL_BUILD_VARS, and validates that the required ones are present.
+    Assumes CWD is already the Android root and necessary TARGET_* env vars are
+    set.
     """
-    command_list = _build_dumpvars_command(vars_to_get=vars_to_get)
-
-    print(f"Executing build variable retrieval command in Android root "
-          f"({os.getcwd()}):")
-    print(f"  $ {shlex.join(command_list)}")
-
-    process_result = run_subprocess(
-        command_list,
-        capture_stdout=True
+    command_list = _build_dumpvars_command(
+        vars_to_get=REQUIRED_BUILD_VARS + OPTIONAL_BUILD_VARS
     )
 
-    parsed_vars: BuildVarsDict = _parse_dumpvars_output(
-        process_result.stdout)
+    print(
+        "Executing build variable retrieval command in Android root "
+        f"({os.getcwd()}):"
+    )
+    print(f"  $ {shlex.join(command_list)}")
 
-    for var_name in vars_to_get:
+    process_result = run_subprocess(command_list, capture_stdout=True)
+    parsed_vars: BuildVarsDict = _parse_dumpvars_output(process_result.stdout)
+
+    for var_name in REQUIRED_BUILD_VARS:
         if var_name not in parsed_vars or not parsed_vars.get(var_name):
-            print(f"Error: Essential variable '{var_name}' not found or "
-                  "empty in retrieved build variables. This indicates a "
-                  "problem with the build setup or dumpvars output.")
+            print(
+                f"Error: Essential variable '{var_name}' not found or "
+                "empty in retrieved build variables. This indicates a "
+                "problem with the build setup or dumpvars output."
+            )
             print("\nRetrieved Variables:")
             for k, v in parsed_vars.items():
                 print(f"  {k}='{v}'")
@@ -203,8 +251,7 @@ def extract_from_apex(apex_name: str, build_vars: BuildVarsDict):
         apex_input_file = os.path.join(apex_root, f"{apex_name}.capex")
 
     if not os.path.exists(apex_input_file):
-        print(f"Error: APEX file for '{apex_name}' not found in "
-              f"'{apex_root}'.")
+        print(f"Error: APEX file for '{apex_name}' not found in '{apex_root}'.")
         sys.exit(1)
 
     shutil.rmtree(apex_out_dir, ignore_errors=True)
@@ -216,8 +263,10 @@ def extract_from_apex(apex_name: str, build_vars: BuildVarsDict):
 
     deapexer_command = [
         deapexer_path,
-        "--debugfs_path", debugfs_path,
-        "--fsckerofs_path", fsckerofs_path,
+        "--debugfs_path",
+        debugfs_path,
+        "--fsckerofs_path",
+        fsckerofs_path,
         "extract",
         apex_input_file,
         apex_out_dir,
@@ -237,8 +286,8 @@ def extract_from_apex(apex_name: str, build_vars: BuildVarsDict):
 
 
 def perform_copy(source_path: str, target_path: str) -> None:
-    """
-    Performs a single file copy operation. Overwrites target.
+    """Performs a single file copy operation. Overwrites target.
+
     Exits the script with status 1 if any error occurs.
 
     Args:
@@ -250,8 +299,10 @@ def perform_copy(source_path: str, target_path: str) -> None:
     """
     try:
         if not os.path.exists(source_path):
-            print(f"  ERROR: Source file not found! ({source_path})",
-                  file=sys.stderr)
+            print(
+                f"  ERROR: Source file not found! ({source_path})",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
         target_dir: str = os.path.dirname(target_path)
@@ -260,8 +311,10 @@ def perform_copy(source_path: str, target_path: str) -> None:
         shutil.copy(source_path, target_path)
 
     except Exception as e:
-        err_msg = (f"  ERROR: An unexpected error occurred during copy "
-                   f"({source_path} -> {target_path}): {e}")
+        err_msg = (
+            "  ERROR: An unexpected error occurred during copy "
+            f"({source_path} -> {target_path}): {e}"
+        )
         print(err_msg, file=sys.stderr)
         sys.exit(1)
 
@@ -279,8 +332,8 @@ def host_tzdata_data_action(build_vars: BuildVarsDict):
 def _get_core_img_jar_source_path(
     build_vars: BuildVarsDict, jar_basename: str
 ) -> str:
-    """
-    Returns the full source path for a given core image JAR.
+    """Returns the full source path for a given core image JAR.
+
     This path is where the build system places JARs for dexpreopting.
     """
     out_dir = build_vars.get("OUT_DIR")
@@ -288,7 +341,7 @@ def _get_core_img_jar_source_path(
     # Path corresponds to art/build/Android.common_path.mk variable
     # CORE_IMG_JAR_DIR.
     core_img_jar_dir = os.path.join(
-        out_dir, 'soong', f'dexpreopt_{target_arch}', 'dex_artjars_input'
+        out_dir, "soong", f"dexpreopt_{target_arch}", "dex_artjars_input"
     )
     return os.path.join(core_img_jar_dir, f"{jar_basename}.jar")
 
@@ -304,13 +357,11 @@ def _get_hostdex_jar_source_path(
 def copy_core_img_jars_action(build_vars: BuildVarsDict):
     """Copies JARs listed in the global CORE_IMG_JARS."""
     target_base_dir = os.path.join(
-        build_vars.get("HOST_OUT"), 'apex/com.android.art/javalib'
+        build_vars.get("HOST_OUT"), "apex/com.android.art/javalib"
     )
 
     for jar_base_name in CORE_IMG_JARS:
-        source: str = _get_core_img_jar_source_path(
-            build_vars, jar_base_name
-        )
+        source: str = _get_core_img_jar_source_path(build_vars, jar_base_name)
         target: str = os.path.join(target_base_dir, f"{jar_base_name}.jar")
         perform_copy(source, target)
 
@@ -324,13 +375,14 @@ def copy_hostdex_jars_action(build_vars: BuildVarsDict):
     for apex_name, jar_basename in HOSTDEX_JARS:
         source = _get_hostdex_jar_source_path(build_vars, jar_basename)
         target = os.path.join(
-            host_out, f'apex/{apex_name}/javalib/{jar_basename}.jar')
+            host_out, f"apex/{apex_name}/javalib/{jar_basename}.jar"
+        )
         perform_copy(source, target)
 
 
 def copy_all_host_boot_image_jars_action(build_vars: BuildVarsDict):
-    """
-    Composite action to copy all necessary JARs for the host boot image.
+    """Composite action to copy all necessary JARs for the host boot image.
+
     This includes CORE_IMG_JARS, conscrypt, and i18n JARs.
     """
     copy_core_img_jars_action(build_vars)
@@ -343,14 +395,18 @@ class Target:
     Attributes:
         name: The unique identifier for this internal target.
         make_targets: List of actual Soong/Make targets required by this target.
-        dependencies: List of names of other internal Targets this one depends on.
+        dependencies: List of names of other internal Targets this one depends
+          on.
         action: An optional function to execute after make_targets are built.
     """
 
-    def __init__(self, name: str,
-                 make_targets: Optional[List[str]] = None,
-                 dependencies: Optional[List[str]] = None,
-                 action: Optional[Callable] = None):
+    def __init__(
+        self,
+        name: str,
+        make_targets: Optional[List[str]] = None,
+        dependencies: Optional[List[str]] = None,
+        action: Optional[Callable] = None,
+    ):
         """Initializes a Target."""
         self.name = name
         self.make_targets = make_targets or []
@@ -373,11 +429,133 @@ class Builder:
         self.positional_make_targets: List[str] = []
         self.build_vars: Optional[BuildVarsDict] = None
 
-    def _get_copy_core_img_make_targets(self) -> List[str]:
+    def _get_art_host_executables_make_targets(self) -> List[str]:
+        """Generates the list of make_targets for ART_HOST_EXECUTABLES."""
+        make_targets: List[str] = []
+
+        art_build_host_ndebug: bool = (
+            os.environ.get("ART_BUILD_HOST_NDEBUG", "true") != "false"
+        )
+        art_build_host_debug: bool = (
+            os.environ.get("ART_BUILD_HOST_DEBUG", "true") != "false"
+        )
+
+        # ART_HOST_EXECUTABLES
+        if art_build_host_ndebug:
+            # Names for non-debug host executables
+            execs_for_ndebug: List[str] = (
+                ART_CORE_EXECUTABLES + ART_CORE_DEBUGGABLE_EXECUTABLES_HOST
+            )
+            for name in execs_for_ndebug:
+                make_targets.append(f"{name}-host")
+
+        if art_build_host_debug:
+            # Names for debug host executables
+            for name in ART_CORE_DEBUGGABLE_EXECUTABLES_HOST:
+                make_targets.append(f"{name}d-host")
+
+        return list(set(make_targets))
+
+    def _get_art_host_dex_dependencies_make_targets(self) -> List[str]:
+        """Generates the list of make_targets for ART_HOST_DEX_DEPENDENCIES."""
+        host_out_java_libs: str = self.build_vars["HOST_OUT_JAVA_LIBRARIES"]
+        make_targets: List[str] = []
+
+        # HOST_TEST_CORE_JARS :=
+        # $(addsuffix -hostdex, $(CORE_IMG_JARS) core-icu4j conscrypt)
+        host_test_core_jars_base_names: List[str] = CORE_IMG_JARS + [
+            name for _, name in HOSTDEX_JARS
+        ]
+        host_test_core_jars: List[str] = [
+            f"{name}-hostdex" for name in host_test_core_jars_base_names
+        ]
+
+        # ART_HOST_DEX_DEPENDENCIES :=
+        # $(foreach jar,$(HOST_TEST_CORE_JARS),$(HOST_OUT_JAVA_LIBRARIES)/$(jar).jar)
+        for jar_name in host_test_core_jars:
+            full_jar_path: str = os.path.join(
+                host_out_java_libs, f"{jar_name}.jar"
+            )
+            make_targets.append(full_jar_path)
+
+        return make_targets
+
+    def _get_art_host_shared_library_dependencies(
+        self,
+    ) -> tuple[List[str], List[str]]:
+        """Generates make_targets for host shared libraries.
+
+        Considers HOST_PREFER_32_BIT and returns both non-debug and debug
+        libraries.
+
+        Returns:
+            A tuple containing two lists of strings:
+            (non_debug_make_targets, debug_make_targets)
         """
-        Generates the list of make_targets (file paths) for CORE_IMG_JARS.
-        These are the source JARs that the copy_core_img_jars_action will
-        copy. Relies on self.build_vars having been set.
+        make_targets: List[str] = []
+        make_targets_debug: List[str] = []
+
+        host_out_shared_libs: str = self.build_vars["HOST_OUT_SHARED_LIBRARIES"]
+        second_host_out_shared_libs: str = self.build_vars.get(
+            "2ND_HOST_OUT_SHARED_LIBRARIES"
+        )
+        actual_host_2nd_arch: Optional[str] = self.build_vars.get(
+            "HOST_2ND_ARCH"
+        )
+
+        host_prefer_32_bit_env: str = os.environ.get("HOST_PREFER_32_BIT", "")
+        host_prefer_32_bit: bool = host_prefer_32_bit_env == "true"
+
+        primary_libs_path: Optional[str]
+        if host_prefer_32_bit:
+            primary_libs_path = second_host_out_shared_libs
+            if not primary_libs_path:
+                print(
+                    "Error: HOST_PREFER_32_BIT=true but "
+                    "2ND_HOST_OUT_SHARED_LIBRARIES is not set.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+        else:
+            primary_libs_path = host_out_shared_libs
+
+        # Non-debug libraries
+        make_targets.extend(
+            os.path.join(primary_libs_path, f"{name}.so")
+            for name in ART_HOST_CORE_SHARED_LIBRARIES
+        )
+        # Debug libraries
+        make_targets_debug.extend(
+            os.path.join(primary_libs_path, f"{name}.so")
+            for name in ART_CORE_SHARED_DEBUG_LIBRARIES
+        )
+
+        if actual_host_2nd_arch:
+            if not second_host_out_shared_libs:
+                err_msg = (
+                    f"Error: HOST_2ND_ARCH ('{actual_host_2nd_arch}') is set, "
+                    "but 2ND_HOST_OUT_SHARED_LIBRARIES is missing."
+                )
+                print(err_msg, file=sys.stderr)
+                sys.exit(1)
+
+            # Non-debug 2nd arch libraries
+            make_targets.extend(
+                os.path.join(second_host_out_shared_libs, f"{name}.so")
+                for name in ART_HOST_CORE_SHARED_LIBRARIES
+            )
+            # Debug 2nd arch libraries
+            make_targets_debug.extend(
+                os.path.join(second_host_out_shared_libs, f"{name}.so")
+                for name in ART_CORE_SHARED_DEBUG_LIBRARIES
+            )
+
+        return list(set(make_targets)), list(set(make_targets_debug))
+
+    def _get_copy_core_img_make_targets(self) -> List[str]:
+        """Generates the list of make_targets (file paths) for CORE_IMG_JARS.
+
+        These are the source JARs that the copy_core_img_jars_action will copy.
         """
         make_targets = []
         for jar_base_name in CORE_IMG_JARS:
@@ -391,13 +569,34 @@ class Builder:
         """Defines built-in targets using build_vars and stores build_vars."""
         self.build_vars = build_vars
 
-        # These test_* lists are placeholders; actual dependencies might differ.
-        test_art_host_deps = ["dalvikvm", "dexlist"]
-        test_art_target_deps = [
-            "com.android.art.testing", "com.android.conscrypt",
-            "com.android.i18n"
-        ]
-        test_target_core_img_outs = ["core-oj", "core-libart"]
+        # ART_HOST_DEPENDENCIES
+        all_art_host_deps_make_targets = []
+        all_art_host_deps_make_targets.extend(
+            # ART_HOST_EXECUTABLES
+            self._get_art_host_executables_make_targets()
+        )
+        all_art_host_deps_make_targets.extend(
+            # ART_HOST_DEX_DEPENDENCIES
+            self._get_art_host_dex_dependencies_make_targets()
+        )
+        # Get both non-debug and debug shared library dependencies
+        (
+            shared_libs,
+            debug_libs,
+        ) = self._get_art_host_shared_library_dependencies()
+        all_art_host_deps_make_targets.extend(shared_libs)
+        # Conditionally add debug dependencies.
+        art_build_host_debug: bool = (
+            os.environ.get("ART_BUILD_HOST_DEBUG", "true") != "false"
+        )
+        if art_build_host_debug:
+            all_art_host_deps_make_targets.extend(debug_libs)
+        self.add_target(
+            Target(
+                name="art_host_dependencies",
+                make_targets=list(set(all_art_host_deps_make_targets)),
+            )
+        )
 
         # HOST_CORE_IMG_OUTS
         copy_core_img_make_targets = self._get_copy_core_img_make_targets()
@@ -405,54 +604,70 @@ class Builder:
             _get_hostdex_jar_source_path(self.build_vars, basename)
             for _, basename in HOSTDEX_JARS
         ]
-        all_boot_image_make_targets = (copy_core_img_make_targets +
-                                       hostdex_jar_make_targets)
-        self.add_target(Target(
-            name="host_core_img_outs",
-            action=copy_all_host_boot_image_jars_action,
-            make_targets=all_boot_image_make_targets,
-        ))
+        all_boot_image_make_targets = (
+            copy_core_img_make_targets + hostdex_jar_make_targets
+        )
+        self.add_target(
+            Target(
+                name="host_core_img_outs",
+                action=copy_all_host_boot_image_jars_action,
+                make_targets=all_boot_image_make_targets,
+            )
+        )
         # HOST_I18N_DATA
-        self.add_target(Target(
-            name="extract-host-i18n-data",
-            action=host_i18n_data_action,
-            make_targets=[I18N_APEX, "deapexer", "debugfs", "fsck.erofs"],
-        ))
+        self.add_target(
+            Target(
+                name="extract-host-i18n-data",
+                action=host_i18n_data_action,
+                make_targets=[I18N_APEX, "deapexer", "debugfs", "fsck.erofs"],
+            )
+        )
         # HOST_TZDATA_DATA
-        self.add_target(Target(
-            name="extract-host-tzdata-data",
-            action=host_tzdata_data_action,
-            make_targets=[TZDATA_APEX, "deapexer", "debugfs", "fsck.erofs"],
-        ))
-        self.add_target(Target(
-            name="build-art-host",
-            make_targets=(
-                ["art-script"] + test_art_host_deps
-            ),
-            dependencies=[
-                "host_core_img_outs",
-                "extract-host-i18n-data",
-                "extract-host-tzdata-data",
-            ],
-        ))
+        self.add_target(
+            Target(
+                name="extract-host-tzdata-data",
+                action=host_tzdata_data_action,
+                make_targets=[TZDATA_APEX, "deapexer", "debugfs", "fsck.erofs"],
+            )
+        )
+        self.add_target(
+            Target(
+                name="build-art-host",
+                make_targets=["art-script"],
+                dependencies=[
+                    "art_host_dependencies",
+                    "host_core_img_outs",
+                    "extract-host-i18n-data",
+                    "extract-host-tzdata-data",
+                ],
+            )
+        )
         # build-art-host-gtests depends on build-art-host  and
         #    $(ART_TEST_HOST_GTEST_DEPENDENCIES)
         # ART_TEST_HOST_GTEST_DEPENDENCIES := $(HOST_I18N_DATA)
-        self.add_target(Target(
-            name="build-art-host-gtests",
-            dependencies=["build-art-host", "extract-host-i18n-data"],
-        ))
-        self.add_target(Target(
-            name="build-art-target",
-            make_targets=(
-                ["art-script"] + test_art_target_deps
-                + test_target_core_img_outs
-            ),
-        ))
-        self.add_target(Target(
-            name="build-art",
-            dependencies=["build-art-host", "build-art-target"],
-        ))
+        self.add_target(
+            Target(
+                name="build-art-host-gtests",
+                dependencies=["build-art-host", "extract-host-i18n-data"],
+            )
+        )
+        self.add_target(
+            Target(
+                name="build-art-target",
+                make_targets=([
+                    "art-script",
+                    "com.android.art.testing",
+                    "com.android.conscrypt",
+                    "com.android.i18n",
+                ]),
+            )
+        )
+        self.add_target(
+            Target(
+                name="build-art",
+                dependencies=["build-art-host", "build-art-target"],
+            )
+        )
 
     def add_target(self, target: Target):
         """Adds or updates an internal target definition.
@@ -465,12 +680,14 @@ class Builder:
             sys.exit(1)
         self.targets[target.name] = target
 
-    def _collect_recursive(self,
-                           target_name: str,
-                           collected_make_targets: List[str],
-                           collected_actions: List[Target],
-                           recursion_stack: set[str],
-                           processed_nodes: set[str]):
+    def _collect_recursive(
+        self,
+        target_name: str,
+        collected_make_targets: List[str],
+        collected_actions: List[Target],
+        recursion_stack: set[str],
+        processed_nodes: set[str],
+    ):
         """Recursively collects dependencies, detecting cycles.
 
         Internal helper for collect_targets. Modifies lists in place.
@@ -478,12 +695,13 @@ class Builder:
         Args:
             target_name: The name of the internal target to collect.
             collected_make_targets: List to store collected make targets.
-            collected_actions: List to store collected Target objects with actions.
+            collected_actions: List to store collected Target objects with
+              actions.
             recursion_stack: A set of targets in the current traversal path,
-                             used to detect actual cycles.
+              used to detect actual cycles.
             processed_nodes: A set of targets that have already been fully
-                             processed, used to handle shared dependencies
-                             (like diamond dependencies) efficiently.
+              processed, used to handle shared dependencies (like diamond
+              dependencies) efficiently.
         """
         if target_name in processed_nodes:
             return
@@ -491,15 +709,19 @@ class Builder:
         # If we encounter a node that is already in our current recursion
         # stack, we have found a genuine cycle.
         if target_name in recursion_stack:
-            print(f"Error: Cycle detected in internal target dependencies "
-                  f"involving '{target_name}'.")
+            print(
+                "Error: Cycle detected in internal target dependencies "
+                f"involving '{target_name}'."
+            )
             sys.exit(1)
 
         if target_name not in self.targets:
-            print(f"Error: Definition error - Internal target '{target_name}' "
-                  "(specified as a dependency for another internal target) "
-                  "was not found in the defined internal targets"
-                  f" {self.targets}.")
+            print(
+                f"Error: Definition error - Internal target '{target_name}' "
+                "(specified as a dependency for another internal target) "
+                "was not found in the defined internal targets"
+                f" {self.targets}."
+            )
             sys.exit(1)
 
         # Add the current target to the recursion stack for this path.
@@ -508,8 +730,11 @@ class Builder:
 
         for dependency_name in target.dependencies:
             self._collect_recursive(
-                dependency_name, collected_make_targets, collected_actions,
-                recursion_stack, processed_nodes
+                dependency_name,
+                collected_make_targets,
+                collected_actions,
+                recursion_stack,
+                processed_nodes,
             )
 
         # After traversing all children, remove from the recursion stack and
@@ -522,11 +747,13 @@ class Builder:
         if target.action:
             collected_actions.append(target)
 
-    def collect_targets(self,
-                        target_name: str,
-                        collected_make_targets: List[str],
-                        collected_actions: List[Target],
-                        processed_nodes: set[str]):
+    def collect_targets(
+        self,
+        target_name: str,
+        collected_make_targets: List[str],
+        collected_actions: List[Target],
+        processed_nodes: set[str],
+    ):
         """Collects make targets and actions for an internal target.
 
         Handles the top-level call for recursive collection.
@@ -534,21 +761,28 @@ class Builder:
         Args:
             target_name: The name of the internal target to collect.
             collected_make_targets: List to store collected make targets.
-            collected_actions: List to store collected Target objects with actions.
+            collected_actions: List to store collected Target objects with
+              actions.
             processed_nodes: A set of targets already processed in this build.
         """
         # The recursion stack is specific to each top-level traversal.
         recursion_stack = set()
-        self._collect_recursive(target_name, collected_make_targets,
-                                collected_actions, recursion_stack,
-                                processed_nodes)
+        self._collect_recursive(
+            target_name,
+            collected_make_targets,
+            collected_actions,
+            recursion_stack,
+            processed_nodes,
+        )
 
     def build(self):
         """Builds targets based on enabled internal and positional targets."""
         if self.build_vars is None:
-            print("Error: build_vars not set in Builder. "
-                  "setup_default_targets must be called first.",
-                  file=sys.stderr)
+            print(
+                "Error: build_vars not set in Builder. "
+                "setup_default_targets must be called first.",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
         all_make_targets: List[str] = []
@@ -559,14 +793,18 @@ class Builder:
 
         for internal_target_name in self.enabled_internal_targets:
             if internal_target_name in self.targets:
-                self.collect_targets(internal_target_name,
-                                     all_make_targets,
-                                     all_actions,
-                                     processed_nodes_for_build)
+                self.collect_targets(
+                    internal_target_name,
+                    all_make_targets,
+                    all_actions,
+                    processed_nodes_for_build,
+                )
             else:
-                print(f"Error: Enabled internal target "
-                      f"'{internal_target_name}' not found in definitions. "
-                      "Exiting.")
+                print(
+                    "Error: Enabled internal target "
+                    f"'{internal_target_name}' not found in definitions. "
+                    "Exiting."
+                )
                 sys.exit(1)
 
         if self.positional_make_targets:
@@ -581,10 +819,14 @@ class Builder:
                 # This is often necessary for reduced manifest branches (e.g.,
                 # master-art) to allow them to build successfully when certain
                 # framework dependencies are not present in the source tree.
-                print("Info: 'frameworks/base' directory not found at "
-                      f"'{os.path.abspath(frameworks_base_dir_path)}'.")
-                print("      Setting SOONG_ALLOW_MISSING_DEPENDENCIES=true and "
-                      "TARGET_BUILD_UNBUNDLED=true.")
+                print(
+                    "Info: 'frameworks/base' directory not found at "
+                    f"'{os.path.abspath(frameworks_base_dir_path)}'."
+                )
+                print(
+                    "      Setting SOONG_ALLOW_MISSING_DEPENDENCIES=true and "
+                    "TARGET_BUILD_UNBUNDLED=true."
+                )
                 env_for_make["SOONG_ALLOW_MISSING_DEPENDENCIES"] = "true"
                 env_for_make["TARGET_BUILD_UNBUNDLED"] = "true"
 
@@ -593,10 +835,13 @@ class Builder:
 
             print_env_parts = []
             # Only show a few key env vars for the log to avoid clutter
-            for key in ["TARGET_PRODUCT", "TARGET_RELEASE",
-                        "TARGET_BUILD_VARIANT",
-                        "SOONG_ALLOW_MISSING_DEPENDENCIES",
-                        "TARGET_BUILD_UNBUNDLED"]:
+            for key in [
+                "TARGET_PRODUCT",
+                "TARGET_RELEASE",
+                "TARGET_BUILD_VARIANT",
+                "SOONG_ALLOW_MISSING_DEPENDENCIES",
+                "TARGET_BUILD_UNBUNDLED",
+            ]:
                 if key in env_for_make:
                     print_env_parts.append(
                         f"{key}={shlex.quote(env_for_make[key])}"
@@ -604,8 +849,8 @@ class Builder:
 
             print_cmd_str = " ".join(print_env_parts)
             if print_cmd_str:
-                 print_cmd_str += " "
-            print_cmd_str += ' '.join(shlex.quote(arg) for arg in make_command)
+                print_cmd_str += " "
+            print_cmd_str += " ".join(shlex.quote(arg) for arg in make_command)
 
             print(f"Running make command: {print_cmd_str}")
 
@@ -628,9 +873,10 @@ class Builder:
 def _setup_env_and_get_primary_build_vars(
     args: argparse.Namespace,
 ) -> BuildVarsDict:
-    """
-    Sets up the script's execution environment (CWD, ANDROID_BUILD_TOP env var)
-    and retrieves primary build variables from dumpvars.
+    """Sets up the script's execution environment and retrieves build vars.
+
+    This includes changing CWD, setting ANDROID_BUILD_TOP, and retrieving
+    primary build variables from dumpvars.
     """
     actual_android_root = os.path.abspath(args.android_root)
     print(f"Info: Effective Android build root: {actual_android_root}")
@@ -642,8 +888,11 @@ def _setup_env_and_get_primary_build_vars(
         print(f"Error: Could not change CWD to {actual_android_root}: {e}")
         sys.exit(1)
 
-    required_env_vars = ["TARGET_PRODUCT", "TARGET_RELEASE",
-                         "TARGET_BUILD_VARIANT"]
+    required_env_vars = [
+        "TARGET_PRODUCT",
+        "TARGET_RELEASE",
+        "TARGET_BUILD_VARIANT",
+    ]
     missing_vars = [v for v in required_env_vars if not os.environ.get(v)]
     if missing_vars:
         error_msg1 = (
@@ -654,15 +903,9 @@ def _setup_env_and_get_primary_build_vars(
         print(error_msg_part2)
         sys.exit(1)
 
-    vars_to_get_via_dumpvars = [
-        "OUT_DIR", "HOST_OUT", "TARGET_OUT", "TARGET_ARCH",
-        "HOST_OUT_JAVA_LIBRARIES"
-    ]
+    final_build_vars: BuildVarsDict = get_android_build_vars()
 
-    build_vars_from_dumpvars: BuildVarsDict = get_android_build_vars(
-        vars_to_get=vars_to_get_via_dumpvars,
-    )
-    return build_vars_from_dumpvars
+    return final_build_vars
 
 
 def parse_command_line_arguments(builder: Builder) -> argparse.ArgumentParser:
@@ -681,36 +924,38 @@ def parse_command_line_arguments(builder: Builder) -> argparse.ArgumentParser:
     parser.add_argument(
         "--build-art-host",
         action="store_true",
-        help="Build build-art-host components (activates internal target)."
+        help="Build build-art-host components (activates internal target).",
     )
     parser.add_argument(
         "--build-art-host-gtests",
         action="store_true",
-        help="Build build-art-host-gtests components (internal target)."
+        help="Build build-art-host-gtests components (internal target).",
     )
     parser.add_argument(
         "--build-art-target",
         action="store_true",
-        help="Build build-art-target components (activates internal target)."
+        help="Build build-art-target components (activates internal target).",
     )
     parser.add_argument(
         "--build-art",
         action="store_true",
-        help="Build build-art components (activates internal target)."
+        help="Build build-art components (activates internal target).",
     )
     parser.add_argument(
         "--android-root",
         default=os.environ.get("ANDROID_BUILD_TOP", "."),
-        help="Path to the Android root directory. Overrides "
-             "ANDROID_BUILD_TOP environment variable if set. "
-             "Defaults to $ANDROID_BUILD_TOP or '.' if not set."
+        help=(
+            "Path to the Android root directory. Overrides "
+            "ANDROID_BUILD_TOP environment variable if set. "
+            "Defaults to $ANDROID_BUILD_TOP or '.' if not set."
+        ),
     )
     # Argument for positional real build targets
     parser.add_argument(
         "positional_targets",
         metavar="MAKE_TARGET",
         nargs="*",
-        help="Additional Soong/Make build targets to build."
+        help="Additional Soong/Make build targets to build.",
     )
 
     args = parser.parse_args()

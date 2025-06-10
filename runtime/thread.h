@@ -627,10 +627,13 @@ class EXPORT Thread {
    *
    * We map a priority value from 1-10 to Linux "nice" values, where lower
    * numbers indicate higher priority.
-   *
-   * Return the niceness value corresponding to the priority.
    */
-  int SetNativePriority(int newPriority) REQUIRES_SHARED(Locks::mutator_lock_);
+  void SetNativePriority(int newPriority) REQUIRES_SHARED(Locks::mutator_lock_);
+
+  /*
+   * And a version that explicitly supplies the corresponding niceness value as well.
+   */
+  void SetNativePriority(int newPriority, int newNiceness) REQUIRES_SHARED(Locks::mutator_lock_);
 
   /*
    * Same thing, but niceness is supplied directly.
@@ -663,6 +666,12 @@ class EXPORT Thread {
    * priorities.
    */
   int GetNativeNiceness() const;
+
+  /*
+   * Return the niceness value for this thread, as cached by the Java layer, or zero if there is
+   * no Java peer.
+   */
+  int GetCachedNiceness() const REQUIRES_SHARED(Locks::mutator_lock_);
 
   // Guaranteed to be non-zero.
   uint32_t GetThreadId() const {

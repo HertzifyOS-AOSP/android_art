@@ -2067,8 +2067,7 @@ void Thread::DumpState(std::ostream& os, const Thread* thread, pid_t tid) {
   // cause ScopedObjectAccessUnchecked to deadlock.
   if (gAborting == 0 && self != nullptr && thread != nullptr && thread->tlsPtr_.opeer != nullptr) {
     ScopedObjectAccessUnchecked soa(self);
-    priority = NicenessToPriority(
-        WellKnownClasses::java_lang_Thread_niceness->GetInt(thread->tlsPtr_.opeer));
+    priority = NicenessToPriority(thread->GetCachedNiceness());
     is_daemon = WellKnownClasses::java_lang_Thread_daemon->GetBoolean(thread->tlsPtr_.opeer);
 
     ObjPtr<mirror::Object> thread_group =
@@ -5109,17 +5108,20 @@ int Thread::GetNativeNiceness() const {
   return niceness;
 }
 
-int Thread::SetNativePriority(int new_priority) {
-  int n = PriorityToNiceness(new_priority);
+void Thread::SetNativePriority(int new_priority, int new_niceness) {
   if (canSetPriority) {
     if (UNLIKELY(NeedSWorkaround())) {
       palette_status_t status = PaletteSchedSetPriority(GetTid(), new_priority);
       CHECK(status == PALETTE_STATUS_OK || status == PALETTE_STATUS_CHECK_ERRNO);
     } else {
-      SetNativeNiceness(n);
+      SetNativeNiceness(new_niceness);
     }
   }
-  return n;
+}
+
+void Thread::SetNativePriority(int new_priority) {
+  int n = PriorityToNiceness(new_priority);
+  SetNativePriority(new_priority, n);
 }
 
 void Thread::AbortInThis(const std::string& message) {

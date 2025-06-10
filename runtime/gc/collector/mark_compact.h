@@ -1018,6 +1018,9 @@ class MarkCompact final : public GarbageCollector {
   // Set to true in MarkingPause() to indicate when allocation_stack_ should be
   // checked in IsMarked() for black allocations.
   bool marking_done_;
+  // Indicates if the concurrent compaction has started or not. Only accessed by
+  // the GC thread.
+  bool conc_compaction_started_;
   // Flag indicating whether one-time uffd initialization has been done. It will
   // be false on the first GC for non-zygote processes, and always for zygote.
   // Its purpose is to minimize the userfaultfd overhead to the minimal in

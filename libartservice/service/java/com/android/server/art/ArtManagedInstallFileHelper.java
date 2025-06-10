@@ -16,14 +16,11 @@
 
 package com.android.server.art;
 
-import android.annotation.FlaggedApi;
 import android.annotation.NonNull;
 import android.annotation.SystemApi;
 import android.os.Build;
 
 import androidx.annotation.RequiresApi;
-
-import com.android.art.flags.Flags;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -38,7 +35,6 @@ import java.util.stream.Stream;
  *
  * @hide
  */
-@FlaggedApi(Flags.FLAG_ART_SERVICE_V3)
 @SystemApi(client = SystemApi.Client.SYSTEM_SERVER)
 @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
 public final class ArtManagedInstallFileHelper {
@@ -56,7 +52,6 @@ public final class ArtManagedInstallFileHelper {
      * Returns whether the file at the given path is an <i>ART-managed install file</i>. This
      * is a pure string operation on the input and does not involve any I/O.
      */
-    @FlaggedApi(Flags.FLAG_ART_SERVICE_V3)
     public static boolean isArtManaged(@NonNull String path) {
         return FILE_TYPES.stream().anyMatch(ext -> path.endsWith(ext));
     }
@@ -69,7 +64,6 @@ public final class ArtManagedInstallFileHelper {
      * Note that the files in different directories than the APK are not considered corresponding to
      * the APK.
      */
-    @FlaggedApi(Flags.FLAG_ART_SERVICE_V3)
     public static @NonNull List<String> filterPathsForApk(
             @NonNull List<String> paths, @NonNull String apkPath) {
         Set<String> candidates =
@@ -93,7 +87,6 @@ public final class ArtManagedInstallFileHelper {
      * @throws IllegalArgumentException if {@code originalPath} does not represent an <i>ART-managed
      *         install file</i>
      */
-    @FlaggedApi(Flags.FLAG_ART_SERVICE_V3)
     public static @NonNull String getTargetPathForApk(
             @NonNull String originalPath, @NonNull String apkPath) {
         for (String ext : FILE_TYPES) {
