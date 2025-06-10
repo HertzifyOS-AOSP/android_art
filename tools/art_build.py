@@ -78,12 +78,26 @@ REQUIRED_BUILD_VARS: List[str] = [
     "HOST_OUT_SHARED_LIBRARIES",
     "TARGET_OUT",
     "TARGET_ARCH",
+    "TARGET_OUT_SHARED_LIBRARIES",
 ]
 # A list of optional build variables. These are retrieved but not required
 # to be present in the build environment.
 OPTIONAL_BUILD_VARS: List[str] = [
     "HOST_2ND_ARCH",
     "2ND_HOST_OUT_SHARED_LIBRARIES",
+    "TARGET_2ND_ARCH",
+    "2ND_TARGET_OUT_SHARED_LIBRARIES",
+]
+# Platform libraries that must be specified through their full target paths,
+# because the prebuilts used on master-art don't have all the variants to allow
+# using their name-only build targets.
+ART_TARGET_PLATFORM_LIBS_WITH_FULL_PATH: List[str] = [
+    "libcutils",
+    "libprocinfo",
+    "libprocessgroup",
+    "libselinux",
+    "libtombstoned_client",
+    "libz",
 ]
 
 
@@ -496,7 +510,7 @@ class Builder:
         make_targets_debug: List[str] = []
 
         host_out_shared_libs: str = self.build_vars["HOST_OUT_SHARED_LIBRARIES"]
-        second_host_out_shared_libs: str = self.build_vars.get(
+        second_host_out_shared_libs: Optional[str] = self.build_vars.get(
             "2ND_HOST_OUT_SHARED_LIBRARIES"
         )
         actual_host_2nd_arch: Optional[str] = self.build_vars.get(
@@ -564,6 +578,42 @@ class Builder:
             )
             make_targets.append(source_file_path)
         return make_targets
+
+    def _get_art_target_platform_libs_make_targets(self) -> List[str]:
+        """Generates make_targets for ART_TARGET_PLATFORM_DEPENDENCIES."""
+        target_out: str = self.build_vars["TARGET_OUT"]
+        target_out_shared_libs: str = self.build_vars[
+            "TARGET_OUT_SHARED_LIBRARIES"
+        ]
+        second_target_out_shared_libs: Optional[str] = self.build_vars.get(
+            "2ND_TARGET_OUT_SHARED_LIBRARIES"
+        )
+        target_2nd_arch: Optional[str] = self.build_vars.get("TARGET_2ND_ARCH")
+
+        make_targets: List[str] = [
+            os.path.join(target_out, "etc", "public.libraries.txt")
+        ]
+
+        make_targets.extend(
+            os.path.join(target_out_shared_libs, f"{lib}.so")
+            for lib in ART_TARGET_PLATFORM_LIBS_WITH_FULL_PATH
+        )
+
+        if target_2nd_arch:
+            if not second_target_out_shared_libs:
+                print(
+                    "Error: TARGET_2ND_ARCH is set, but "
+                    "2ND_TARGET_OUT_SHARED_LIBRARIES is missing.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+
+            make_targets.extend(
+                os.path.join(second_target_out_shared_libs, f"{lib}.so")
+                for lib in ART_TARGET_PLATFORM_LIBS_WITH_FULL_PATH
+            )
+
+        return list(set(make_targets))
 
     def setup_default_targets(self, build_vars: BuildVarsDict):
         """Defines built-in targets using build_vars and stores build_vars."""
@@ -660,6 +710,23 @@ class Builder:
                     "com.android.conscrypt",
                     "com.android.i18n",
                 ]),
+            )
+        )
+        # ART_TARGET_PLATFORM_DEPENDENCIES
+        self.add_target(
+            Target(
+                name="art_target_platform_dependencies",
+                make_targets=self._get_art_target_platform_libs_make_targets(),
+            )
+        )
+        self.add_target(
+            Target(
+                name="build-art-target-gtests",
+                make_targets=["art_test_target_gtest_dependencies"],
+                dependencies=[
+                    "build-art-target",
+                    "art_target_platform_dependencies",
+                ],
             )
         )
         self.add_target(
@@ -937,6 +1004,11 @@ def parse_command_line_arguments(builder: Builder) -> argparse.ArgumentParser:
         help="Build build-art-target components (activates internal target).",
     )
     parser.add_argument(
+        "--build-art-target-gtests",
+        action="store_true",
+        help="Build build-art-target-gtests components (internal target).",
+    )
+    parser.add_argument(
         "--build-art",
         action="store_true",
         help="Build build-art components (activates internal target).",
@@ -966,6 +1038,8 @@ def parse_command_line_arguments(builder: Builder) -> argparse.ArgumentParser:
         builder.enabled_internal_targets.append("build-art-host-gtests")
     if args.build_art_target:
         builder.enabled_internal_targets.append("build-art-target")
+    if args.build_art_target_gtests:
+        builder.enabled_internal_targets.append("build-art-target-gtests")
     if args.build_art:
         builder.enabled_internal_targets.append("build-art")
 
