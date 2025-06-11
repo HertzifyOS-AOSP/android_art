@@ -218,10 +218,12 @@ public class ReasonMapping {
      * the "framework" module (specifically, the {@code package_optimization_compilation_filter}
      * field of the {@code AppStartOccurred} and {@code AppStartFullyDrawn} protos defined in {@code
      * frameworks/proto_logging/stats/atoms.proto}). The integer is not supposed to be understood by
-     * the caller but to be filled as is into the fields mentioned above.
+     * the caller but to be filled as-is into the fields mentioned above.
      *
-     * Note that this mapping is different from the one used in the "art" module and must not be
+     * <p>Note that this mapping is different from the one used in the "art" module and must not be
      * used for reporting ART stats (e.g., ART runtime metrics).
+     *
+     * @param compilerFilter The string obtained from {@link DexFile.OptimizationInfo#getStatus()}.
      */
     @FlaggedApi(Flags.FLAG_UPDATABLE_FILTER_AND_REASON)
     public static int getCompilerFilterValueForFrameworkStatsReporting(
@@ -249,10 +251,13 @@ public class ReasonMapping {
      * in the "framework" module (specifically, the {@code package_optimization_compilation_reason}
      * field of the {@code AppStartOccurred} and {@code AppStartFullyDrawn} protos defined in {@code
      * frameworks/proto_logging/stats/atoms.proto}). The integer is not supposed to be understood by
-     * the caller but to be filled as is into the fields mentioned above.
+     * the caller but to be filled as-is into the fields mentioned above.
      *
-     * Note that this mapping is different from the one used in the "art" module and must not be
+     * <p>Note that this mapping is different from the one used in the "art" module and must not be
      * used for reporting ART stats (e.g., ART runtime metrics).
+     *
+     * @param compilationReason The string obtained from {@link
+     *     DexFile.OptimizationInfo#getReason()}.
      */
     @FlaggedApi(Flags.FLAG_UPDATABLE_FILTER_AND_REASON)
     public static int getCompilationReasonValueForFrameworkStatsReporting(
