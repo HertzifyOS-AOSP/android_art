@@ -1481,6 +1481,28 @@ ScopedJitSuspend::~ScopedJitSuspend() {
   }
 }
 
+ScopedJitPauseNewTasks::ScopedJitPauseNewTasks() {
+  jit::Jit* jit = Runtime::Current()->GetJit();
+  was_on_ = (jit != nullptr) && (jit->GetThreadPool() != nullptr);
+  if (was_on_) {
+    // Don't accept any new JIT tasks. If the redefinition is structural then we have to discard all
+    // the JITed code anyway. For in place redefinition we can allow JIT tasks if they don't involve
+    // the method that is being redefined. Though we just stop accepting new requests in  both cases
+    // to keep the implementation simple.
+    jit->GetThreadPool()->StopWorkers(Thread::Current());
+    // Also clear the queue. So we only have the ongoing compilations now.
+    jit->GetThreadPool()->RemoveAllTasks(Thread::Current());
+  }
+}
+
+ScopedJitPauseNewTasks::~ScopedJitPauseNewTasks() {
+  if (was_on_) {
+    DCHECK(Runtime::Current()->GetJit() != nullptr);
+    DCHECK(Runtime::Current()->GetJit()->GetThreadPool() != nullptr);
+    Runtime::Current()->GetJit()->GetThreadPool()->StartWorkers(Thread::Current());
+  }
+}
+
 class MapBootImageMethodsTask : public gc::HeapTask {
  public:
   explicit MapBootImageMethodsTask(uint64_t target_run_time) : gc::HeapTask(target_run_time) {}
@@ -1895,6 +1917,11 @@ void JitThreadPool::VisitRoots(RootVisitor* visitor) {
   for (ArtMethod* method : methods) {
     method->VisitRoots(root_visitor, kRuntimePointerSize);
   }
+}
+
+bool JitThreadPool::HasOngoingCompiles() {
+  MutexLock mu(Thread::Current(), task_queue_lock_);
+  return !current_compilations_.empty();
 }
 
 }  // namespace jit
