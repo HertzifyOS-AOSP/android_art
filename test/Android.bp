@@ -1968,3 +1968,37 @@ phony {
         ],
     }),
 }
+
+// This phony module lists the dependencies required by art/tools/art_build.py
+// to build build-art-host-run-tests. It excludes dependencies that require
+// special handling, such as ART_HOST_DEX_DEPENDENCIES, HOST_I18N_DATA,
+// and hprof-conv.
+phony {
+    name: "art_test_host_run_test_dependencies",
+    required: [
+        // HOST_OUT_EXECUTABLES
+        "signal_dumper",
+        // ART_TEST_LIST_
+        "libtiagent",
+        "libtiagentd",
+        "libtistress",
+        "libtistressd",
+        "libartagent",
+        "libartagentd",
+        "libarttest",
+        "libarttestd",
+        "libarttest_external",
+        "libarttestd_external",
+        "libnativebridgetest",
+        "libnativebridgetestd",
+        // in ART_HOST_OUT_SHARED_LIBRARIES/
+        "libicu_jni",
+        "libjavacore",
+        "libopenjdk",
+        "libopenjdkd",
+        "libopenjdkjvmti",
+        "libopenjdkjvmtid",
+        // Other dependencies
+        "art_boot_images",
+    ],
+}
