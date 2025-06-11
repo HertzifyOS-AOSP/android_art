@@ -19,8 +19,8 @@ container: "com.android.art"
 # Read-only flags should go into the art-flags.aconfig file instead.
 
 flag {
-  name: "test_rw"
-  namespace: "art_mainline"
+  name: "test_rw_flag"
+  namespace: "core_libraries"
   description: "Permanent test read-write flag."
   bug: "391379705"
   is_fixed_read_only: false

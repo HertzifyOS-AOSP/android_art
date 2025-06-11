@@ -775,12 +775,10 @@ struct MethodHandleOffsets : public CheckOffsets<mirror::MethodHandle> {
 struct MethodHandleImplOffsets : public CheckOffsets<mirror::MethodHandleImpl> {
   MethodHandleImplOffsets() : CheckOffsets<mirror::MethodHandleImpl>(
       false, "Ljava/lang/invoke/MethodHandleImpl;") {
-    // Beware: changing offsets of field and targetClassOrMethodHandleInfo might lead to compat
-    // issues.
     addOffset(OFFSETOF_MEMBER(mirror::MethodHandleImpl, field_), "field");
+    addOffset(OFFSETOF_MEMBER(mirror::MethodHandleImpl, target_), "target");
     addOffset(OFFSETOF_MEMBER(mirror::MethodHandleImpl, target_class_or_info_),
               "targetClassOrMethodHandleInfo");
-    addOffset(OFFSETOF_MEMBER(mirror::MethodHandleImpl, target_method_entry_), "targetMethodEntry");
   }
 };
 
