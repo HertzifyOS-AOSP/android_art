@@ -23,14 +23,10 @@ namespace art_flags = com::android::art::flags;
 
 namespace art HIDDEN {
 
-bool AssumeValueOptions::MaybeSetAssumedValue(const detail::AssumeValueSignature& signature,
-                                              int32_t value) {
-  if (kSdkInt.Equals(signature)) {
-    DCHECK(art_flags::compile_sdk_int_constant());
-    sdk_int_ = value;
-    return true;
-  }
-  return false;
+void AssumeValueOptions::SetSdkInt(uint32_t sdk_int) {
+  DCHECK(art_flags::compile_sdk_int_constant());
+  VLOG(compiler) << "Setting assumed value for SDK_INT: " << sdk_int;
+  sdk_int_ = sdk_int;
 }
 
 }  // namespace art

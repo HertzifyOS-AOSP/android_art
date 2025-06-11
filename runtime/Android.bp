@@ -242,6 +242,7 @@ cc_defaults {
         "app_info.cc",
         "art_field.cc",
         "art_method.cc",
+        "assume_value_signatures.cc",
         "backtrace_helper.cc",
         "barrier.cc",
         "base/gc_visited_arena_pool.cc",

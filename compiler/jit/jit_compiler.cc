@@ -130,8 +130,7 @@ void JitCompiler::ParseCompilerOptions() {
   }
 
   if (art_flags::compile_sdk_int_constant()) {
-    compiler_options_->GetAssumeValueOptions().MaybeSetAssumedValue(AssumeValueOptions::kSdkInt,
-                                                                    runtime->GetSdkVersion());
+    compiler_options_->GetAssumeValueOptions().SetSdkInt(runtime->GetSdkVersion());
   }
 }
 

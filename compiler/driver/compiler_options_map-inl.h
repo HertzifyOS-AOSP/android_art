@@ -26,6 +26,7 @@
 #include "android-base/stringprintf.h"
 
 #include "assume_value_options.h"
+#include "assume_value_signatures.h"
 #include "base/macros.h"
 #include "cmdline_parser.h"
 #include "com_android_art_flags.h"
@@ -65,14 +66,19 @@ struct CmdlineType<AssumeValueOptions> : CmdlineTypeParser<AssumeValueOptions> {
     if (!com::android::art::flags::compile_sdk_int_constant()) {
       // Feature disabled, silently ignore setting the value. Note that if we ever add additional
       // support beyond for more assumed values beyond SDK_INT, this will need to be adjusted.
+      static_assert(AssumeValueSignatures::kSignatures.size() == 1);
       return Result::SuccessNoValue();
     }
 
-    if (!assume_value_options.MaybeSetAssumedValue(
-            class_descriptor, member_name, parsed_value.GetValue())) {
-      return Result::Failure(std::string("Invalid --assume-value assignment: '") + args + "'");
+    auto known_signature = AssumeValueSignatures::Lookup(class_descriptor, member_name);
+    if (known_signature == AssumeValueSignatures::kSdkInt) {
+      assume_value_options.SetSdkInt(parsed_value.GetValue());
+      return Result::SuccessNoValue();
     }
 
+    // Note that we treat unhandled assumed value members as benign, as the optimization is
+    // strictly best-effort and shouldn't break compilation.
+    LOG(WARNING) << "Unhandled --assume-value member: " << args;
     return Result::SuccessNoValue();
   }
 
