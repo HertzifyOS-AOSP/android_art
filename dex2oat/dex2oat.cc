@@ -1429,7 +1429,8 @@ class Dex2Oat final {
           compiler_options_->dex_files_for_oat_file_);
       VLOG(compiler) << "Loaded " << image_classes.size()
                      << " image class descriptors from profile";
-    } else if (compiler_options_->IsBootImage() || compiler_options_->IsBootImageExtension()) {
+    } else if (!com::android::art::flags::ignore_boot_image_extension_class_resolution()
+               && (compiler_options_->IsBootImage() || compiler_options_->IsBootImageExtension())) {
       // If we are compiling a boot image but no profile is provided, include all classes in the
       // image. This is to match pre-boot image extension work where we would load all boot image
       // extension classes at startup.
