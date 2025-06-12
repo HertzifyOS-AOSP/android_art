@@ -26,6 +26,8 @@ using android::base::StringPrintf;
 
 namespace art HIDDEN {
 
+static constexpr double kSecondsToNanoseconds = 1000 * 1000 * 1000;
+
 static std::string GetMethodInfoLine(ArtMethod* method) REQUIRES_SHARED(Locks::mutator_lock_) {
   method = method->GetInterfaceMethodIfProxy(kRuntimePointerSize);
   return StringPrintf("%s\t%s\t%s\t%s\n",
@@ -76,7 +78,6 @@ class TimestampCounter {
     // user space. Seem comment in GetTimestamp for more details.
     tsc_to_nanosec_scaling_factor = 1.0;
 #elif defined(__aarch64__)
-    double seconds_to_nanoseconds = 1000 * 1000;
     uint64_t freq = 0;
     // See Arm Architecture Registers  Armv8 section System Registers
     asm volatile("mrs %0,  cntfrq_el0" : "=r"(freq));
@@ -85,7 +86,7 @@ class TimestampCounter {
       // devices don't do this. In such cases fall back to computing the frequency. See b/315139000.
       tsc_to_nanosec_scaling_factor = computeScalingFactor();
     } else {
-      tsc_to_nanosec_scaling_factor = seconds_to_nanoseconds / static_cast<double>(freq);
+      tsc_to_nanosec_scaling_factor = kSecondsToNanoseconds / static_cast<double>(freq);
     }
 #elif defined(__i386__) || defined(__x86_64__)
     tsc_to_nanosec_scaling_factor = GetScalingFactorForX86();
@@ -152,8 +153,7 @@ class TimestampCounter {
     // frequency = coreCrystalFreq * (ebx / eax)
     // scaling_factor = seconds_to_nanoseconds / frequency
     //                = seconds_to_nanoseconds * eax / (coreCrystalFreq * ebx)
-    double seconds_to_nanoseconds = 1000 * 1000;
-    double scaling_factor = (seconds_to_nanoseconds * eax) / (coreCrystalFreq * ebx);
+    double scaling_factor = (kSecondsToNanoseconds * eax) / (coreCrystalFreq * ebx);
     return scaling_factor;
   }
 #endif
