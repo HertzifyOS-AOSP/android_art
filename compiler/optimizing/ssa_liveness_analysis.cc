@@ -45,7 +45,53 @@ void SsaLivenessAnalysis::Analyze() {
   ComputeLiveness();
 }
 
+template <bool kIsPhi>
+static inline void AllocateLocations(CodeGenerator* codegen,
+                                     HGraphVisitor* location_builder,
+                                     HInstruction* instruction) {
+  DCHECK_EQ(kIsPhi, instruction->IsPhi());
+  if (kIsPhi) {
+    DCHECK(instruction->GetEnvironment() == nullptr);
+    location_builder->VisitPhi(instruction->AsPhi());
+  } else {
+    ArenaAllocator* allocator = codegen->GetGraph()->GetAllocator();
+    for (HEnvironment* env = instruction->GetEnvironment();
+         env != nullptr;
+         env = env->GetParent()) {
+      env->AllocateLocations(allocator);
+    }
+    location_builder->Dispatch(instruction);
+  }
+  DCHECK(CodeGenerator::CheckTypeConsistency(instruction));
+  if (kIsPhi) {
+    DCHECK(instruction->GetLocations() != nullptr);
+    DCHECK(!instruction->GetLocations()->CanCall());
+    DCHECK(!instruction->NeedsCurrentMethod());
+  } else if (!instruction->IsSuspendCheckEntry()) {
+    LocationSummary* locations = instruction->GetLocations();
+    if (locations != nullptr) {
+      if (locations->CanCall()) {
+        codegen->MarkNotLeaf();
+        if (locations->NeedsSuspendCheckEntry()) {
+          codegen->MarkNeedsSuspendCheckEntry();
+        }
+      } else if (locations->Intrinsified() &&
+                 instruction->IsInvokeStaticOrDirect() &&
+                 !instruction->AsInvokeStaticOrDirect()->HasCurrentMethodInput()) {
+        // A static method call that has been fully intrinsified, and cannot call on the slow
+        // path or refer to the current method directly, no longer needs current method.
+        return;
+      }
+    }
+    if (instruction->NeedsCurrentMethod()) {
+      codegen->SetRequiresCurrentMethod();
+    }
+  }
+}
+
 void SsaLivenessAnalysis::NumberInstructions() {
+  CodeGenerator* codegen = codegen_;
+  HGraphVisitor* location_builder = codegen->GetLocationBuilder();
   size_t ssa_index = 0;
   size_t lifetime_position = 0;
   // Each instruction gets a lifetime position, and a block gets a lifetime
@@ -60,17 +106,16 @@ void SsaLivenessAnalysis::NumberInstructions() {
   for (HBasicBlock* block : graph_->GetLinearOrder()) {
     block->SetLifetimeStart(lifetime_position);
 
-    for (HInstructionIteratorPrefetchNext inst_it(block->GetPhis()); !inst_it.Done();
-         inst_it.Advance()) {
+    for (HInstructionIterator inst_it(block->GetPhis()); !inst_it.Done(); inst_it.Advance()) {
       HInstruction* current = inst_it.Current();
-      codegen_->AllocateLocations(current);
-      LocationSummary* locations = current->GetLocations();
-      if (locations != nullptr && locations->Out().IsValid()) {
-        instructions_from_ssa_index_.push_back(current);
-        current->SetSsaIndex(ssa_index++);
-        current->SetLiveInterval(
-            LiveInterval::MakeInterval(allocator_, current->GetType(), current));
-      }
+      AllocateLocations</*kIsPhi=*/ true>(codegen, location_builder, current);
+      // Phis always have a valid output location, namely `Location::Any()`.
+      DCHECK(current->GetLocations() != nullptr);
+      DCHECK(current->GetLocations()->Out().IsValid());
+      instructions_from_ssa_index_.push_back(current);
+      current->SetSsaIndex(ssa_index++);
+      current->SetLiveInterval(
+          LiveInterval::MakeInterval(allocator_, current->GetType(), current));
       current->SetLifetimePosition(lifetime_position);
     }
     lifetime_position += kLivenessPositionsPerInstruction;
@@ -78,10 +123,10 @@ void SsaLivenessAnalysis::NumberInstructions() {
     // Add a null marker to notify we are starting a block.
     instructions_from_lifetime_position_.push_back(nullptr);
 
-    for (HInstructionIteratorPrefetchNext inst_it(block->GetInstructions()); !inst_it.Done();
+    for (HInstructionIterator inst_it(block->GetInstructions()); !inst_it.Done();
          inst_it.Advance()) {
       HInstruction* current = inst_it.Current();
-      codegen_->AllocateLocations(current);
+      AllocateLocations</*kIsPhi=*/ false>(codegen, location_builder, current);
       LocationSummary* locations = current->GetLocations();
       if (locations != nullptr && locations->Out().IsValid()) {
         instructions_from_ssa_index_.push_back(current);

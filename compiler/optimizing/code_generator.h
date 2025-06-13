@@ -546,7 +546,8 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
         : allocated_registers_.ContainsFloatingPointRegister(reg);
   }
 
-  void AllocateLocations(HInstruction* instruction);
+  // Type consistency check, used only in debug builds.
+  static bool CheckTypeConsistency(HInstruction* instruction);
 
   // Tells whether the stack frame of the compiled method is
   // considered "empty", that is either actually having a size of zero,
@@ -738,6 +739,9 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
                                    GetAssembler().CodeSize());
   }
 
+  virtual HGraphVisitor* GetLocationBuilder() = 0;
+  virtual HGraphVisitor* GetInstructionVisitor() = 0;
+
  protected:
   // Patch info used for recording locations of required linker patches and their targets,
   // i.e. target method, string, type or code identified by their dex file and index,
@@ -764,9 +768,6 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
                 const CompilerOptions& compiler_options,
                 OptimizingCompilerStats* stats,
                 const art::ArrayRef<const bool>& unimplemented_intrinsics);
-
-  virtual HGraphVisitor* GetLocationBuilder() = 0;
-  virtual HGraphVisitor* GetInstructionVisitor() = 0;
 
   template <typename RegType>
   static uint32_t ComputeRegisterMask(const RegType* registers, size_t length) {

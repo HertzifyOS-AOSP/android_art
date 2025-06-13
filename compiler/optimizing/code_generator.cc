@@ -106,7 +106,7 @@ static bool CheckType(DataType::Type type, Location location) {
 }
 
 // Check that a location summary is consistent with an instruction.
-static bool CheckTypeConsistency(HInstruction* instruction) {
+bool CodeGenerator::CheckTypeConsistency(HInstruction* instruction) {
   LocationSummary* locations = instruction->GetLocations();
   if (locations == nullptr) {
     return true;
@@ -916,35 +916,6 @@ void CodeGenerator::BlockIfInRegister(Location location, bool is_out) const {
     blocked_core_registers_[location.AsRegisterPairLow<int>()] = true;
     DCHECK(is_out || !blocked_core_registers_[location.AsRegisterPairHigh<int>()]);
     blocked_core_registers_[location.AsRegisterPairHigh<int>()] = true;
-  }
-}
-
-void CodeGenerator::AllocateLocations(HInstruction* instruction) {
-  ArenaAllocator* allocator = GetGraph()->GetAllocator();
-  for (HEnvironment* env = instruction->GetEnvironment(); env != nullptr; env = env->GetParent()) {
-    env->AllocateLocations(allocator);
-  }
-  GetLocationBuilder()->Dispatch(instruction);
-  DCHECK(CheckTypeConsistency(instruction));
-  LocationSummary* locations = instruction->GetLocations();
-  if (!instruction->IsSuspendCheckEntry()) {
-    if (locations != nullptr) {
-      if (locations->CanCall()) {
-        MarkNotLeaf();
-        if (locations->NeedsSuspendCheckEntry()) {
-          MarkNeedsSuspendCheckEntry();
-        }
-      } else if (locations->Intrinsified() &&
-                 instruction->IsInvokeStaticOrDirect() &&
-                 !instruction->AsInvokeStaticOrDirect()->HasCurrentMethodInput()) {
-        // A static method call that has been fully intrinsified, and cannot call on the slow
-        // path or refer to the current method directly, no longer needs current method.
-        return;
-      }
-    }
-    if (instruction->NeedsCurrentMethod()) {
-      SetRequiresCurrentMethod();
-    }
   }
 }
 
