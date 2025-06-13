@@ -77,6 +77,7 @@ REQUIRED_BUILD_VARS: List[str] = [
     "HOST_OUT_EXECUTABLES",
     "HOST_OUT_JAVA_LIBRARIES",
     "HOST_OUT_SHARED_LIBRARIES",
+    "PRODUCT_OUT",
     "TARGET_OUT",
     "TARGET_ARCH",
     "TARGET_OUT_SHARED_LIBRARIES",
@@ -88,6 +89,7 @@ OPTIONAL_BUILD_VARS: List[str] = [
     "2ND_HOST_OUT_SHARED_LIBRARIES",
     "TARGET_2ND_ARCH",
     "2ND_TARGET_OUT_SHARED_LIBRARIES",
+    "PRODUCT_DEX_PREOPT_BOOT_IMAGE_PROFILE_LOCATION",
 ]
 # Platform libraries that must be specified through their full target paths,
 # because the prebuilts used on master-art don't have all the variants to allow
@@ -342,6 +344,161 @@ def host_i18n_data_action(build_vars: BuildVarsDict):
 def host_tzdata_data_action(build_vars: BuildVarsDict):
     """Custom action to process tzdata data."""
     extract_from_apex(TZDATA_APEX, build_vars)
+
+
+def _get_target_art_apex_system_path(build_vars: BuildVarsDict) -> str:
+    """Returns the path corresponding to TARGET_ART_APEX_SYSTEM."""
+    product_out: str = build_vars["PRODUCT_OUT"]
+    return os.path.join(product_out, "system/apex/com.android.art")
+
+
+def _get_target_boot_image_profile_path(build_vars: BuildVarsDict) -> str:
+    """Returns the path corresponding to TARGET_BOOT_IMAGE_PROFILE."""
+    target_art_apex_system = _get_target_art_apex_system_path(build_vars)
+    # This mimics the '.testing' suffix addition from the makefile.
+    return os.path.join(
+        target_art_apex_system + ".testing", "etc/boot-image.prof"
+    )
+
+
+def _get_target_core_img_dex_files_paths(
+    build_vars: BuildVarsDict,
+) -> List[str]:
+    "Generates paths to intermediate core image JARs for testing."
+    out_dir: str = build_vars["OUT_DIR"]
+    intermediates_dir_base: str = os.path.join(
+        out_dir, "target/common/obj/JAVA_LIBRARIES"
+    )
+    return [
+        os.path.join(
+            intermediates_dir_base,
+            f"{jar}.com.android.art.testing_intermediates/javalib.jar",
+        )
+        for jar in CORE_IMG_JARS
+    ]
+
+
+def _parse_boot_image_profile_paths(
+    build_vars: BuildVarsDict,
+) -> List[str]:
+    """Gets all existing boot image profile paths from build variables.
+
+    Parses the space-separated PRODUCT_DEX_PREOPT_BOOT_IMAGE_PROFILE_LOCATION
+    variable and returns a list containing only the paths that exist in the
+    current source tree.
+
+    Args:
+        build_vars: The dictionary of build variables.
+
+    Returns:
+        A list of strings, where each string is a valid, existing path.
+    """
+    profiles_str = build_vars.get(
+        "PRODUCT_DEX_PREOPT_BOOT_IMAGE_PROFILE_LOCATION", ""
+    )
+    if not profiles_str:
+        return []
+
+    return profiles_str.split()
+
+
+def generate_simulator_profile_action(build_vars: BuildVarsDict):
+    """Generates the simulator boot image profile using profmand."""
+
+    existing_profiles = _parse_boot_image_profile_paths(build_vars)
+
+    # Construct all necessary paths and variables
+    host_out_execs: str = build_vars["HOST_OUT_EXECUTABLES"]
+    profmand_path: str = os.path.join(host_out_execs, "profmand")
+    # TARGET_BOOT_IMAGE_PROFILE
+    reference_profile_file: str = _get_target_boot_image_profile_path(
+        build_vars
+    )
+
+    # Determine dex locations based on ART_TEST_ANDROID_ROOT
+    dex_location_base: str = os.environ.get(
+        "ART_TEST_ANDROID_ROOT", "/apex/com.android.art/javalib"
+    )
+    dex_locations = [f"{dex_location_base}/{jar}.jar" for jar in CORE_IMG_JARS]
+
+    os.makedirs(os.path.dirname(reference_profile_file), exist_ok=True)
+    # Generate a profile from the core boot jars. This allows the simulator
+    # and boot image to use a stable profile that is generated on the host.
+    profmand_command: List[str] = [
+        profmand_path,
+        "--output-profile-type=boot",
+    ]
+
+    create_from_paths_str = " ".join(existing_profiles)
+    profmand_command.append(f"--create-profile-from={create_from_paths_str}")
+
+    # Add --apk arguments from TARGET_CORE_IMG_DEX_FILES
+    apk_paths = _get_target_core_img_dex_files_paths(build_vars)
+    profmand_command.extend([f"--apk={path}" for path in apk_paths])
+    # Add --dex-location arguments
+    profmand_command.extend([f"--dex-location={loc}" for loc in dex_locations])
+    # Add the final reference profile file argument
+    profmand_command.append(
+        f"--reference-profile-file={reference_profile_file}"
+    )
+
+    print(f"  $ {shlex.join(profmand_command)}")
+    run_subprocess(profmand_command)
+
+
+def generate_simulator_boot_image_action(build_vars: BuildVarsDict):
+    """Generates the simulator boot image using the host's dex2oat."""
+
+    # Define all necessary paths from build variables
+    product_out: str = build_vars["PRODUCT_OUT"]
+    host_out_execs: str = build_vars["HOST_OUT_EXECUTABLES"]
+
+    target_boot_image_system_dir = os.path.join(
+        product_out, "system/apex/art_boot_images"
+    )
+    target_art_apex_system_dir: str = _get_target_art_apex_system_path(
+        build_vars
+    )
+    profile_file: str = _get_target_boot_image_profile_path(build_vars)
+    android_root_for_boot_image: str = build_vars["TARGET_OUT"]
+
+    # Note: The target boot image needs to be in a trusted system directory
+    # to be used by the zygote or if -Xonly-use-system-oat-files is passed
+    # to the runtime.
+    shutil.rmtree(target_boot_image_system_dir, ignore_errors=True)
+    os.makedirs(
+        os.path.join(target_boot_image_system_dir, "javalib"), exist_ok=True
+    )
+    os.makedirs(
+        os.path.join(target_art_apex_system_dir, "javalib"), exist_ok=True
+    )
+
+    # Copy the core boot jars to the expected directory for
+    # generate-boot-image.
+    target_core_img_dex_files = _get_target_core_img_dex_files_paths(build_vars)
+    for i, src_jar in enumerate(target_core_img_dex_files):
+        dest_jar_name = CORE_IMG_JARS[i] + ".jar"
+        dest_path = os.path.join(
+            target_art_apex_system_dir, "javalib", dest_jar_name
+        )
+        perform_copy(src_jar, dest_path)
+
+    # Generate a target boot image using the host dex2oat. Note: a boot
+    # image using a profile is required for certain run tests to pass.
+    command = [
+        os.path.join(host_out_execs, "generate-boot-image64"),
+        f"--output-dir={os.path.join(target_boot_image_system_dir, 'javalib')}",
+        "--compiler-filter=speed-profile",
+        "--use-profile=true",
+        f"--profile-file={profile_file}",
+        f"--dex2oat-bin={os.path.join(host_out_execs, 'dex2oatd')}",
+        f"--android-root={android_root_for_boot_image}",
+        "--android-root-for-location=true",
+        "--core-only=true",
+        f'--instruction-set={build_vars["TARGET_ARCH"]}',
+    ]
+    print(f"  $ {shlex.join(command)}")
+    run_subprocess(command)
 
 
 def _get_core_img_jar_source_path(
@@ -637,6 +794,37 @@ class Builder:
 
         return list(set(make_targets))
 
+    def _get_art_simulator_profile_dep_make_targets(self) -> List[str]:
+        """Gets make targets required by the simulator profile action."""
+        # The action depends on profmand and the boot image profile text.
+        make_targets: List[str] = [
+            os.path.join(self.build_vars["HOST_OUT_EXECUTABLES"], "profmand"),
+        ]
+        # PRODUCT_DEX_PREOPT_BOOT_IMAGE_PROFILE_LOCATION
+        existing_profiles = _parse_boot_image_profile_paths(self.build_vars)
+        make_targets.extend(existing_profiles)
+
+        # TARGET_CORE_IMG_DEX_FILES
+        make_targets.extend(
+            _get_target_core_img_dex_files_paths(self.build_vars)
+        )
+
+        return make_targets
+
+    def _get_art_simulator_boot_image_dep_make_targets(
+        self,
+    ) -> List[str]:
+        """Gets make targets required by the simulator boot image action."""
+        host_out_execs: str = self.build_vars["HOST_OUT_EXECUTABLES"]
+        make_targets: List[str] = [
+            os.path.join(host_out_execs, "generate-boot-image64"),
+            os.path.join(host_out_execs, "dex2oatd"),
+        ]
+        make_targets.extend(
+            _get_target_core_img_dex_files_paths(self.build_vars)
+        )
+        return make_targets
+
     def setup_default_targets(self, build_vars: BuildVarsDict):
         """Defines built-in targets using build_vars and stores build_vars."""
         self.build_vars = build_vars
@@ -776,6 +964,34 @@ class Builder:
                 make_targets=[
                     "art_test_target_run_test_dependencies",
                     "art-run-test-target-data",
+                ],
+            )
+        )
+        self.add_target(
+            Target(
+                name="build-art-simulator-profile",
+                action=generate_simulator_profile_action,
+                make_targets=self._get_art_simulator_profile_dep_make_targets(),
+            )
+        )
+        simulator_boot_image_deps = (
+            self._get_art_simulator_boot_image_dep_make_targets()
+        )
+        self.add_target(
+            Target(
+                name="build-art-simulator-boot-image",
+                dependencies=["build-art-simulator-profile"],
+                action=generate_simulator_boot_image_action,
+                make_targets=self._get_art_simulator_boot_image_dep_make_targets(),
+            )
+        )
+        # For simulator, build a target profile and boot image on the host.
+        self.add_target(
+            Target(
+                name="build-art-simulator",
+                dependencies=[
+                    "build-art-simulator-profile",
+                    "build-art-simulator-boot-image",
                 ],
             )
         )
@@ -931,22 +1147,6 @@ class Builder:
 
         if unique_make_targets:
             env_for_make = os.environ.copy()
-            frameworks_base_dir_path = "frameworks/base"
-            if not os.path.isdir(frameworks_base_dir_path):
-                # This is often necessary for reduced manifest branches (e.g.,
-                # master-art) to allow them to build successfully when certain
-                # framework dependencies are not present in the source tree.
-                print(
-                    "Info: 'frameworks/base' directory not found at "
-                    f"'{os.path.abspath(frameworks_base_dir_path)}'."
-                )
-                print(
-                    "      Setting SOONG_ALLOW_MISSING_DEPENDENCIES=true and "
-                    "TARGET_BUILD_UNBUNDLED=true."
-                )
-                env_for_make["SOONG_ALLOW_MISSING_DEPENDENCIES"] = "true"
-                env_for_make["TARGET_BUILD_UNBUNDLED"] = "true"
-
             make_command = ["./build/soong/soong_ui.bash", "--make-mode"]
             make_command.extend(unique_make_targets)
 
@@ -1020,6 +1220,19 @@ def _setup_env_and_get_primary_build_vars(
         print(error_msg_part2)
         sys.exit(1)
 
+    frameworks_base_dir_path = "frameworks/base"
+    if not os.path.isdir(frameworks_base_dir_path):
+        # This is often necessary for reduced manifest branches (e.g.,
+        # master-art) to allow them to build successfully when certain
+        # framework dependencies are not present in the source tree.
+        print(f"Info: '{frameworks_base_dir_path}' directory not found.")
+        print(
+            "      Setting SOONG_ALLOW_MISSING_DEPENDENCIES=true and "
+            "TARGET_BUILD_UNBUNDLED=true for this session."
+        )
+        os.environ["SOONG_ALLOW_MISSING_DEPENDENCIES"] = "true"
+        os.environ["TARGET_BUILD_UNBUNDLED"] = "true"
+
     final_build_vars: BuildVarsDict = get_android_build_vars()
 
     return final_build_vars
@@ -1069,6 +1282,11 @@ def parse_command_line_arguments(builder: Builder) -> argparse.ArgumentParser:
         help="Build build-art-target-run-tests components (internal target).",
     )
     parser.add_argument(
+        "--build-art-simulator",
+        action="store_true",
+        help="Build all ART simulator components (internal target).",
+    )
+    parser.add_argument(
         "--build-art",
         action="store_true",
         help="Build build-art components (activates internal target).",
@@ -1104,6 +1322,8 @@ def parse_command_line_arguments(builder: Builder) -> argparse.ArgumentParser:
         builder.enabled_internal_targets.append("build-art-target-gtests")
     if args.build_art_target_run_tests:
         builder.enabled_internal_targets.append("build-art-target-run-tests")
+    if args.build_art_simulator:
+        builder.enabled_internal_targets.append("build-art-simulator")
     if args.build_art:
         builder.enabled_internal_targets.append("build-art")
 
