@@ -1969,6 +1969,32 @@ phony {
     }),
 }
 
+phony {
+    name: "art_run_test_dependencies",
+    required: [
+        // Host tools required by run-tests
+        "d8",
+        "hiddenapi",
+        "jasmin",
+        "android-smali",
+
+        // Native libraries required by run-tests
+        "libartagent",
+        "libartagentd",
+        "libtiagent",
+        "libtiagentd",
+        "libtistress",
+        "libtistressd",
+        "libarttest",
+        "libarttestd",
+        "libarttest_external",
+        "libarttestd_external",
+        "libnativebridgetest",
+        "libnativebridgetestd",
+        "signal_dumper",
+    ],
+}
+
 // This phony module lists the dependencies required by art/tools/art_build.py
 // to build build-art-host-run-tests. It excludes dependencies that require
 // special handling, such as ART_HOST_DEX_DEPENDENCIES, HOST_I18N_DATA,
@@ -1976,21 +2002,7 @@ phony {
 phony {
     name: "art_test_host_run_test_dependencies",
     required: [
-        // HOST_OUT_EXECUTABLES
-        "signal_dumper",
-        // ART_TEST_LIST_
-        "libtiagent",
-        "libtiagentd",
-        "libtistress",
-        "libtistressd",
-        "libartagent",
-        "libartagentd",
-        "libarttest",
-        "libarttestd",
-        "libarttest_external",
-        "libarttestd_external",
-        "libnativebridgetest",
-        "libnativebridgetestd",
+        "art_run_test_dependencies",
         // in ART_HOST_OUT_SHARED_LIBRARIES/
         "libicu_jni",
         "libjavacore",
@@ -2000,5 +2012,18 @@ phony {
         "libopenjdkjvmtid",
         // Other dependencies
         "art_boot_images",
+    ],
+}
+
+// Phony module that lists key dependencies for building the target run-tests.
+// Note: This list is intentionally incomplete, as most dependencies are pulled
+// in transitively. It serves as a build trigger for art/tools/art_build.py.
+phony {
+    name: "art_test_target_run_test_dependencies",
+    device_supported: true,
+    required: [
+        "art_run_test_dependencies",
+        // TESTING_ART_APEX
+        "com.android.art.testing",
     ],
 }
