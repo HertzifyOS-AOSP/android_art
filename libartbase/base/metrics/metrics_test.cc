@@ -675,6 +675,7 @@ TEST(CompilerFilterReportingTest, FromName) {
   ASSERT_EQ(CompilerFilterReportingFromName("run-from-apk"), CompilerFilterReporting::kRunFromApk);
   ASSERT_EQ(CompilerFilterReportingFromName("run-from-apk-fallback"),
             CompilerFilterReporting::kRunFromApkFallback);
+  ASSERT_EQ(CompilerFilterReportingFromName("other"), CompilerFilterReporting::kOther);
 }
 
 TEST(CompilerFilterReportingTest, Name) {
@@ -694,6 +695,7 @@ TEST(CompilerFilterReportingTest, Name) {
   ASSERT_EQ(CompilerFilterReportingName(CompilerFilterReporting::kRunFromApk), "run-from-apk");
   ASSERT_EQ(CompilerFilterReportingName(CompilerFilterReporting::kRunFromApkFallback),
             "run-from-apk-fallback");
+  ASSERT_EQ(CompilerFilterReportingName(CompilerFilterReporting::kOther), "other");
 }
 
 TEST(CompilerReason, FromName) {
@@ -722,6 +724,10 @@ TEST(CompilerReason, FromName) {
   ASSERT_EQ(CompilationReasonFromName("vdex"), CompilationReason::kVdex);
   ASSERT_EQ(CompilationReasonFromName("boot-after-mainline-update"),
             CompilationReason::kBootAfterMainlineUpdate);
+  ASSERT_EQ(CompilationReasonFromName("other"), CompilationReason::kOther);
+  ASSERT_EQ(CompilationReasonFromName("cloud"), CompilationReason::kCloud);
+  ASSERT_EQ(CompilationReasonFromName("vdex-dm"), CompilationReason::kVdexDm);
+  ASSERT_EQ(CompilationReasonFromName("def-dexopt"), CompilationReason::kDefDexopt);
 }
 
 TEST(CompilerReason, Name) {
@@ -750,6 +756,10 @@ TEST(CompilerReason, Name) {
   ASSERT_EQ(CompilationReasonName(CompilationReason::kVdex), "vdex");
   ASSERT_EQ(CompilationReasonName(CompilationReason::kBootAfterMainlineUpdate),
             "boot-after-mainline-update");
+  ASSERT_EQ(CompilationReasonName(CompilationReason::kOther), "other");
+  ASSERT_EQ(CompilationReasonName(CompilationReason::kCloud), "cloud");
+  ASSERT_EQ(CompilationReasonName(CompilationReason::kVdexDm), "vdex-dm");
+  ASSERT_EQ(CompilationReasonName(CompilationReason::kDefDexopt), "def-dexopt");
 }
 }  // namespace metrics
 }  // namespace art

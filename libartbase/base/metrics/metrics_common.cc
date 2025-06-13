@@ -335,6 +335,14 @@ static_assert(CompilationReasonFromName(CompilationReasonName(CompilationReason:
 static_assert(
     CompilationReasonFromName(CompilationReasonName(CompilationReason::kBootAfterMainlineUpdate)) ==
     CompilationReason::kBootAfterMainlineUpdate);
+static_assert(CompilationReasonFromName(CompilationReasonName(CompilationReason::kOther)) ==
+              CompilationReason::kOther);
+static_assert(CompilationReasonFromName(CompilationReasonName(CompilationReason::kCloud)) ==
+              CompilationReason::kCloud);
+static_assert(CompilationReasonFromName(CompilationReasonName(CompilationReason::kVdexDm)) ==
+              CompilationReason::kVdexDm);
+static_assert(CompilationReasonFromName(CompilationReasonName(CompilationReason::kDefDexopt)) ==
+              CompilationReason::kDefDexopt);
 
 }  // namespace metrics
 }  // namespace art
