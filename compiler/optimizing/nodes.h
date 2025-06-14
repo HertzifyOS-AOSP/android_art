@@ -1765,8 +1765,6 @@ class HInstruction : public ArenaObject<kArenaAllocInstruction> {
   void SetLiveInterval(LiveInterval* interval) { live_interval_ = interval; }
   bool HasLiveInterval() const { return live_interval_ != nullptr; }
 
-  bool IsSuspendCheckEntry() const { return IsSuspendCheck() && GetBlock()->IsEntryBlock(); }
-
   // Returns whether the code generation of the instruction will require to have access
   // to the current method. Such instructions are:
   // (1): Instructions that require an environment, as calling the runtime requires

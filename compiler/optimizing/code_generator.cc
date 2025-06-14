@@ -994,8 +994,9 @@ CodeGenerator::CodeGenerator(HGraph* graph,
       current_slow_path_(nullptr),
       current_block_index_(0),
       is_leaf_(true),
-      needs_suspend_check_entry_(false),
-      requires_current_method_(false),
+      // We need the current method for baseline in case we reach the hotness threshold.
+      // As a side effect this makes the frame non-empty.
+      requires_current_method_(GetGraph()->IsCompilingBaseline()),
       code_generation_data_(),
       unimplemented_intrinsics_(unimplemented_intrinsics) {
   if (GetGraph()->IsCompilingOsr()) {
@@ -1011,11 +1012,6 @@ CodeGenerator::CodeGenerator(HGraph* graph,
         AddAllocatedRegister(Location::FpuRegisterLocation(i));
       }
     }
-  }
-  if (GetGraph()->IsCompilingBaseline()) {
-    // We need the current method in case we reach the hotness threshold. As a
-    // side effect this makes the frame non-empty.
-    SetRequiresCurrentMethod();
   }
 }
 

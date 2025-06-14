@@ -415,21 +415,12 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
     return is_leaf_;
   }
 
-  void MarkNotLeaf() {
-    is_leaf_ = false;
-    requires_current_method_ = true;
+  void SetIsLeaf(bool is_leaf) {
+    is_leaf_ = is_leaf;
   }
 
-  bool NeedsSuspendCheckEntry() const {
-    return needs_suspend_check_entry_;
-  }
-
-  void MarkNeedsSuspendCheckEntry() {
-    needs_suspend_check_entry_ = true;
-  }
-
-  void SetRequiresCurrentMethod() {
-    requires_current_method_ = true;
+  void SetRequiresCurrentMethod(bool requires_current_method) {
+    requires_current_method_ = requires_current_method;
   }
 
   bool RequiresCurrentMethod() const {
@@ -907,9 +898,6 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
 
   // Whether the method is a leaf method.
   bool is_leaf_;
-
-  // Whether the method has to emit a SuspendCheck at entry.
-  bool needs_suspend_check_entry_;
 
   // Whether an instruction in the graph accesses the current method.
   // TODO: Rename: this actually indicates that some instruction in the method
