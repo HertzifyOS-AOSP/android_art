@@ -18,42 +18,15 @@
 #define ART_COMPILER_DRIVER_ASSUME_VALUE_OPTIONS_H_
 
 #include <cstdint>
-#include <ostream>
-#include <string>
-#include <string_view>
 
 #include "base/macros.h"
 #include "base/sdk_version.h"
 
 namespace art HIDDEN {
 
-class AssumeValueOptions;
-
-namespace detail {
-
-class AssumeValueSignature {
- public:
-  bool Equals(const AssumeValueSignature& other) const {
-    return class_descriptor_ == other.class_descriptor_ && member_name_ == other.member_name_;
-  }
-
- private:
-  friend class art::AssumeValueOptions;
-
-  constexpr AssumeValueSignature(std::string_view class_descriptor, std::string_view member_name)
-      : class_descriptor_(class_descriptor), member_name_(member_name) {}
-
-  const std::string_view class_descriptor_;
-  const std::string_view member_name_;
-};
-
-}  // namespace detail
-
 // A helper class containing configured values that can be safely assumed during compile time.
 class AssumeValueOptions final {
  public:
-  static constexpr detail::AssumeValueSignature kSdkInt{"Landroid/os/Build$VERSION;", "SDK_INT"};
-
   static constexpr uint32_t kUnsetSdkInt = static_cast<uint32_t>(SdkVersion::kUnset);
 
   // The assumed Build.VERSION.SDK_INT value to use for compilation.
@@ -63,14 +36,8 @@ class AssumeValueOptions final {
   // Whether a valid, explicit SDK_INT has been set for compilation.
   bool HasValidSdkInt() const { return sdk_int_ != kUnsetSdkInt; }
 
-  // Sets the assumed value for a given member, if supported.
-  EXPORT bool MaybeSetAssumedValue(const detail::AssumeValueSignature& signature, int32_t value);
-
-  bool MaybeSetAssumedValue(std::string_view class_descriptor,
-                            std::string_view member_name,
-                            int32_t value) {
-    return MaybeSetAssumedValue(detail::AssumeValueSignature(class_descriptor, member_name), value);
-  }
+  // Sets the assumed Build.VERSION.SDK_INT value to user for compilation, if supported.
+  EXPORT void SetSdkInt(uint32_t sdk_int);
 
  private:
   // The assumed android.os.Build.VERSION.SDK_INT value to use during compilation.

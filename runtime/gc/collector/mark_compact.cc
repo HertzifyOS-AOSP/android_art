@@ -319,8 +319,11 @@ bool ShouldUseGenerationalGC() {
   // can pick a different values than zygote and will be able to execute.
   return GetBoolProperty("persist.device_config.runtime_native_boot.use_generational_gc", true);
 }
+// Inter-Processor Interrupts (IPI), which are used for TLB flush, are very slow on
+// virtual devices, like cuttlefish. Therefore, we don't use MOVE ioctl on such devices.
 static const bool gMoveIoctlRequested =
     com::android::art::flags::use_uffd_move_ioctl() &&
+    android::base::GetProperty("ro.hardware.virtual_device", "") != "1" &&
     GetBoolProperty("persist.device_config.runtime_native_boot.use_uffd_move_ioctl", true);
 #else
 bool ShouldUseGenerationalGC() { return true; }

@@ -151,3 +151,12 @@ flag {
   is_fixed_read_only: true
   is_exported: true
 }
+
+flag {
+  name: "ignore_boot_image_extension_class_resolution"
+  namespace: "art_cloud"
+  description: "Flag to ignore boot image extension class resolution"
+  bug: "274077782"
+  is_fixed_read_only: true
+  is_exported: false
+}

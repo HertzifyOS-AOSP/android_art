@@ -65,6 +65,7 @@
 #include "android/binder_interface_utils.h"
 #include "android/binder_manager.h"
 #include "android/binder_process.h"
+#include "assume_value_signatures.h"
 #include "base/compiler_filter.h"
 #include "base/file_magic.h"
 #include "base/file_utils.h"
@@ -1935,10 +1936,8 @@ void Artd::AddCompilerConfigFlags(const std::string& instruction_set,
 
   const uint32_t sdk_version = GetSdkVersion();
   if (sdk_version != static_cast<uint32_t>(SdkVersion::kUnset)) {
-    // TODO(b/204924812): Reuse the appropriate SDK_INT signature from
-    // AssumeValueOptions to generate the correctly formatted argument.
-    constexpr const char* kSdkIntSignature = "Landroid/os/Build$VERSION;->SDK_INT";
-    args.Add(ART_FORMAT("--assume-value={}:{}", kSdkIntSignature, sdk_version));
+    args.Add(
+        ART_FORMAT("--assume-value={}:{}", AssumeValueSignatures::kSdkInt.AsKey(), sdk_version));
   }
 }
 
