@@ -1091,6 +1091,7 @@ std::unique_ptr<OatFile> OatFileAssistant::OatFileInfoBackedByVdex::LoadFile(
                                                         std::move(vdex),
                                                         oat_file_assistant_->dex_location_,
                                                         oat_file_assistant_->context_,
+                                                        kReasonVdex,
                                                         error_msg));
 }
 
@@ -1109,6 +1110,7 @@ std::unique_ptr<OatFile> OatFileAssistant::OatFileInfoBackedByDm::LoadFile(
                                                         std::move(vdex),
                                                         oat_file_assistant_->dex_location_,
                                                         oat_file_assistant_->context_,
+                                                        kReasonVdexDm,
                                                         error_msg));
 }
 

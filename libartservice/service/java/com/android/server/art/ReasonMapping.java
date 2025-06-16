@@ -288,6 +288,7 @@ public class ReasonMapping {
             case "vdex" -> 24;
             case "boot-after-mainline-update" -> 25;
             case "cloud" -> 26;
+            case "vdex-dm" -> 27;
             default -> 1;
         };
     }

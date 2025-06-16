@@ -1977,6 +1977,13 @@ TEST_P(OatFileAssistantTest, DmUpToDateDexUncompressed) {
 
   OatFileAssistant oat_file_assistant = CreateOatFileAssistant(dex_location.c_str());
 
+  VerifyOptimizationStatusWithInstance(&oat_file_assistant,
+                                       "verify",
+                                       "vdex-dm",
+                                       "up-to-date",
+                                       OatFileAssistant::kLocationDm,
+                                       /*is_backed_by_vdex_only=*/true);
+
   VerifyGetDexOptNeeded(&oat_file_assistant,
                         CompilerFilter::kSpeed,
                         default_trigger_,
@@ -2028,6 +2035,13 @@ TEST_P(OatFileAssistantTest, DmUpToDateDexCompressed) {
   auto scoped_maybe_without_runtime = ScopedMaybeWithoutRuntime();
 
   OatFileAssistant oat_file_assistant = CreateOatFileAssistant(dex_location.c_str());
+
+  VerifyOptimizationStatusWithInstance(&oat_file_assistant,
+                                       "verify",
+                                       "vdex-dm",
+                                       "up-to-date",
+                                       OatFileAssistant::kLocationDm,
+                                       /*is_backed_by_vdex_only=*/true);
 
   VerifyGetDexOptNeeded(&oat_file_assistant,
                         CompilerFilter::kSpeed,
@@ -2552,7 +2566,7 @@ TEST_P(OatFileAssistantTest, SdmApexVersionMismatch) {
 
   VerifyOptimizationStatusWithInstance(&oat_file_assistant,
                                        "verify",
-                                       "vdex",
+                                       "vdex-dm",
                                        "up-to-date",
                                        OatFileAssistant::kLocationDm,
                                        /*is_backed_by_vdex_only=*/true);
