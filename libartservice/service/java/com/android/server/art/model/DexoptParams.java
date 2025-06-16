@@ -126,10 +126,6 @@ public class DexoptParams {
             if (mParams.mReason.isEmpty()) {
                 throw new IllegalArgumentException("Reason must not be empty");
             }
-            if (mParams.mReason.equals(ArtConstants.REASON_VDEX)) {
-                throw new IllegalArgumentException(
-                        "Reason must not be '" + ArtConstants.REASON_VDEX + "'");
-            }
 
             if (mParams.mCompilerFilter.isEmpty()) {
                 mParams.mCompilerFilter = ReasonMapping.getCompilerFilterForReason(mParams.mReason);

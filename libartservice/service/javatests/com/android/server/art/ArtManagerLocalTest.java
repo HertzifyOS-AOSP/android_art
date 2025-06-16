@@ -423,27 +423,31 @@ public class ArtManagerLocalTest {
     @Test
     public void testGetDexoptStatus() throws Exception {
         doReturn(createGetDexoptStatusResult("speed", "compilation-reason-0",
-                         "location-debug-string-0", ArtifactsLocation.NEXT_TO_DEX))
+                         "location-debug-string-0", ArtifactsLocation.NEXT_TO_DEX,
+                         false /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus("/somewhere/app/foo/base.apk", "arm64", "PCL[]");
         doReturn(createGetDexoptStatusResult("speed-profile", "compilation-reason-1",
-                         "location-debug-string-1", ArtifactsLocation.NEXT_TO_DEX))
+                         "location-debug-string-1", ArtifactsLocation.NEXT_TO_DEX,
+                         false /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus("/somewhere/app/foo/base.apk", "arm", "PCL[]");
         doReturn(createGetDexoptStatusResult("verify", "compilation-reason-2",
-                         "location-debug-string-2", ArtifactsLocation.NEXT_TO_DEX))
+                         "location-debug-string-2", ArtifactsLocation.NEXT_TO_DEX,
+                         false /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus("/somewhere/app/foo/split_0.apk", "arm64", "PCL[base.apk]");
         doReturn(createGetDexoptStatusResult("extract", "compilation-reason-3",
-                         "location-debug-string-3", ArtifactsLocation.NEXT_TO_DEX))
+                         "location-debug-string-3", ArtifactsLocation.NEXT_TO_DEX,
+                         false /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus("/somewhere/app/foo/split_0.apk", "arm", "PCL[base.apk]");
-        doReturn(createGetDexoptStatusResult(
-                         "run-from-apk", "unknown", "unknown", ArtifactsLocation.NEXT_TO_DEX))
+        doReturn(createGetDexoptStatusResult("run-from-apk", "unknown", "unknown",
+                         ArtifactsLocation.NEXT_TO_DEX, false /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus("/data/user/0/foo/1.apk", "arm64", "CLC");
-        doReturn(createGetDexoptStatusResult(
-                         "unknown", "unknown", "error", ArtifactsLocation.NONE_OR_ERROR))
+        doReturn(createGetDexoptStatusResult("unknown", "unknown", "error",
+                         ArtifactsLocation.NONE_OR_ERROR, false /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus("/data/user/0/foo/not_found.apk", "arm64", "CLC");
 
@@ -1237,30 +1241,30 @@ public class ArtManagerLocalTest {
 
     private void testCleanup(boolean keepPreRebootStagedFiles) throws Exception {
         // It should keep all artifacts, but not runtime images.
-        doReturn(createGetDexoptStatusResult(
-                         "speed-profile", "bg-dexopt", "location", ArtifactsLocation.NEXT_TO_DEX))
+        doReturn(createGetDexoptStatusResult("speed-profile", "bg-dexopt", "location",
+                         ArtifactsLocation.NEXT_TO_DEX, false /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus(eq("/somewhere/app/foo/base.apk"), eq("arm64"), any());
-        doReturn(createGetDexoptStatusResult(
-                         "verify", "cmdline", "location", ArtifactsLocation.NEXT_TO_DEX))
+        doReturn(createGetDexoptStatusResult("verify", "cmdline", "location",
+                         ArtifactsLocation.NEXT_TO_DEX, false /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus(eq("/data/user/0/foo/1.apk"), eq("arm64"), any());
 
         // It should keep all artifacts and runtime images.
-        doReturn(createGetDexoptStatusResult(
-                         "verify", "bg-dexopt", "location", ArtifactsLocation.DALVIK_CACHE))
+        doReturn(createGetDexoptStatusResult("verify", "bg-dexopt", "location",
+                         ArtifactsLocation.DALVIK_CACHE, false /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus(eq("/somewhere/app/foo/split_0.apk"), eq("arm64"), any());
 
         // It should only keep VDEX files and runtime images.
-        doReturn(createGetDexoptStatusResult(
-                         "verify", "vdex", "location", ArtifactsLocation.NEXT_TO_DEX))
+        doReturn(createGetDexoptStatusResult("verify", "vdex", "location",
+                         ArtifactsLocation.NEXT_TO_DEX, true /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus(eq("/somewhere/app/foo/split_0.apk"), eq("arm"), any());
 
         // It should not keep any artifacts or runtime images.
-        doReturn(createGetDexoptStatusResult(
-                         "run-from-apk", "unknown", "unknown", ArtifactsLocation.NONE_OR_ERROR))
+        doReturn(createGetDexoptStatusResult("run-from-apk", "unknown", "unknown",
+                         ArtifactsLocation.NONE_OR_ERROR, false /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus(eq("/somewhere/app/foo/base.apk"), eq("arm"), any());
 
@@ -1303,31 +1307,32 @@ public class ArtManagerLocalTest {
         when(mPreRebootDexoptJob.hasStarted()).thenReturn(false);
 
         // It should keep the SDM file, but not runtime images.
-        doReturn(createGetDexoptStatusResult(
-                         "speed-profile", "cloud", "location", ArtifactsLocation.SDM_NEXT_TO_DEX))
+        doReturn(createGetDexoptStatusResult("speed-profile", "cloud", "location",
+                         ArtifactsLocation.SDM_NEXT_TO_DEX, false /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus(eq("/somewhere/app/foo/base.apk"), eq("arm64"), any());
 
         // It should keep the SDM file, but not runtime images.
-        doReturn(createGetDexoptStatusResult(
-                         "speed-profile", "cloud", "location", ArtifactsLocation.SDM_DALVIK_CACHE))
+        doReturn(createGetDexoptStatusResult("speed-profile", "cloud", "location",
+                         ArtifactsLocation.SDM_DALVIK_CACHE, false /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus(eq("/somewhere/app/foo/base.apk"), eq("arm"), any());
 
         // It should keep the SDM file and runtime images.
-        doReturn(createGetDexoptStatusResult(
-                         "verify", "cloud", "location", ArtifactsLocation.SDM_NEXT_TO_DEX))
+        doReturn(createGetDexoptStatusResult("verify", "cloud", "location",
+                         ArtifactsLocation.SDM_NEXT_TO_DEX, false /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus(eq("/somewhere/app/foo/split_0.apk"), eq("arm64"), any());
 
         // It should only keep runtime images.
-        doReturn(createGetDexoptStatusResult("verify", "vdex", "location", ArtifactsLocation.DM))
+        doReturn(createGetDexoptStatusResult("verify", "vdex", "location", ArtifactsLocation.DM,
+                         true /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus(eq("/somewhere/app/foo/split_0.apk"), eq("arm"), any());
 
         // This file is uninteresting in this test.
-        doReturn(createGetDexoptStatusResult(
-                         "run-from-apk", "unknown", "unknown", ArtifactsLocation.NONE_OR_ERROR))
+        doReturn(createGetDexoptStatusResult("run-from-apk", "unknown", "unknown",
+                         ArtifactsLocation.NONE_OR_ERROR, false /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus(eq("/data/user/0/foo/1.apk"), eq("arm64"), any());
 
@@ -1381,30 +1386,30 @@ public class ArtManagerLocalTest {
                         eq(PKG_NAME_1), eq(true) /* excludeObsoleteDexesAndLoaders */);
 
         // It should count all artifacts, but not runtime images.
-        doReturn(createGetDexoptStatusResult(
-                         "speed-profile", "bg-dexopt", "location", ArtifactsLocation.NEXT_TO_DEX))
+        doReturn(createGetDexoptStatusResult("speed-profile", "bg-dexopt", "location",
+                         ArtifactsLocation.NEXT_TO_DEX, false /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus(eq("/somewhere/app/foo/base.apk"), eq("arm64"), any());
-        doReturn(createGetDexoptStatusResult(
-                         "verify", "cmdline", "location", ArtifactsLocation.NEXT_TO_DEX))
+        doReturn(createGetDexoptStatusResult("verify", "cmdline", "location",
+                         ArtifactsLocation.NEXT_TO_DEX, false /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus(eq("/data/user/0/foo/1.apk"), eq("arm64"), any());
 
         // It should count all artifacts and runtime images.
-        doReturn(createGetDexoptStatusResult(
-                         "verify", "bg-dexopt", "location", ArtifactsLocation.DALVIK_CACHE))
+        doReturn(createGetDexoptStatusResult("verify", "bg-dexopt", "location",
+                         ArtifactsLocation.DALVIK_CACHE, false /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus(eq("/somewhere/app/foo/split_0.apk"), eq("arm64"), any());
 
         // It should only count VDEX files and runtime images.
-        doReturn(createGetDexoptStatusResult(
-                         "verify", "vdex", "location", ArtifactsLocation.NEXT_TO_DEX))
+        doReturn(createGetDexoptStatusResult("verify", "vdex", "location",
+                         ArtifactsLocation.NEXT_TO_DEX, true /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus(eq("/somewhere/app/foo/split_0.apk"), eq("arm"), any());
 
         // It should not count any artifacts or runtime images.
-        doReturn(createGetDexoptStatusResult(
-                         "run-from-apk", "unknown", "unknown", ArtifactsLocation.NONE_OR_ERROR))
+        doReturn(createGetDexoptStatusResult("run-from-apk", "unknown", "unknown",
+                         ArtifactsLocation.NONE_OR_ERROR, false /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus(eq("/somewhere/app/foo/base.apk"), eq("arm"), any());
 
@@ -1453,8 +1458,8 @@ public class ArtManagerLocalTest {
 
         // These belong to a different user.
         if (isSystemOrRootOrShell) {
-            doReturn(createGetDexoptStatusResult(
-                             "verify", "cmdline", "location", ArtifactsLocation.NEXT_TO_DEX))
+            doReturn(createGetDexoptStatusResult("verify", "cmdline", "location",
+                             ArtifactsLocation.NEXT_TO_DEX, false /* isBackedByVdexOnly */))
                     .when(mArtd)
                     .getDexoptStatus(eq("/data/user/1/foo/1.apk"), eq("arm64"), any());
 
@@ -1505,31 +1510,32 @@ public class ArtManagerLocalTest {
     @Test
     public void testGetArtManagedFileStatsDmAndSdm() throws Exception {
         // It should count the SDM file, but not runtime images.
-        doReturn(createGetDexoptStatusResult(
-                         "speed-profile", "cloud", "location", ArtifactsLocation.SDM_NEXT_TO_DEX))
+        doReturn(createGetDexoptStatusResult("speed-profile", "cloud", "location",
+                         ArtifactsLocation.SDM_NEXT_TO_DEX, false /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus(eq("/somewhere/app/foo/base.apk"), eq("arm64"), any());
 
         // It should count the SDM file, but not runtime images.
-        doReturn(createGetDexoptStatusResult(
-                         "speed-profile", "cloud", "location", ArtifactsLocation.SDM_DALVIK_CACHE))
+        doReturn(createGetDexoptStatusResult("speed-profile", "cloud", "location",
+                         ArtifactsLocation.SDM_DALVIK_CACHE, false /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus(eq("/somewhere/app/foo/base.apk"), eq("arm"), any());
 
         // It should count the SDM file and runtime images.
-        doReturn(createGetDexoptStatusResult(
-                         "verify", "cloud", "location", ArtifactsLocation.SDM_NEXT_TO_DEX))
+        doReturn(createGetDexoptStatusResult("verify", "cloud", "location",
+                         ArtifactsLocation.SDM_NEXT_TO_DEX, false /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus(eq("/somewhere/app/foo/split_0.apk"), eq("arm64"), any());
 
         // It should only count runtime images.
-        doReturn(createGetDexoptStatusResult("verify", "vdex", "location", ArtifactsLocation.DM))
+        doReturn(createGetDexoptStatusResult("verify", "vdex", "location", ArtifactsLocation.DM,
+                         true /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus(eq("/somewhere/app/foo/split_0.apk"), eq("arm"), any());
 
         // This file is uninteresting in this test.
-        doReturn(createGetDexoptStatusResult(
-                         "run-from-apk", "unknown", "unknown", ArtifactsLocation.NONE_OR_ERROR))
+        doReturn(createGetDexoptStatusResult("run-from-apk", "unknown", "unknown",
+                         ArtifactsLocation.NONE_OR_ERROR, false /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus(eq("/data/user/0/foo/1.apk"), eq("arm64"), any());
 
@@ -1740,12 +1746,14 @@ public class ArtManagerLocalTest {
     }
 
     private GetDexoptStatusResult createGetDexoptStatusResult(String compilerFilter,
-            String compilationReason, String locationDebugString, @ArtifactsLocation int location) {
+            String compilationReason, String locationDebugString, @ArtifactsLocation int location,
+            boolean isBackedByVdexOnly) {
         var getDexoptStatusResult = new GetDexoptStatusResult();
         getDexoptStatusResult.compilerFilter = compilerFilter;
         getDexoptStatusResult.compilationReason = compilationReason;
         getDexoptStatusResult.locationDebugString = locationDebugString;
         getDexoptStatusResult.artifactsLocation = location;
+        getDexoptStatusResult.isBackedByVdexOnly = isBackedByVdexOnly;
         return getDexoptStatusResult;
     }
 

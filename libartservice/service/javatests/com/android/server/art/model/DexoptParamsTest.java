@@ -44,11 +44,6 @@ public class DexoptParamsTest {
     }
 
     @Test(expected = IllegalArgumentException.class)
-    public void testBuildReasonVdex() {
-        new DexoptParams.Builder("vdex").setCompilerFilter("speed").setPriorityClass(90).build();
-    }
-
-    @Test(expected = IllegalArgumentException.class)
     public void testBuildInvalidCompilerFilter() {
         new DexoptParams.Builder("install").setCompilerFilter("invalid").build();
     }

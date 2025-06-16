@@ -612,7 +612,8 @@ ScopedAStatus Artd::getDexoptStatus(const std::string& in_dexFile,
                                             &_aidl_return->compilerFilter,
                                             &_aidl_return->compilationReason,
                                             &ignored_odex_status,
-                                            &location);
+                                            &location,
+                                            &_aidl_return->isBackedByVdexOnly);
   _aidl_return->artifactsLocation = ArtifactsLocationToAidl(location);
 
   // We ignore odex_status because it is not meaningful. It can only be either "up-to-date",
