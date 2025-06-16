@@ -153,7 +153,7 @@ class JitThreadPool : public AbstractThreadPool {
   JitThreadPool(const char* name,
                 size_t num_threads,
                 size_t worker_stack_size)
-      // We need peers as we may report the JIT thread, e.g., in the debugger.
+      // We need peers as JIT thread can load classes and we may report related events b/29547798.
       : AbstractThreadPool(name, num_threads, /* create_peers= */ true, worker_stack_size) {}
 
   // Try to fetch an entry from `methods`. Return null if `methods` is empty.
