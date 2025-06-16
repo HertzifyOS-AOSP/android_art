@@ -177,7 +177,7 @@ inline uint32_t Class::NumMethods() {
 }
 
 inline uint32_t Class::NumMethods(LengthPrefixedArray<ArtMethod>* methods) {
-  return methods->size();
+  return (methods == nullptr) ? 0 :  methods->size();
 }
 
 inline void Class::SetMethodsPtr(LengthPrefixedArray<ArtMethod>* new_methods,
