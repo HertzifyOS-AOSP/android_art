@@ -1108,7 +1108,7 @@ class Builder:
             processed_nodes,
         )
 
-    def build(self):
+    def build(self, args: argparse.Namespace):
         """Builds targets based on enabled internal and positional targets."""
         if self.build_vars is None:
             print(
@@ -1148,6 +1148,8 @@ class Builder:
         if unique_make_targets:
             env_for_make = os.environ.copy()
             make_command = ["./build/soong/soong_ui.bash", "--make-mode"]
+            if args.jobs:
+                make_command.append(f"-j{args.jobs}")
             make_command.extend(unique_make_targets)
 
             print_env_parts = []
@@ -1250,6 +1252,12 @@ def parse_command_line_arguments(builder: Builder) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Builds ART targets with Soong, handling APEX extractions."
     )
+    parser.add_argument(
+        "-j",
+        dest="jobs",
+        type=int,
+        help="Set the number of parallel jobs for the build.",
+    )
     # Arguments for enabling internal targets
     parser.add_argument(
         "--build-art-host",
@@ -1342,7 +1350,7 @@ def main():
     builder.setup_default_targets(build_vars)
 
     if builder.enabled_internal_targets or builder.positional_make_targets:
-        builder.build()
+        builder.build(args)
     else:
         print("No build targets specified. Printing help:")
         parser.print_help()
