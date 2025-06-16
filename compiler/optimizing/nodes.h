@@ -228,14 +228,6 @@ class HBasicBlock final : public ArenaObject<kArenaAllocBasicBlock> {
     return dominated_blocks_;
   }
 
-  bool IsEntryBlock() const {
-    return graph_->GetEntryBlock() == this;
-  }
-
-  bool IsExitBlock() const {
-    return graph_->GetExitBlock() == this;
-  }
-
   bool IsSingleGoto() const;
   bool IsSingleReturn() const;
   bool IsSingleReturnOrReturnVoidAllowingPhis() const;

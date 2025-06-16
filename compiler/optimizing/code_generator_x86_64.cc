@@ -2096,7 +2096,7 @@ void CodeGeneratorX86_64::AddLocationAsTemp(Location location, LocationSummary* 
 }
 
 void InstructionCodeGeneratorX86_64::HandleGoto(HInstruction* got, HBasicBlock* successor) {
-  if (successor->IsExitBlock()) {
+  if (GetGraph()->IsExitBlock(successor)) {
     DCHECK(got->GetPrevious()->AlwaysThrows());
     return;  // no code needed
   }
@@ -2111,7 +2111,7 @@ void InstructionCodeGeneratorX86_64::HandleGoto(HInstruction* got, HBasicBlock* 
     return;
   }
 
-  if (block->IsEntryBlock() && (previous != nullptr) && previous->IsSuspendCheck()) {
+  if (GetGraph()->IsEntryBlock(block) && (previous != nullptr) && previous->IsSuspendCheck()) {
     GenerateSuspendCheck(previous->AsSuspendCheck(), nullptr);
   }
   if (!codegen_->GoesToNextBlock(got->GetBlock(), successor)) {
@@ -2133,7 +2133,7 @@ void LocationsBuilderX86_64::VisitTryBoundary(HTryBoundary* try_boundary) {
 
 void InstructionCodeGeneratorX86_64::VisitTryBoundary(HTryBoundary* try_boundary) {
   HBasicBlock* successor = try_boundary->GetNormalFlowSuccessor();
-  if (!successor->IsExitBlock()) {
+  if (!GetGraph()->IsExitBlock(successor)) {
     HandleGoto(try_boundary, successor);
   }
 }
@@ -6335,7 +6335,7 @@ void InstructionCodeGeneratorX86_64::VisitSuspendCheck(HSuspendCheck* instructio
     // The back edge will generate the suspend check.
     return;
   }
-  if (block->IsEntryBlock() && instruction->GetNext()->IsGoto()) {
+  if (GetGraph()->IsEntryBlock(block) && instruction->GetNext()->IsGoto()) {
     // The goto will generate the suspend check.
     return;
   }

@@ -73,7 +73,8 @@ static inline uint32_t AllocateLocations(HGraphVisitor* location_builder,
     DCHECK(instruction->GetLocations() != nullptr);
     DCHECK(!instruction->GetLocations()->CanCall());
     DCHECK(!instruction->NeedsCurrentMethod());
-  } else if (instruction->IsSuspendCheck() && instruction->GetBlock()->IsEntryBlock()) {
+  } else if (instruction->IsSuspendCheck() &&
+             location_builder->GetGraph()->IsEntryBlock(instruction->GetBlock())) {
     DCHECK(*entry_suspend_check == nullptr);  // At most one entry suspend check.
     *entry_suspend_check = instruction->AsSuspendCheck();
   } else {
@@ -433,7 +434,7 @@ void SsaLivenessAnalysis::DoCheckNoLiveInIrreducibleLoop(const HBasicBlock& bloc
   // and the current method, which can be trivially re-materialized.
   for (uint32_t idx : live_in.Indexes()) {
     HInstruction* instruction = GetInstructionFromSsaIndex(idx);
-    DCHECK(instruction->GetBlock()->IsEntryBlock()) << instruction->DebugName();
+    DCHECK(graph_->IsEntryBlock(instruction->GetBlock())) << instruction->DebugName();
     DCHECK(!instruction->IsParameterValue());
     DCHECK(instruction->IsCurrentMethod() || instruction->IsConstant())
         << instruction->DebugName();

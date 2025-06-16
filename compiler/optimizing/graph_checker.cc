@@ -52,14 +52,14 @@ static bool IsAllowedToJumpToExitBlock(HInstruction* instruction) {
   return instruction->AlwaysThrows();
 }
 
-static bool IsExitTryBoundaryIntoExitBlock(HBasicBlock* block) {
+bool GraphChecker::IsExitTryBoundaryIntoExitBlock(HBasicBlock* block) {
   if (!block->IsSingleTryBoundary()) {
     return false;
   }
 
   HTryBoundary* boundary = block->GetLastInstruction()->AsTryBoundary();
   return block->GetPredecessors().size() == 1u &&
-         boundary->GetNormalFlowSuccessor()->IsExitBlock() &&
+         GetGraph()->IsExitBlock(boundary->GetNormalFlowSuccessor()) &&
          !boundary->IsEntry();
 }
 
@@ -248,7 +248,7 @@ void GraphChecker::VisitBasicBlock(HBasicBlock* block) {
 
   // Ensure that only Return(Void) and Throw jump to Exit. An exiting TryBoundary
   // may be between the instructions if the Throw/Return(Void) is in a try block.
-  if (block->IsExitBlock()) {
+  if (GetGraph()->IsExitBlock(block)) {
     for (HBasicBlock* predecessor : block->GetPredecessors()) {
       HInstruction* last_instruction = IsExitTryBoundaryIntoExitBlock(predecessor) ?
         predecessor->GetSinglePredecessor()->GetLastInstruction() :
@@ -341,7 +341,7 @@ void GraphChecker::VisitBasicBlock(HBasicBlock* block) {
   }
 
   // Ensure all blocks have at least one successor, except the Exit block.
-  if (block->GetSuccessors().empty() && !block->IsExitBlock()) {
+  if (block->GetSuccessors().empty() && !GetGraph()->IsExitBlock(block)) {
     AddError(StringPrintf("Block %d has no successor and it is not the Exit block.",
                           block->GetBlockId()));
   }
@@ -796,7 +796,7 @@ void GraphChecker::VisitInvokeStaticOrDirect(HInvokeStaticOrDirect* invoke) {
 void GraphChecker::VisitReturn(HReturn* ret) {
   VisitInstruction(ret);
   HBasicBlock* successor = ret->GetBlock()->GetSingleSuccessor();
-  if (!successor->IsExitBlock() && !IsExitTryBoundaryIntoExitBlock(successor)) {
+  if (!GetGraph()->IsExitBlock(successor) && !IsExitTryBoundaryIntoExitBlock(successor)) {
     AddError(StringPrintf("%s:%d does not jump to the exit block.",
                           ret->DebugName(),
                           ret->GetId()));
@@ -806,7 +806,7 @@ void GraphChecker::VisitReturn(HReturn* ret) {
 void GraphChecker::VisitReturnVoid(HReturnVoid* ret) {
   VisitInstruction(ret);
   HBasicBlock* successor = ret->GetBlock()->GetSingleSuccessor();
-  if (!successor->IsExitBlock() && !IsExitTryBoundaryIntoExitBlock(successor)) {
+  if (!GetGraph()->IsExitBlock(successor) && !IsExitTryBoundaryIntoExitBlock(successor)) {
     AddError(StringPrintf("%s:%d does not jump to the exit block.",
                           ret->DebugName(),
                           ret->GetId()));
@@ -1463,7 +1463,7 @@ void GraphChecker::VisitConstant(HConstant* instruction) {
   VisitInstruction(instruction);
 
   HBasicBlock* block = instruction->GetBlock();
-  if (!block->IsEntryBlock()) {
+  if (!GetGraph()->IsEntryBlock(block)) {
     AddError(StringPrintf(
         "%s %d should be in the entry block but is in block %d.",
         instruction->DebugName(),

@@ -1153,7 +1153,7 @@ void SchedulingLatencyVisitorARM::VisitStaticFieldSet(HStaticFieldSet* instructi
 void SchedulingLatencyVisitorARM::VisitSuspendCheck(HSuspendCheck* instruction) {
   HBasicBlock* block = instruction->GetBlock();
   DCHECK_IMPLIES(block->GetLoopInformation() == nullptr,
-                 block->IsEntryBlock() && instruction->GetNext()->IsGoto());
+                 block->GetGraph()->IsEntryBlock(block) && instruction->GetNext()->IsGoto());
   // Users do not use any data results.
   last_visited_latency_ = 0;
 }

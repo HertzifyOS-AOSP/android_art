@@ -1997,7 +1997,7 @@ void CodeGeneratorRISCV64::GenerateReadBarrierForRootSlow(HInstruction* instruct
 
 void InstructionCodeGeneratorRISCV64::HandleGoto(HInstruction* instruction,
                                                  HBasicBlock* successor) {
-  if (successor->IsExitBlock()) {
+  if (GetGraph()->IsExitBlock(successor)) {
     DCHECK(instruction->GetPrevious()->AlwaysThrows());
     return;  // no code needed
   }
@@ -2011,7 +2011,7 @@ void InstructionCodeGeneratorRISCV64::HandleGoto(HInstruction* instruction,
     GenerateSuspendCheck(info->GetSuspendCheck(), successor);
     return;  // `GenerateSuspendCheck()` emitted the jump.
   }
-  if (block->IsEntryBlock() && previous != nullptr && previous->IsSuspendCheck()) {
+  if (GetGraph()->IsEntryBlock(block) && previous != nullptr && previous->IsSuspendCheck()) {
     GenerateSuspendCheck(previous->AsSuspendCheck(), nullptr);
   }
   if (!codegen_->GoesToNextBlock(block, successor)) {
@@ -5246,7 +5246,7 @@ void InstructionCodeGeneratorRISCV64::VisitSuspendCheck(HSuspendCheck* instructi
     // The back edge will generate the suspend check.
     return;
   }
-  if (block->IsEntryBlock() && instruction->GetNext()->IsGoto()) {
+  if (GetGraph()->IsEntryBlock(block) && instruction->GetNext()->IsGoto()) {
     // The goto will generate the suspend check.
     return;
   }
@@ -5271,7 +5271,7 @@ void LocationsBuilderRISCV64::VisitTryBoundary(HTryBoundary* instruction) {
 
 void InstructionCodeGeneratorRISCV64::VisitTryBoundary(HTryBoundary* instruction) {
   HBasicBlock* successor = instruction->GetNormalFlowSuccessor();
-  if (!successor->IsExitBlock()) {
+  if (!GetGraph()->IsExitBlock(successor)) {
     HandleGoto(instruction, successor);
   }
 }

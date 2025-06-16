@@ -3880,7 +3880,7 @@ void InstructionCodeGeneratorARM64::VisitFloatConstant([[maybe_unused]] HFloatCo
 }
 
 void InstructionCodeGeneratorARM64::HandleGoto(HInstruction* got, HBasicBlock* successor) {
-  if (successor->IsExitBlock()) {
+  if (GetGraph()->IsExitBlock(successor)) {
     DCHECK(got->GetPrevious()->AlwaysThrows());
     return;  // no code needed
   }
@@ -3894,7 +3894,7 @@ void InstructionCodeGeneratorARM64::HandleGoto(HInstruction* got, HBasicBlock* s
     GenerateSuspendCheck(info->GetSuspendCheck(), successor);
     return;  // `GenerateSuspendCheck()` emitted the jump.
   }
-  if (block->IsEntryBlock() && (previous != nullptr) && previous->IsSuspendCheck()) {
+  if (GetGraph()->IsEntryBlock(block) && (previous != nullptr) && previous->IsSuspendCheck()) {
     GenerateSuspendCheck(previous->AsSuspendCheck(), nullptr);
     codegen_->MaybeGenerateMarkingRegisterCheck(/* code= */ __LINE__);
   }
@@ -3917,7 +3917,7 @@ void LocationsBuilderARM64::VisitTryBoundary(HTryBoundary* try_boundary) {
 
 void InstructionCodeGeneratorARM64::VisitTryBoundary(HTryBoundary* try_boundary) {
   HBasicBlock* successor = try_boundary->GetNormalFlowSuccessor();
-  if (!successor->IsExitBlock()) {
+  if (!GetGraph()->IsExitBlock(successor)) {
     HandleGoto(try_boundary, successor);
   }
 }
@@ -6721,7 +6721,7 @@ void InstructionCodeGeneratorARM64::VisitSuspendCheck(HSuspendCheck* instruction
     // The back edge will generate the suspend check.
     return;
   }
-  if (block->IsEntryBlock() && instruction->GetNext()->IsGoto()) {
+  if (GetGraph()->IsEntryBlock(block) && instruction->GetNext()->IsGoto()) {
     // The goto will generate the suspend check.
     return;
   }

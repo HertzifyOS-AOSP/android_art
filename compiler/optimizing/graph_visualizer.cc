@@ -279,7 +279,7 @@ class HGraphVisualizerPrinter final : public HGraphDelegateVisitor {
     for (HBasicBlock* predecessor : block->GetPredecessors()) {
       output_ << " \"" << namer_.GetName(predecessor) << "\" ";
     }
-    if (block->IsEntryBlock() && (disasm_info_ != nullptr)) {
+    if (GetGraph()->IsEntryBlock(block) && (disasm_info_ != nullptr)) {
       output_ << " \"" << kDisassemblyBlockFrameEntry << "\" ";
     }
     output_<< "\n";
@@ -295,7 +295,7 @@ class HGraphVisualizerPrinter final : public HGraphDelegateVisitor {
   }
 
   void PrintExceptionHandlers(HBasicBlock* block) {
-    bool has_slow_paths = block->IsExitBlock() &&
+    bool has_slow_paths = GetGraph()->IsExitBlock(block) &&
                           (disasm_info_ != nullptr) &&
                           !disasm_info_->GetSlowPathIntervals().empty();
     if (IsDebugDump() && block->GetExceptionalSuccessors().empty() && !has_slow_paths) {
