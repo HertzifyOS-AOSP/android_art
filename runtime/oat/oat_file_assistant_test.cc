@@ -72,6 +72,7 @@ class OatFileAssistantTest : public OatFileAssistantBaseTest,
                                 const std::string& expected_reason,
                                 const std::string& expected_odex_status,
                                 OatFileAssistant::Location expected_location,
+                                bool expected_is_backed_by_vdex_only,
                                 bool check_context = false) {
     std::string expected_filter_name;
     if constexpr (std::is_same_v<T, CompilerFilter::Filter>) {
@@ -92,34 +93,45 @@ class OatFileAssistantTest : public OatFileAssistantBaseTest,
                                               &compilation_reason,
                                               MaybeGetOatFileAssistantContext());
 
-      ASSERT_EQ(expected_filter_name, compilation_filter);
-      ASSERT_EQ(expected_reason, compilation_reason);
+      EXPECT_EQ(expected_filter_name, compilation_filter);
+      EXPECT_EQ(expected_reason, compilation_reason);
     }
 
     // Verify the instance methods (called at runtime and from artd).
     OatFileAssistant assistant = CreateOatFileAssistant(file.c_str(), context);
-    VerifyOptimizationStatusWithInstance(
-        &assistant, expected_filter_name, expected_reason, expected_odex_status, expected_location);
+    VerifyOptimizationStatusWithInstance(&assistant,
+                                         expected_filter_name,
+                                         expected_reason,
+                                         expected_odex_status,
+                                         expected_location,
+                                         expected_is_backed_by_vdex_only);
   }
 
   void VerifyOptimizationStatusWithInstance(OatFileAssistant* assistant,
                                             const std::string& expected_filter,
                                             const std::string& expected_reason,
                                             const std::string& expected_odex_status,
-                                            OatFileAssistant::Location expected_location) {
+                                            OatFileAssistant::Location expected_location,
+                                            bool expected_is_backed_by_vdex_only) {
     std::string odex_location;  // ignored
     std::string compilation_filter;
     std::string compilation_reason;
     std::string odex_status;
     OatFileAssistant::Location location;
+    bool is_backed_by_vdex_only;
 
-    assistant->GetOptimizationStatus(
-        &odex_location, &compilation_filter, &compilation_reason, &odex_status, &location);
+    assistant->GetOptimizationStatus(&odex_location,
+                                     &compilation_filter,
+                                     &compilation_reason,
+                                     &odex_status,
+                                     &location,
+                                     &is_backed_by_vdex_only);
 
-    ASSERT_EQ(expected_filter, compilation_filter);
-    ASSERT_EQ(expected_reason, compilation_reason);
-    ASSERT_EQ(expected_odex_status, odex_status);
-    ASSERT_EQ(expected_location, location);
+    EXPECT_EQ(expected_filter, compilation_filter);
+    EXPECT_EQ(expected_reason, compilation_reason);
+    EXPECT_EQ(expected_odex_status, odex_status);
+    EXPECT_EQ(expected_location, location);
+    EXPECT_EQ(expected_is_backed_by_vdex_only, is_backed_by_vdex_only);
   }
 
   bool InsertNewBootClasspathEntry(const std::string& src, std::string* error_msg) {
@@ -385,7 +397,8 @@ TEST_P(OatFileAssistantTest, DexNoOat) {
                            "run-from-apk",
                            "unknown",
                            "io-error-no-oat",
-                           OatFileAssistant::kLocationNoneOrError);
+                           OatFileAssistant::kLocationNoneOrError,
+                           /*is_backed_by_vdex_only=*/false);
 }
 
 // Case: We have no DEX file and no OAT file.
@@ -414,7 +427,8 @@ TEST_P(OatFileAssistantTest, NoDexNoOat) {
                                        "unknown",
                                        "unknown",
                                        "io-error-no-apk",
-                                       OatFileAssistant::kLocationNoneOrError);
+                                       OatFileAssistant::kLocationNoneOrError,
+                                       /*is_backed_by_vdex_only=*/false);
 }
 
 // Case: We have a DEX file and an ODEX file, but no OAT file.
@@ -459,7 +473,8 @@ TEST_P(OatFileAssistantTest, OdexUpToDate) {
                            CompilerFilter::kSpeed,
                            "install",
                            "up-to-date",
-                           OatFileAssistant::kLocationOdex);
+                           OatFileAssistant::kLocationOdex,
+                           /*is_backed_by_vdex_only=*/false);
 }
 
 // Case: We have an ODEX file compiled against partial boot image.
@@ -508,7 +523,8 @@ TEST_P(OatFileAssistantTest, OdexUpToDatePartialBootImage) {
                            CompilerFilter::kSpeed,
                            "install",
                            "up-to-date",
-                           OatFileAssistant::kLocationOdex);
+                           OatFileAssistant::kLocationOdex,
+                           /*is_backed_by_vdex_only=*/false);
 }
 
 // Case: We have a DEX file and a PIC ODEX file, but no OAT file. We load the dex
@@ -596,7 +612,8 @@ TEST_P(OatFileAssistantTest, OatUpToDate) {
                            CompilerFilter::kSpeed,
                            "unknown",
                            "up-to-date",
-                           OatFileAssistant::kLocationOat);
+                           OatFileAssistant::kLocationOat,
+                           /*is_backed_by_vdex_only=*/false);
 }
 
 // Case: Passing valid file descriptors of updated odex/vdex files along with the dex file.
@@ -796,7 +813,8 @@ TEST_P(OatFileAssistantTest, VdexUpToDateNoOdex) {
                            "verify",
                            "vdex",
                            "up-to-date",
-                           OatFileAssistant::kLocationOdex);
+                           OatFileAssistant::kLocationOdex,
+                           /*is_backed_by_vdex_only=*/true);
 }
 
 // Case: We have a DEX file and empty VDEX and ODEX files.
@@ -994,7 +1012,8 @@ TEST_P(OatFileAssistantTest, OatDexOutOfDate) {
                            "run-from-apk-fallback",
                            "unknown",
                            "apk-more-recent",
-                           OatFileAssistant::kLocationNoneOrError);
+                           OatFileAssistant::kLocationNoneOrError,
+                           /*is_backed_by_vdex_only=*/false);
 }
 
 // Case: We have a DEX file and an (ODEX) VDEX file out of date with respect
@@ -1079,7 +1098,8 @@ TEST_P(OatFileAssistantTest, OatImageOutOfDate) {
                            "verify",
                            "vdex",
                            "up-to-date",
-                           OatFileAssistant::kLocationOat);
+                           OatFileAssistant::kLocationOat,
+                           /*is_backed_by_vdex_only=*/true);
 }
 
 TEST_P(OatFileAssistantTest, OatContextOutOfDate) {
@@ -1113,6 +1133,7 @@ TEST_P(OatFileAssistantTest, OatContextOutOfDate) {
                            "vdex",
                            "up-to-date",
                            OatFileAssistant::kLocationOdex,
+                           /*is_backed_by_vdex_only=*/true,
                            /*check_context=*/true);
 }
 
@@ -1193,7 +1214,8 @@ TEST_P(OatFileAssistantTest, ResourceOnlyDex) {
                                        "unknown",
                                        "unknown",
                                        "no-dex-code",
-                                       OatFileAssistant::kLocationNoneOrError);
+                                       OatFileAssistant::kLocationNoneOrError,
+                                       /*is_backed_by_vdex_only=*/false);
 }
 
 // Case: We have a DEX file, an ODEX file and an OAT file.
@@ -1955,6 +1977,13 @@ TEST_P(OatFileAssistantTest, DmUpToDateDexUncompressed) {
 
   OatFileAssistant oat_file_assistant = CreateOatFileAssistant(dex_location.c_str());
 
+  VerifyOptimizationStatusWithInstance(&oat_file_assistant,
+                                       "verify",
+                                       "vdex-dm",
+                                       "up-to-date",
+                                       OatFileAssistant::kLocationDm,
+                                       /*is_backed_by_vdex_only=*/true);
+
   VerifyGetDexOptNeeded(&oat_file_assistant,
                         CompilerFilter::kSpeed,
                         default_trigger_,
@@ -2006,6 +2035,13 @@ TEST_P(OatFileAssistantTest, DmUpToDateDexCompressed) {
   auto scoped_maybe_without_runtime = ScopedMaybeWithoutRuntime();
 
   OatFileAssistant oat_file_assistant = CreateOatFileAssistant(dex_location.c_str());
+
+  VerifyOptimizationStatusWithInstance(&oat_file_assistant,
+                                       "verify",
+                                       "vdex-dm",
+                                       "up-to-date",
+                                       OatFileAssistant::kLocationDm,
+                                       /*is_backed_by_vdex_only=*/true);
 
   VerifyGetDexOptNeeded(&oat_file_assistant,
                         CompilerFilter::kSpeed,
@@ -2060,7 +2096,8 @@ TEST_P(OatFileAssistantTest, OdexNoDex) {
                                        "unknown",
                                        "unknown",
                                        "io-error-no-apk",
-                                       OatFileAssistant::kLocationNoneOrError);
+                                       OatFileAssistant::kLocationNoneOrError,
+                                       /*is_backed_by_vdex_only=*/false);
 }
 
 // Case: We have a VDEX file, but the DEX file is gone.
@@ -2089,7 +2126,8 @@ TEST_P(OatFileAssistantTest, VdexNoDex) {
                                        "unknown",
                                        "unknown",
                                        "io-error-no-apk",
-                                       OatFileAssistant::kLocationNoneOrError);
+                                       OatFileAssistant::kLocationNoneOrError,
+                                       /*is_backed_by_vdex_only=*/false);
 }
 
 // Case: We have a VDEX file, generated without a boot image, and we now have a boot image.
@@ -2270,7 +2308,8 @@ TEST_P(OatFileAssistantTest, SdmUpToDate) {
                                        "speed-profile",
                                        "cloud",
                                        "up-to-date",
-                                       OatFileAssistant::kLocationSdmOdex);
+                                       OatFileAssistant::kLocationSdmOdex,
+                                       /*is_backed_by_vdex_only=*/false);
 
   VerifyGetDexOptNeeded(&oat_file_assistant,
                         CompilerFilter::kSpeed,
@@ -2334,7 +2373,8 @@ TEST_P(OatFileAssistantTest, SdmUpToDateSdcInOatLocation) {
                                        "speed-profile",
                                        "cloud",
                                        "up-to-date",
-                                       OatFileAssistant::kLocationSdmOat);
+                                       OatFileAssistant::kLocationSdmOat,
+                                       /*is_backed_by_vdex_only=*/false);
 }
 
 // Case: We have SDM, DM, and SDC files for an uncompressed DEX file, and the SDM file contains no
@@ -2365,7 +2405,8 @@ TEST_P(OatFileAssistantTest, SdmUpToDateNoArt) {
                                        "speed-profile",
                                        "cloud",
                                        "up-to-date",
-                                       OatFileAssistant::kLocationSdmOdex);
+                                       OatFileAssistant::kLocationSdmOdex,
+                                       /*is_backed_by_vdex_only=*/false);
 }
 
 // Case: We have SDM, DM, and SDC files for an uncompressed DEX file. Meanwhile, we have an ODEX
@@ -2403,7 +2444,8 @@ TEST_P(OatFileAssistantTest, SdmAndOdexUpToDate) {
                                        "speed-profile",
                                        "bg-dexopt",
                                        "up-to-date",
-                                       OatFileAssistant::kLocationOdex);
+                                       OatFileAssistant::kLocationOdex,
+                                       /*is_backed_by_vdex_only=*/false);
 }
 
 // Case: We have SDM, DM, and SDC files for an uncompressed DEX file. Meanwhile, we have a VDEX
@@ -2442,7 +2484,8 @@ TEST_P(OatFileAssistantTest, SdmAndVdexUpToDate) {
                                        "speed-profile",
                                        "cloud",
                                        "up-to-date",
-                                       OatFileAssistant::kLocationSdmOdex);
+                                       OatFileAssistant::kLocationSdmOdex,
+                                       /*is_backed_by_vdex_only=*/false);
 }
 
 // Case: We have SDM, DM, and SDC files for a compressed DEX file.
@@ -2474,7 +2517,8 @@ TEST_P(OatFileAssistantTest, SdmUpToDateCompressedDex) {
                                        "speed-profile",
                                        "cloud",
                                        "up-to-date",
-                                       OatFileAssistant::kLocationSdmOdex);
+                                       OatFileAssistant::kLocationSdmOdex,
+                                       /*is_backed_by_vdex_only=*/false);
 
   VerifyGetDexOptNeeded(&oat_file_assistant,
                         CompilerFilter::kSpeedProfile,
@@ -2520,8 +2564,12 @@ TEST_P(OatFileAssistantTest, SdmApexVersionMismatch) {
 
   OatFileAssistant oat_file_assistant = CreateOatFileAssistant(dex_location.c_str());
 
-  VerifyOptimizationStatusWithInstance(
-      &oat_file_assistant, "verify", "vdex", "up-to-date", OatFileAssistant::kLocationDm);
+  VerifyOptimizationStatusWithInstance(&oat_file_assistant,
+                                       "verify",
+                                       "vdex-dm",
+                                       "up-to-date",
+                                       OatFileAssistant::kLocationDm,
+                                       /*is_backed_by_vdex_only=*/true);
 
   VerifyGetDexOptNeeded(&oat_file_assistant,
                         CompilerFilter::kSpaceProfile,
@@ -2811,8 +2859,12 @@ TEST_P(OatFileAssistantTest, Create) {
   ASSERT_NE(oat_file_assistant, nullptr);
 
   // Verify that the created instance is usable.
-  VerifyOptimizationStatusWithInstance(
-      oat_file_assistant.get(), "speed", "install", "up-to-date", OatFileAssistant::kLocationOdex);
+  VerifyOptimizationStatusWithInstance(oat_file_assistant.get(),
+                                       "speed",
+                                       "install",
+                                       "up-to-date",
+                                       OatFileAssistant::kLocationOdex,
+                                       /*is_backed_by_vdex_only=*/false);
 }
 
 TEST_P(OatFileAssistantTest, CreateWithNullContext) {
@@ -2838,8 +2890,12 @@ TEST_P(OatFileAssistantTest, CreateWithNullContext) {
   ASSERT_EQ(context, nullptr);
 
   // Verify that the created instance is usable.
-  VerifyOptimizationStatusWithInstance(
-      oat_file_assistant.get(), "speed", "install", "up-to-date", OatFileAssistant::kLocationOdex);
+  VerifyOptimizationStatusWithInstance(oat_file_assistant.get(),
+                                       "speed",
+                                       "install",
+                                       "up-to-date",
+                                       OatFileAssistant::kLocationOdex,
+                                       /*is_backed_by_vdex_only=*/false);
 }
 
 TEST_P(OatFileAssistantTest, ErrorOnInvalidIsaString) {

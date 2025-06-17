@@ -614,6 +614,12 @@ class Instrumentation {
   bool MethodSupportsExitEvents(ArtMethod* method, const OatQuickMethodHeader* header)
       REQUIRES_SHARED(Locks::mutator_lock_);
 
+  int GetCurrentRedefinitionCount() const REQUIRES_SHARED(Locks::mutator_lock_) {
+    return redefinition_count_;
+  }
+
+  void IncrementRedefinitionCount() REQUIRES(Locks::mutator_lock_) { redefinition_count_++; }
+
  private:
   static bool CanUseAotCode(const void* quick_code);
   static const void* GetOptimizedCodeFor(ArtMethod* method) REQUIRES_SHARED(Locks::mutator_lock_);
@@ -794,6 +800,12 @@ class Instrumentation {
   // to prevent races with the GC where the GC relies on thread suspension only see
   // alloc_entrypoints_instrumented_ change during suspend points.
   bool alloc_entrypoints_instrumented_;
+
+  // Maintains the count of redefinitions done. This is used to discard any Jited code that was
+  // generated while a redefinition is in progress. We cannot stop an in-progress Jit thread, so we
+  // instead use this count to see if any redefinition has happened while the compilation was
+  // ongoing.
+  int redefinition_count_ GUARDED_BY(Locks::mutator_lock_);
 
   friend class InstrumentationTest;  // For GetCurrentInstrumentationLevel and ConfigureStubs.
   friend class InstrumentationStackPopper;  // For popping instrumentation frames.

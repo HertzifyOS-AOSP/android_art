@@ -153,7 +153,11 @@ enum class DatumId {
   V(kPrebuilt, "prebuilt")                                                \
   V(kCmdLine, "cmdline")                                                  \
   V(kVdex, "vdex")                                                        \
-  V(kBootAfterMainlineUpdate, "boot-after-mainline-update")
+  V(kBootAfterMainlineUpdate, "boot-after-mainline-update")               \
+  V(kOther, "other")                                                      \
+  V(kCloud, "cloud")                                                      \
+  V(kVdexDm, "vdex-dm")                                                   \
+  V(kDefDexopt, "def-dexopt")
 
 // We log compilation reasons as part of the metadata we report. Since elsewhere compilation reasons
 // are specified as a string, we define them as an enum here which indicates the reasons that we
@@ -177,26 +181,30 @@ constexpr const char* CompilationReasonName(CompilationReason reason) {
 
 constexpr CompilationReason CompilationReasonFromName(std::string_view name) {
   REASON_NAME_LIST(REASON_FROM_NAME)
-  return CompilationReason::kError;
+  return CompilationReason::kOther;
 }
 
 #undef REASON_NAME
 #undef REASON_FROM_NAME
 
-#define COMPILER_FILTER_REPORTING_LIST(V) \
-  V(kError, "error") /* Error (invalid value) condition */ \
-  V(kUnknown, "unknown") /* Unknown (not set) condition */ \
-  V(kAssumeVerified, "assume-verified") /* Standard compiler filters */ \
-  V(kExtract, "extract") \
-  V(kVerify, "verify") \
-  V(kSpaceProfile, "space-profile") \
-  V(kSpace, "space") \
-  V(kSpeedProfile, "speed-profile") \
-  V(kSpeed, "speed") \
-  V(kEverythingProfile, "everything-profile") \
-  V(kEverything, "everything") \
-  V(kRunFromApk, "run-from-apk") /* Augmented compiler filters as produces by OatFileAssistant#GetOptimizationStatus */ \
-  V(kRunFromApkFallback, "run-from-apk-fallback")
+// NOLINTBEGIN(readability/multiline_comment) - multi-line /*...*/-style comment needed in macro.
+#define COMPILER_FILTER_REPORTING_LIST(V)                                     \
+  V(kError, "error")                    /* Error (invalid value) condition */ \
+  V(kUnknown, "unknown")                /* Unknown (not set) condition */     \
+  V(kAssumeVerified, "assume-verified") /* Standard compiler filters */       \
+  V(kExtract, "extract")                                                      \
+  V(kVerify, "verify")                                                        \
+  V(kSpaceProfile, "space-profile")                                           \
+  V(kSpace, "space")                                                          \
+  V(kSpeedProfile, "speed-profile")                                           \
+  V(kSpeed, "speed")                                                          \
+  V(kEverythingProfile, "everything-profile")                                 \
+  V(kEverything, "everything")                                                \
+  V(kRunFromApk, "run-from-apk") /* Augmented compiler filters as produces by \
+                                    OatFileAssistant#GetOptimizationStatus */ \
+  V(kRunFromApkFallback, "run-from-apk-fallback")                             \
+  V(kOther, "other")
+// NOLINTEND(readability/multiline_comment)
 
 // Augmented compiler filter enum, used in the reporting infra.
 enum class CompilerFilterReporting {
@@ -218,7 +226,7 @@ constexpr const char* CompilerFilterReportingName(CompilerFilterReporting filter
 
 constexpr CompilerFilterReporting CompilerFilterReportingFromName(std::string_view name) {
   COMPILER_FILTER_REPORTING_LIST(FILTER_FROM_NAME)
-  return CompilerFilterReporting::kError;
+  return CompilerFilterReporting::kOther;
 }
 
 #undef FILTER_NAME

@@ -848,9 +848,9 @@ class MarkCompact::FlipCallback : public Closure {
   MarkCompact* const collector_;
 };
 
-// Traces the page faults incurred in the context of the GC thread. The 'Majflt' counter traces the
-// major faults i.e. all faults that had to bring a page into the memory from disk as well as
-// decompression from zram. The 'Minflt' counter traces all minor page faults(for eg. CoW and
+// Traces the page faults incurred in the context of the GC thread. The 'Majflt-GC' counter traces
+// the major faults i.e. all faults that had to bring a page into the memory from disk as well as
+// decompression from zram. The 'Minflt-GC' counter traces all minor page faults(for eg. CoW and
 // anonymous page allocations). Since we only measure page faults hit by the GC thread, these
 // counters do not measure userfaults.
 void TraceFaults() {
@@ -863,8 +863,8 @@ void TraceFaults() {
   if (ret)
     return;
 
-  ATraceIntegerValue("Minflt", usage.ru_minflt);
-  ATraceIntegerValue("Majflt", usage.ru_majflt);
+  ATraceIntegerValue("Minflt-GC", usage.ru_minflt);
+  ATraceIntegerValue("Majflt-GC", usage.ru_majflt);
 }
 
 void MarkCompact::RunPhases() {

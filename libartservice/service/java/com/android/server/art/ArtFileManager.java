@@ -157,7 +157,7 @@ public class ArtFileManager {
                     ArtifactsPath thisArtifacts =
                             AidlUtils.buildArtifactsPathAsInput(dexInfo.dexPath(), abi.isa(),
                                     result.artifactsLocation == ArtifactsLocation.DALVIK_CACHE);
-                    if (result.compilationReason.equals(ArtConstants.REASON_VDEX)) {
+                    if (result.isBackedByVdexOnly) {
                         // Only the VDEX file is usable.
                         vdexFiles.add(VdexPath.artifactsPath(thisArtifacts));
                     } else {
