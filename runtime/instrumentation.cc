@@ -121,8 +121,7 @@ Instrumentation::Instrumentation()
       have_branch_listeners_(false),
       have_exception_handled_listeners_(false),
       quick_alloc_entry_points_instrumentation_counter_(0),
-      alloc_entrypoints_instrumented_(false),
-      redefinition_count_(0) {}
+      alloc_entrypoints_instrumented_(false) {}
 
 bool Instrumentation::ProcessMethodUnwindCallbacks(Thread* self,
                                                    std::queue<ArtMethod*>& methods,

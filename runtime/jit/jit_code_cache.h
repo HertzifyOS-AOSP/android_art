@@ -278,7 +278,8 @@ class JitCodeCache {
               bool is_full_debug_info,
               CompilationKind compilation_kind,
               const ArenaSet<ArtMethod*>& cha_single_implementation_list)
-      REQUIRES_SHARED(Locks::mutator_lock_) REQUIRES(!Locks::jit_lock_);
+      REQUIRES_SHARED(Locks::mutator_lock_)
+      REQUIRES(!Locks::jit_lock_);
 
   // Free the previously allocated memory regions.
   void Free(Thread* self, JitMemoryRegion* region, const uint8_t* code, const uint8_t* data)

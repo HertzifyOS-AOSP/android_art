@@ -16,11 +16,11 @@
 
 #include "optimizing_compiler.h"
 
-#include <stdint.h>
-
 #include <fstream>
 #include <memory>
 #include <sstream>
+
+#include <stdint.h>
 
 #include "art_method-inl.h"
 #include "base/arena_allocator.h"
@@ -34,8 +34,8 @@
 #include "base/timing_logger.h"
 #include "builder.h"
 #include "code_generator.h"
-#include "com_android_art_flags.h"
 #include "compiler.h"
+#include "com_android_art_flags.h"
 #include "debug/elf_debug_writer.h"
 #include "debug/method_debug_info.h"
 #include "dex/dex_file_types.h"
@@ -46,7 +46,6 @@
 #include "graph_checker.h"
 #include "graph_visualizer.h"
 #include "inliner.h"
-#include "instrumentation.h"
 #include "jit/debugger_interface.h"
 #include "jit/jit.h"
 #include "jit/jit_code_cache.h"
@@ -1314,26 +1313,6 @@ bool EncodeArtMethodInInlineInfo([[maybe_unused]] ArtMethod* method) {
   return Runtime::Current() == nullptr || !Runtime::Current()->IsAotCompiler();
 }
 
-namespace {
-class RedefinitionCounter {
- public:
-  explicit RedefinitionCounter()
-      : redefinition_count_(
-            Runtime::Current()->GetInstrumentation()->GetCurrentRedefinitionCount()) {}
-
-  // It is possible that there was an ongoing compilation when a redefinition is requested. It is
-  // not safe to wait for the compilation to finish. So we instead discard any generated code if a
-  // redefinition has happened after the compilation has started.
-  bool HasChanged() const REQUIRES_SHARED(Locks::mutator_lock_) {
-    return Runtime::Current()->GetInstrumentation()->GetCurrentRedefinitionCount() !=
-           redefinition_count_;
-  }
-
- private:
-  const int redefinition_count_;
-};
-}  // namespace
-
 bool OptimizingCompiler::JitCompile(Thread* self,
                                     jit::JitCodeCache* code_cache,
                                     jit::JitMemoryRegion* region,
@@ -1354,8 +1333,6 @@ bool OptimizingCompiler::JitCompile(Thread* self,
   const dex::CodeItem* code_item = method->GetCodeItem();
   const uint32_t method_idx = method->GetDexMethodIndex();
   const uint32_t access_flags = method->GetAccessFlags();
-
-  RedefinitionCounter redef_counter;
 
   Runtime* runtime = Runtime::Current();
   ArenaAllocator allocator(runtime->GetJitArenaPool());
@@ -1434,8 +1411,7 @@ bool OptimizingCompiler::JitCompile(Thread* self,
       debug_info = GenerateJitDebugInfo(method_debug_info);
     }
 
-    if (redef_counter.HasChanged() ||
-        !code_cache->Commit(self,
+    if (!code_cache->Commit(self,
                             region,
                             method,
                             reserved_code,
@@ -1540,8 +1516,7 @@ bool OptimizingCompiler::JitCompile(Thread* self,
                          return handles.Contains(root.GetReference());
                        }));
     ArenaSet<ArtMethod*> cha_single_implementation_list(allocator.Adapter(kArenaAllocCHA));
-    if (redef_counter.HasChanged() ||
-        !code_cache->Commit(self,
+    if (!code_cache->Commit(self,
                             region,
                             method,
                             reserved_code,
@@ -1608,8 +1583,7 @@ bool OptimizingCompiler::JitCompile(Thread* self,
       compilation_kind = CompilationKind::kOptimized;
     }
 
-    if (redef_counter.HasChanged() ||
-        !code_cache->Commit(self,
+    if (!code_cache->Commit(self,
                             region,
                             method,
                             reserved_code,
