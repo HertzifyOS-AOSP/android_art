@@ -1942,22 +1942,25 @@ bool Runtime::Init(RuntimeArgumentMap&& runtime_options_in) {
       // These need to be in a specific order.  The null point check handler must be
       // after the suspend check and stack overflow check handlers.
       //
-      // Note: the instances attach themselves to the fault manager and are handled by it. The
-      //       manager will delete the instance on Shutdown().
+      // Note: The manager will delete the handlers on Shutdown().
       if (implicit_suspend_checks_) {
-        new SuspensionHandler(&fault_manager);
+        fault_manager.AddHandler(new SuspensionHandler(),
+                                 SuspensionHandler::IsGeneratedCodeHandler());
       }
 
       if (implicit_so_checks_) {
-        new StackOverflowHandler(&fault_manager);
+        fault_manager.AddHandler(new StackOverflowHandler(),
+                                 StackOverflowHandler::IsGeneratedCodeHandler());
       }
 
       if (implicit_null_checks_) {
-        new NullPointerHandler(&fault_manager);
+        fault_manager.AddHandler(new NullPointerHandler(),
+                                 NullPointerHandler::IsGeneratedCodeHandler());
       }
 
       if (kEnableJavaStackTraceHandler) {
-        new JavaStackTraceHandler(&fault_manager);
+        fault_manager.AddHandler(new JavaStackTraceHandler(&fault_manager),
+                                 JavaStackTraceHandler::IsGeneratedCodeHandler());
       }
 
       if (interpreter::CanRuntimeUseNterp()) {
