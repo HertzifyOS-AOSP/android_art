@@ -21,6 +21,7 @@
 #include "art_method-inl.h"
 #include "base/leb128.h"
 #include "base/mutex.h"
+#include "base/systrace.h"
 #include "base/unix_file/fd_file.h"
 #include "com_android_art_flags.h"
 #include "dex/descriptors_names.h"
@@ -352,8 +353,14 @@ void TraceProfiler::Start(LowOverheadTraceType trace_type, uint64_t trace_durati
       trace_data_ = new TraceData(trace_type);
 
       if (trace_type == LowOverheadTraceType::kAllMethods) {
+        // TODO(mythria): Use Async trace events here. We don't have hooks for
+        // these yet, so just use a ScopedTrace events for now.
+        ScopedTrace trace("LowOverheadTraceAll::Start");
         runtime->GetThreadList()->RunCheckpoint(&all_methods_checkpoint_);
       } else {
+        // TODO(mythria): Use Async trace events here. We don't have hooks for
+        // these yet, so just use a ScopedTrace events for now.
+        ScopedTrace("LowOverheadTraceLongRunning::Start");
         runtime->GetThreadList()->RunCheckpoint(&long_running_methods_checkpoint_);
       }
 
@@ -392,6 +399,9 @@ void TraceProfiler::StopLocked() {
     return;
   }
 
+  // TODO(mythria): Use Async trace events here. We don't have hooks for
+  // these yet, so just use a ScopedTrace events for now.
+  ScopedTrace trace("LowOverheadTrace::Stop");
   // We should not delete trace_data_ when there is an ongoing trace dump. So
   // wait for any in progress trace dump to finish.
   trace_data_->MaybeWaitForTraceDumpToFinish();

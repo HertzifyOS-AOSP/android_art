@@ -67,6 +67,13 @@ ART_HOST_CORE_SHARED_LIBRARIES: List[str] = ART_CORE_SHARED_LIBRARIES + [
     "libicui18n-host",
     "libicu_jni",
 ]
+# Dependencies on host tools for actually running a run-test.
+ART_RUN_TEST_DEPENDENCIES: List[str] = [
+    "d8",
+    "hiddenapi",
+    "jasmin",
+    "android-smali",
+]
 # Define a more specific type for build variables, which are strings.
 BuildVarsDict = Dict[str, str]
 # A list of build variables that are essential for this script.
@@ -74,6 +81,7 @@ BuildVarsDict = Dict[str, str]
 REQUIRED_BUILD_VARS: List[str] = [
     "OUT_DIR",
     "HOST_OUT",
+    "HOST_OUT_EXECUTABLES",
     "HOST_OUT_JAVA_LIBRARIES",
     "HOST_OUT_SHARED_LIBRARIES",
     "TARGET_OUT",
@@ -566,6 +574,27 @@ class Builder:
 
         return list(set(make_targets)), list(set(make_targets_debug))
 
+    def _get_art_host_run_test_dep_make_targets(self) -> List[str]:
+        """Gets make targets for ART_TEST_HOST_RUN_TEST_DEPENDENCIES."""
+        make_targets: List[str] = []
+
+        # ART_HOST_EXECUTABLES
+        make_targets.extend(self._get_art_host_executables_make_targets())
+        # ART_HOST_DEX_DEPENDENCIES
+        make_targets.extend(self._get_art_host_dex_dependencies_make_targets())
+
+        # Simple make targets
+        make_targets.append("art_test_host_run_test_dependencies")
+
+        # Special handling for hprof-conv. On the master-art branch, it
+        # requires a full path to build correctly. This is because its
+        # dependency, libwinpthread, references a Windows-specific variant
+        # that is not available in the branch's source tree.
+        host_out_execs: str = self.build_vars["HOST_OUT_EXECUTABLES"]
+        make_targets.append(os.path.join(host_out_execs, "hprof-conv"))
+
+        return list(set(make_targets))
+
     def _get_copy_core_img_make_targets(self) -> List[str]:
         """Generates the list of make_targets (file paths) for CORE_IMG_JARS.
 
@@ -699,6 +728,23 @@ class Builder:
             Target(
                 name="build-art-host-gtests",
                 dependencies=["build-art-host", "extract-host-i18n-data"],
+            )
+        )
+        # build-art-host-run-tests
+        art_test_host_run_test_deps = (
+            self._get_art_host_run_test_dep_make_targets()
+        )
+        self.add_target(
+            Target(
+                name="build-art-host-run-tests",
+                dependencies=["build-art-host", "extract-host-i18n-data"],
+                make_targets=list(
+                    set(
+                        ART_RUN_TEST_DEPENDENCIES
+                        + art_test_host_run_test_deps
+                        + ["art-run-test-host-data", "art-run-test-jvm-data"]
+                    )
+                ),
             )
         )
         self.add_target(
@@ -999,6 +1045,11 @@ def parse_command_line_arguments(builder: Builder) -> argparse.ArgumentParser:
         help="Build build-art-host-gtests components (internal target).",
     )
     parser.add_argument(
+        "--build-art-host-run-tests",
+        action="store_true",
+        help="Build build-art-host-run-tests components (internal target).",
+    )
+    parser.add_argument(
         "--build-art-target",
         action="store_true",
         help="Build build-art-target components (activates internal target).",
@@ -1036,6 +1087,8 @@ def parse_command_line_arguments(builder: Builder) -> argparse.ArgumentParser:
         builder.enabled_internal_targets.append("build-art-host")
     if args.build_art_host_gtests:
         builder.enabled_internal_targets.append("build-art-host-gtests")
+    if args.build_art_host_run_tests:
+        builder.enabled_internal_targets.append("build-art-host-run-tests")
     if args.build_art_target:
         builder.enabled_internal_targets.append("build-art-target")
     if args.build_art_target_gtests:

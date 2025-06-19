@@ -172,7 +172,6 @@ inline ArraySlice<ArtMethod> Class::GetMethodsSliceRangeUnchecked(
 }
 
 inline uint32_t Class::NumMethods() {
-  DCHECK_NE(GetMethodsPtr(), nullptr);
   return NumMethods(GetMethodsPtr());
 }
 
