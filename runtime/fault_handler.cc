@@ -80,6 +80,9 @@ FaultManager::FaultManager()
       initialized_(false) {}
 
 FaultManager::~FaultManager() {
+  // ~Runtime() calls Shutdown(), but the FaultManager's lifetime can be shorter than the runtime.
+  // Make sure to call Shutdown in the destructor to not leak memory through the handlers.
+  Shutdown();
 }
 
 static const char* SignalCodeName(int sig, int code) {
