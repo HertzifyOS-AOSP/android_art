@@ -297,6 +297,8 @@ constexpr int32_t EncodeCompilationReason(CompilationReason reason) {
       return statsd::ART_DATUM_REPORTED__COMPILATION_REASON__ART_COMPILATION_REASON_VDEX_DM;
     case CompilationReason::kDefDexopt:
       return statsd::ART_DATUM_REPORTED__COMPILATION_REASON__ART_COMPILATION_REASON_DEF_DEXOPT;
+    case CompilationReason::kPostUr:
+      return statsd::ART_DATUM_REPORTED__COMPILATION_REASON__ART_COMPILATION_REASON_POST_UR;
   }
 }
 

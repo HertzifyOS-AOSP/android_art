@@ -157,7 +157,8 @@ enum class DatumId {
   V(kOther, "other")                                                      \
   V(kCloud, "cloud")                                                      \
   V(kVdexDm, "vdex-dm")                                                   \
-  V(kDefDexopt, "def-dexopt")
+  V(kDefDexopt, "def-dexopt")                                             \
+  V(kPostUr, "post-ur")
 
 // We log compilation reasons as part of the metadata we report. Since elsewhere compilation reasons
 // are specified as a string, we define them as an enum here which indicates the reasons that we

@@ -728,6 +728,7 @@ TEST(CompilerReason, FromName) {
   ASSERT_EQ(CompilationReasonFromName("cloud"), CompilationReason::kCloud);
   ASSERT_EQ(CompilationReasonFromName("vdex-dm"), CompilationReason::kVdexDm);
   ASSERT_EQ(CompilationReasonFromName("def-dexopt"), CompilationReason::kDefDexopt);
+  ASSERT_EQ(CompilationReasonFromName("post-ur"), CompilationReason::kPostUr);
 }
 
 TEST(CompilerReason, Name) {
@@ -760,6 +761,7 @@ TEST(CompilerReason, Name) {
   ASSERT_EQ(CompilationReasonName(CompilationReason::kCloud), "cloud");
   ASSERT_EQ(CompilationReasonName(CompilationReason::kVdexDm), "vdex-dm");
   ASSERT_EQ(CompilationReasonName(CompilationReason::kDefDexopt), "def-dexopt");
+  ASSERT_EQ(CompilationReasonName(CompilationReason::kPostUr), "post-ur");
 }
 }  // namespace metrics
 }  // namespace art

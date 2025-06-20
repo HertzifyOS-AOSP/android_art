@@ -343,6 +343,8 @@ static_assert(CompilationReasonFromName(CompilationReasonName(CompilationReason:
               CompilationReason::kVdexDm);
 static_assert(CompilationReasonFromName(CompilationReasonName(CompilationReason::kDefDexopt)) ==
               CompilationReason::kDefDexopt);
+static_assert(CompilationReasonFromName(CompilationReasonName(CompilationReason::kPostUr)) ==
+              CompilationReason::kPostUr);
 
 }  // namespace metrics
 }  // namespace art
