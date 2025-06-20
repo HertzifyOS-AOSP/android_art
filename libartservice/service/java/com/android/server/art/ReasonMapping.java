@@ -229,8 +229,7 @@ public class ReasonMapping {
     public static int getCompilerFilterValueForFrameworkStatsReporting(
             @NonNull String compilerFilter) {
         return switch (compilerFilter) {
-            // Reserved 3, 5, 14-27.
-            case "error" -> 0;
+            // Reserved -1, 0, 3, 5, 14-27.
             case "unknown" -> 1;
             case "assume-verified" -> 2;
             case "verify" -> 4;
@@ -242,7 +241,7 @@ public class ReasonMapping {
             case "everything" -> 11;
             case "run-from-apk" -> 12;
             case "run-from-apk-fallback" -> 13;
-            default -> 1;
+            default -> 28;
         };
     }
 
@@ -263,8 +262,7 @@ public class ReasonMapping {
     public static int getCompilationReasonValueForFrameworkStatsReporting(
             @NonNull String compilationReason) {
         return switch (compilationReason) {
-            // Reserved 3, 8, 21.
-            case "error" -> 0;
+            // Reserved -1, 0, 3, 8, 21.
             case "unknown" -> 1;
             case "first-boot" -> 2;
             case "install" -> 4;
@@ -289,7 +287,7 @@ public class ReasonMapping {
             case "boot-after-mainline-update" -> 25;
             case "cloud" -> 26;
             case "vdex-dm" -> 27;
-            default -> 1;
+            default -> 28;
         };
     }
 }
