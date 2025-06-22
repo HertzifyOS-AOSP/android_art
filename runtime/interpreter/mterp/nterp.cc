@@ -123,10 +123,30 @@ void CheckNterpAsmConstants() {
   }
 }
 
-inline void UpdateHotness(ArtMethod* method) REQUIRES_SHARED(Locks::mutator_lock_) {
+extern "C" void NterpTryFastCompile(ArtMethod* method) REQUIRES_SHARED(Locks::mutator_lock_) {
+  // It is important this method is not suspended because it can be called on
+  // method entry and async deoptimization does not expect runtime methods other than the
+  // suspend entrypoint before executing the first instruction of a Java
+  // method.
+  ScopedAssertNoThreadSuspension sants("In nterp");
+  jit::Jit* jit = Runtime::Current()->GetJit();
+  if (jit != nullptr && jit->UseJitCompilation()) {
+    jit->MaybeEnqueueFastCompilation(method, Thread::Current());
+  }
+}
+
+inline void UpdateHotness(Thread* self, ArtMethod* method) REQUIRES_SHARED(Locks::mutator_lock_) {
   // The hotness we will add to a method when we perform a
   // field/method/class/string lookup.
-  method->UpdateCounter(0xf);
+  static constexpr int kHotnessCounter = 0xf;
+  if (com::android::art::flags::fast_baseline_compiler() && kRuntimeISA == InstructionSet::kArm64) {
+    size_t counter = method->GetCounter();
+    if (self->IsJitSensitiveThread() &&
+        (counter % jit::kFastCompilerFrequencyCheck) < kHotnessCounter) {
+      NterpTryFastCompile(method);
+    }
+  }
+  method->UpdateCounter(kHotnessCounter);
 }
 
 template<typename T>
@@ -427,7 +447,7 @@ extern "C" size_t NterpGetMethod(Thread* self,
                                  const uint16_t* dex_pc_ptr,
                                  uint32_t* registers)
     REQUIRES_SHARED(Locks::mutator_lock_) {
-  UpdateHotness(caller);
+  UpdateHotness(self, caller);
   const Instruction* inst = Instruction::At(dex_pc_ptr);
   Instruction::Code opcode = inst->Opcode();
   DCHECK(IsUint<8>(static_cast<std::underlying_type_t<Instruction::Code>>(opcode)));
@@ -596,7 +616,7 @@ extern "C" size_t NterpGetStaticField(Thread* self,
       return 0;
     }
     // Only update hotness for slow lookups.
-    UpdateHotness(caller);
+    UpdateHotness(self, caller);
   }
 
   if (UNLIKELY(!resolved_field->GetDeclaringClass()->IsVisiblyInitialized())) {
@@ -734,7 +754,7 @@ extern "C" uint32_t NterpGetInstanceFieldOffset(Thread* self,
       return 0;
     }
     // Only update hotness for slow lookups.
-    UpdateHotness(caller);
+    UpdateHotness(self, caller);
   }
 
   // For iput-object, try to resolve the field type even if we were not requested to.
@@ -766,7 +786,7 @@ extern "C" uint32_t NterpGetInstanceFieldOffset(Thread* self,
 
 extern "C" mirror::Object* NterpGetClass(Thread* self, ArtMethod* caller, uint16_t* dex_pc_ptr)
     REQUIRES_SHARED(Locks::mutator_lock_) {
-  UpdateHotness(caller);
+  UpdateHotness(self, caller);
   const Instruction* inst = Instruction::At(dex_pc_ptr);
   Instruction::Code opcode = inst->Opcode();
   DCHECK(opcode == Instruction::CHECK_CAST ||
@@ -800,7 +820,7 @@ extern "C" mirror::Object* NterpAllocateObject(Thread* self,
                                                ArtMethod* caller,
                                                uint16_t* dex_pc_ptr)
     REQUIRES_SHARED(Locks::mutator_lock_) {
-  UpdateHotness(caller);
+  UpdateHotness(self, caller);
   const Instruction* inst = Instruction::At(dex_pc_ptr);
   DCHECK_EQ(inst->Opcode(), Instruction::NEW_INSTANCE);
   dex::TypeIndex index = dex::TypeIndex(inst->VRegB_21c());
@@ -836,7 +856,7 @@ extern "C" mirror::Object* NterpLoadObject(Thread* self, ArtMethod* caller, uint
   switch (inst->Opcode()) {
     case Instruction::CONST_STRING:
     case Instruction::CONST_STRING_JUMBO: {
-      UpdateHotness(caller);
+      UpdateHotness(self, caller);
       dex::StringIndex string_index(
           (inst->Opcode() == Instruction::CONST_STRING)
               ? inst->VRegB_21c()

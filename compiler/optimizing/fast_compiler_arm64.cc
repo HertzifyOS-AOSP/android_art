@@ -927,8 +927,10 @@ bool FastCompilerARM64::EnsureHasFrame() {
                                                           core_spill_mask_,
                                                           fpu_spill_mask_,
                                                           GetCodeItemAccessor().RegistersSize(),
-                                                          /* is_compiling_baseline= */ true,
-                                                          /* is_debuggable= */ false);
+                                                          /* is_compiling_baseline= */ false,
+                                                          /* is_debuggable= */ false,
+                                                          /* has_should_deoptimize_flag= */ false,
+                                                          /* is_fast= */ true);
   MacroAssembler* masm = GetVIXLAssembler();
   {
     UseScratchRegisterScope temps(masm);
@@ -986,7 +988,7 @@ bool FastCompilerARM64::EnsureHasFrame() {
     Register counter = temps.AcquireW();
     vixl::aarch64::Label increment, done;
     uint32_t entrypoint_offset =
-        GetThreadOffset<kArm64PointerSize>(kQuickCompileOptimized).Int32Value();
+        GetThreadOffset<kArm64PointerSize>(kQuickCompileBaseline).Int32Value();
 
     __ Ldrh(counter, MemOperand(kArtMethodRegister, ArtMethod::HotnessCountOffset().Int32Value()));
     __ Cbnz(counter, &increment);
@@ -3325,7 +3327,9 @@ bool FastCompilerARM64::Compile() {
                                   /* fp_spill_mask= */ 0u,
                                   GetCodeItemAccessor().RegistersSize(),
                                   /* is_compiling_baseline= */ true,
-                                  /* is_debuggable= */ false);
+                                  /* is_debuggable= */ false,
+                                  /* has_should_deoptimize_flag= */ false,
+                                  /* is_fast= */ true);
   }
 
   // Catch stack maps are pushed at the end.
@@ -3355,20 +3359,22 @@ bool FastCompilerARM64::Compile() {
       VLOG(jit) << "Dumping generated fast baseline code for " << method_->PrettyMethod();
     }
     FILE* file = tmpfile();
-    MacroAssembler* masm = GetVIXLAssembler();
-    PrintDisassembler print_disasm(file);
-    vixl::aarch64::Instruction* dis_start =
-        masm->GetBuffer()->GetStartAddress<vixl::aarch64::Instruction*>();
-    vixl::aarch64::Instruction* dis_end =
-        masm->GetBuffer()->GetEndAddress<vixl::aarch64::Instruction*>();
-    print_disasm.DisassembleBuffer(dis_start, dis_end);
-    fseek(file, 0L, SEEK_SET);
-    char buffer[1024];
-    const char* line;
-    while ((line = fgets(buffer, sizeof(buffer), file)) != nullptr) {
-      VLOG(jit) << std::string(line);
+    if (file != nullptr) {
+      MacroAssembler* masm = GetVIXLAssembler();
+      PrintDisassembler print_disasm(file);
+      vixl::aarch64::Instruction* dis_start =
+          masm->GetBuffer()->GetStartAddress<vixl::aarch64::Instruction*>();
+      vixl::aarch64::Instruction* dis_end =
+          masm->GetBuffer()->GetEndAddress<vixl::aarch64::Instruction*>();
+      print_disasm.DisassembleBuffer(dis_start, dis_end);
+      fseek(file, 0L, SEEK_SET);
+      char buffer[1024];
+      const char* line;
+      while ((line = fgets(buffer, sizeof(buffer), file)) != nullptr) {
+        VLOG(jit) << std::string(line);
+      }
+      fclose(file);
     }
-    fclose(file);
   }
   return true;
 }
