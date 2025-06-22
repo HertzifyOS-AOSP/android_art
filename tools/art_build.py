@@ -67,13 +67,6 @@ ART_HOST_CORE_SHARED_LIBRARIES: List[str] = ART_CORE_SHARED_LIBRARIES + [
     "libicui18n-host",
     "libicu_jni",
 ]
-# Dependencies on host tools for actually running a run-test.
-ART_RUN_TEST_DEPENDENCIES: List[str] = [
-    "d8",
-    "hiddenapi",
-    "jasmin",
-    "android-smali",
-]
 # Define a more specific type for build variables, which are strings.
 BuildVarsDict = Dict[str, str]
 # A list of build variables that are essential for this script.
@@ -136,7 +129,7 @@ def run_subprocess(
         # The command is constructed from trusted sources (hardcoded values
         # or build system variables). With shell=False, this call is not
         # vulnerable to command injection.
-        # nosemgrep: default-ruleset.python.lang.security.audit.dangerous-subprocess-use-audit
+        # nosemgrep: googleplex-android.python.lang.security.audit.dangerous-subprocess-use-audit
         result = subprocess.run(
             command,
             cwd=cwd,
@@ -738,12 +731,9 @@ class Builder:
             Target(
                 name="build-art-host-run-tests",
                 dependencies=["build-art-host", "extract-host-i18n-data"],
-                make_targets=list(
-                    set(
-                        ART_RUN_TEST_DEPENDENCIES
-                        + art_test_host_run_test_deps
-                        + ["art-run-test-host-data", "art-run-test-jvm-data"]
-                    )
+                make_targets=(
+                    art_test_host_run_test_deps
+                    + ["art-run-test-host-data", "art-run-test-jvm-data"]
                 ),
             )
         )
@@ -772,6 +762,20 @@ class Builder:
                 dependencies=[
                     "build-art-target",
                     "art_target_platform_dependencies",
+                ],
+            )
+        )
+        self.add_target(
+            Target(
+                name="build-art-target-run-tests",
+                dependencies=[
+                    "build-art-target",
+                    # ART_TARGET_PLATFORM_DEPENDENCIES
+                    "art_target_platform_dependencies",
+                ],
+                make_targets=[
+                    "art_test_target_run_test_dependencies",
+                    "art-run-test-target-data",
                 ],
             )
         )
@@ -1060,6 +1064,11 @@ def parse_command_line_arguments(builder: Builder) -> argparse.ArgumentParser:
         help="Build build-art-target-gtests components (internal target).",
     )
     parser.add_argument(
+        "--build-art-target-run-tests",
+        action="store_true",
+        help="Build build-art-target-run-tests components (internal target).",
+    )
+    parser.add_argument(
         "--build-art",
         action="store_true",
         help="Build build-art components (activates internal target).",
@@ -1093,6 +1102,8 @@ def parse_command_line_arguments(builder: Builder) -> argparse.ArgumentParser:
         builder.enabled_internal_targets.append("build-art-target")
     if args.build_art_target_gtests:
         builder.enabled_internal_targets.append("build-art-target-gtests")
+    if args.build_art_target_run_tests:
+        builder.enabled_internal_targets.append("build-art-target-run-tests")
     if args.build_art:
         builder.enabled_internal_targets.append("build-art")
 
