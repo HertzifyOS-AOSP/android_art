@@ -18,7 +18,9 @@ package com.android.server.art;
 
 import static android.app.ActivityManager.RunningAppProcessInfo;
 import static android.os.ParcelFileDescriptor.AutoCloseInputStream;
+import static android.platform.test.flag.junit.DeviceFlagsValueProvider.createCheckFlagsRule;
 
+import static com.android.art.rw.flags.Flags.FLAG_POST_UR_JOB;
 import static com.android.server.art.DexUseManagerLocal.CheckedSecondaryDexInfo;
 import static com.android.server.art.ProfilePath.PrimaryCurProfilePath;
 import static com.android.server.art.model.DexoptResult.DexContainerFileDexoptResult;
@@ -38,6 +40,7 @@ import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.anyBoolean;
 import static org.mockito.Mockito.anyInt;
 import static org.mockito.Mockito.argThat;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.isNull;
@@ -54,6 +57,7 @@ import android.apphibernation.AppHibernationManager;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.os.CancellationSignal;
 import android.os.ParcelFileDescriptor;
 import android.os.Process;
@@ -62,6 +66,9 @@ import android.os.SystemProperties;
 import android.os.UserHandle;
 import android.os.UserManager;
 import android.os.storage.StorageManager;
+import android.platform.test.annotations.RequiresFlagsDisabled;
+import android.platform.test.annotations.RequiresFlagsEnabled;
+import android.platform.test.flag.junit.CheckFlagsRule;
 import android.system.OsConstants;
 
 import androidx.test.filters.SmallTest;
@@ -92,7 +99,6 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 import org.junit.runners.Parameterized.Parameter;
 import org.junit.runners.Parameterized.Parameters;
-import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 
@@ -104,6 +110,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -131,6 +139,7 @@ public class ArtManagerLocalTest {
     @Rule
     public StaticMockitoRule mockitoRule = new StaticMockitoRule(
             SystemProperties.class, Constants.class, PackageStateModulesUtils.class);
+    @Rule public final CheckFlagsRule mCheckFlagsRule = createCheckFlagsRule();
 
     @Mock private ArtManagerLocal.Injector mInjector;
     @Mock private ArtFileManager.Injector mArtFileManagerInjector;
@@ -148,13 +157,14 @@ public class ArtManagerLocalTest {
     @Mock private PreRebootDexoptJob mPreRebootDexoptJob;
     @Mock private PreRebootStatsReporter.Injector mPreRebootStatsReporterInjector;
     @Mock private ActivityManager mActivityManager;
+    @Mock private BackgroundDexoptJob mBackgroundDexoptJob;
     private PackageState mPkgState1;
     private AndroidPackage mPkg1;
     private CheckedSecondaryDexInfo mPkg1SecondaryDexInfo1;
     private CheckedSecondaryDexInfo mPkg1SecondaryDexInfoNotFound;
     private Config mConfig;
     private DexMetadataHelper mDexMetadataHelper;
-    private ArgumentCaptor<BroadcastReceiver> mBroadcastReceiverCaptor;
+    private Map<String, Set<BroadcastReceiver>> mBroadcastReceivers = new HashMap<>();
 
     // True if the artifacts should be in dalvik-cache.
     @Parameter(0) public boolean mIsInDalvikCache;
@@ -197,6 +207,7 @@ public class ArtManagerLocalTest {
                 .thenAnswer(
                         invocation -> new PreRebootStatsReporter(mPreRebootStatsReporterInjector));
         lenient().when(mInjector.getActivityManager()).thenReturn(mActivityManager);
+        lenient().when(mInjector.getBackgroundDexoptJob()).thenReturn(mBackgroundDexoptJob);
 
         lenient().when(mArtFileManagerInjector.getArtd()).thenReturn(mArtd);
         lenient().when(mArtFileManagerInjector.getUserManager()).thenReturn(mUserManager);
@@ -226,11 +237,12 @@ public class ArtManagerLocalTest {
                 .when(SystemProperties.getInt(
                         eq("pm.dexopt.downgrade_after_inactive_days"), anyInt()))
                 .thenReturn(INACTIVE_DAYS);
+        lenient()
+                .when(SystemProperties.get(eq("sys.boot.reason")))
+                .thenReturn("reboot,userrequested");
 
         // No ISA translation.
-        lenient()
-                .when(SystemProperties.get(argThat(arg -> arg.startsWith("ro.dalvik.vm.isa."))))
-                .thenReturn("");
+        lenient().when(SystemProperties.get(matches("ro\\.dalvik\\.vm\\.isa\\..*"))).thenReturn("");
 
         lenient().when(Constants.getPreferredAbi()).thenReturn("arm64-v8a");
         lenient().when(Constants.getNative64BitAbi()).thenReturn("arm64-v8a");
@@ -294,10 +306,22 @@ public class ArtManagerLocalTest {
                 .when(mDexMetadataHelperInjector.openZipFile(any()))
                 .thenThrow(NoSuchFileException.class);
 
-        mBroadcastReceiverCaptor = ArgumentCaptor.forClass(BroadcastReceiver.class);
+        lenient().when(mContext.registerReceiver(any(), any())).thenAnswer(invocation -> {
+            mBroadcastReceivers
+                    .computeIfAbsent(invocation.<IntentFilter>getArgument(1).getAction(0),
+                            k -> new HashSet<>())
+                    .add(invocation.<BroadcastReceiver>getArgument(0));
+            return mock(Intent.class);
+        });
         lenient()
-                .when(mContext.registerReceiver(mBroadcastReceiverCaptor.capture(), any()))
-                .thenReturn(mock(Intent.class));
+                .doAnswer(invocation -> {
+                    for (Set<BroadcastReceiver> set : mBroadcastReceivers.values()) {
+                        set.remove(invocation.<BroadcastReceiver>getArgument(0));
+                    }
+                    return null;
+                })
+                .when(mContext)
+                .unregisterReceiver(any());
 
         File tempFile = File.createTempFile("pre-reboot-stats", ".pb");
         tempFile.deleteOnExit();
@@ -1597,7 +1621,7 @@ public class ArtManagerLocalTest {
         // It should not commit anything on system ready.
         verify(mArtd, times(1)).commitPreRebootStagedFiles(any(), any());
 
-        mBroadcastReceiverCaptor.getValue().onReceive(mContext, mock(Intent.class));
+        simulateBroadcast(Intent.ACTION_BOOT_COMPLETED);
 
         // It should commit files for secondary dex files on boot complete.
         verify(mArtd).commitPreRebootStagedFiles(
@@ -1665,6 +1689,82 @@ public class ArtManagerLocalTest {
 
         verify(mInjector, never()).kill(1002 /* pid */, OsConstants.SIGUSR1);
         verify(notificationForPid1002, never()).wait(anyInt());
+    }
+
+    @Test
+    @RequiresFlagsEnabled(FLAG_POST_UR_JOB)
+    public void testPostUrJob() throws Exception {
+        when(SystemProperties.get(eq("sys.boot.reason"))).thenReturn("reboot,unattended,ota");
+        mArtManagerLocal.onBoot(ReasonMapping.REASON_BOOT_AFTER_OTA,
+                null /* progressCallbackExecutor */, null /* progressCallback */);
+        mArtManagerLocal.systemReady();
+
+        simulateBroadcast(Intent.ACTION_BOOT_COMPLETED);
+
+        verify(mBackgroundDexoptJob).schedule(BackgroundDexoptJob.JobType.POST_UNATTENDED_REBOOT);
+
+        simulateBroadcast(Intent.ACTION_USER_PRESENT);
+
+        verify(mBackgroundDexoptJob).unschedule(BackgroundDexoptJob.JobType.POST_UNATTENDED_REBOOT);
+    }
+
+    @Test
+    @RequiresFlagsEnabled(FLAG_POST_UR_JOB)
+    public void testPostUrJobBroadcastOrderReversed() throws Exception {
+        when(SystemProperties.get(eq("sys.boot.reason"))).thenReturn("reboot,unattended,ota");
+        mArtManagerLocal.onBoot(ReasonMapping.REASON_BOOT_AFTER_OTA,
+                null /* progressCallbackExecutor */, null /* progressCallback */);
+        mArtManagerLocal.systemReady();
+
+        simulateBroadcast(Intent.ACTION_USER_PRESENT);
+
+        verify(mBackgroundDexoptJob).unschedule(BackgroundDexoptJob.JobType.POST_UNATTENDED_REBOOT);
+
+        simulateBroadcast(Intent.ACTION_BOOT_COMPLETED);
+
+        verify(mBackgroundDexoptJob, never())
+                .schedule(BackgroundDexoptJob.JobType.POST_UNATTENDED_REBOOT);
+    }
+
+    @Test
+    @RequiresFlagsEnabled(FLAG_POST_UR_JOB)
+    public void testPostUrJobNotUnattended() throws Exception {
+        mArtManagerLocal.onBoot(ReasonMapping.REASON_BOOT_AFTER_OTA,
+                null /* progressCallbackExecutor */, null /* progressCallback */);
+        mArtManagerLocal.systemReady();
+
+        simulateBroadcast(Intent.ACTION_BOOT_COMPLETED);
+
+        verify(mBackgroundDexoptJob, never())
+                .schedule(BackgroundDexoptJob.JobType.POST_UNATTENDED_REBOOT);
+    }
+
+    @Test
+    @RequiresFlagsEnabled(FLAG_POST_UR_JOB)
+    public void testPostUrJobNotBootAfterOtaOrMainline() throws Exception {
+        when(SystemProperties.get(eq("sys.boot.reason"))).thenReturn("reboot,unattended,ota");
+        mArtManagerLocal.systemReady();
+
+        simulateBroadcast(Intent.ACTION_BOOT_COMPLETED);
+
+        verify(mBackgroundDexoptJob, never())
+                .schedule(BackgroundDexoptJob.JobType.POST_UNATTENDED_REBOOT);
+    }
+
+    @Test
+    @RequiresFlagsDisabled(FLAG_POST_UR_JOB)
+    public void testPostUrJobFlagDisabled() throws Exception {
+        lenient()
+                .when(SystemProperties.get(eq("sys.boot.reason")))
+                .thenReturn("reboot,unattended,ota");
+        mArtManagerLocal.onBoot(ReasonMapping.REASON_BOOT_AFTER_OTA,
+                null /* progressCallbackExecutor */, null /* progressCallback */);
+        mArtManagerLocal.systemReady();
+
+        simulateBroadcast(Intent.ACTION_BOOT_COMPLETED);
+
+        verify(mBackgroundDexoptJob, never())
+                .schedule(BackgroundDexoptJob.JobType.POST_UNATTENDED_REBOOT);
     }
 
     private AndroidPackage createPackage(boolean multiSplit) {
@@ -1785,5 +1885,11 @@ public class ArtManagerLocalTest {
         info.uid = uid;
         info.importance = importance;
         return info;
+    }
+
+    private void simulateBroadcast(String action) throws Exception {
+        for (BroadcastReceiver receiver : mBroadcastReceivers.getOrDefault(action, Set.of())) {
+            receiver.onReceive(mContext, mock(Intent.class));
+        }
     }
 }
