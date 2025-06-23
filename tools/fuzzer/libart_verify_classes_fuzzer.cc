@@ -14,7 +14,9 @@
  * limitations under the License.
  */
 
+#include <cstdint>
 #include <iostream>
+#include <vector>
 
 #include "android-base/file.h"
 #include "android-base/strings.h"
@@ -43,6 +45,9 @@ int skipped_gc_iterations = 0;
 static constexpr int kMaxSkipGCIterations = 100;
 // Global variable to signal LSAN that we are not leaking memory.
 uint8_t* allocated_signal_stack = nullptr;
+
+std::vector<uint8_t*> data_to_delete;
+std::vector<art::StandardDexFile*> dex_files_to_delete;
 
 namespace art {
 // A class to be friends with ClassLinker and access the internal FindDexCacheDataLocked method.
@@ -157,15 +162,21 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   // and know that the checksum would probably be erroneous (i.e. random).
   constexpr bool kVerify = false;
 
-  auto container = std::make_shared<art::MemoryDexFileContainer>(data, size);
-  art::StandardDexFile dex_file(data,
-                                /*location=*/"fuzz.dex",
-                                /*location_checksum=*/0,
-                                /*oat_dex_file=*/nullptr,
-                                container);
+  uint8_t* new_data = new uint8_t[size];
+  memcpy(new_data, data, size);
+  data_to_delete.push_back(new_data);
+
+  auto container = std::make_shared<art::MemoryDexFileContainer>(new_data, size);
+  art::StandardDexFile* dex_file = new art::StandardDexFile(new_data,
+                                                            /*location=*/"fuzz.dex",
+                                                            /*location_checksum=*/0,
+                                                            /*oat_dex_file=*/nullptr,
+                                                            container);
+  dex_files_to_delete.push_back(dex_file);
+
   std::string error_msg;
   const bool verify_result =
-      art::dex::Verify(&dex_file, dex_file.GetLocation().c_str(), kVerify, &error_msg);
+      art::dex::Verify(dex_file, dex_file->GetLocation().c_str(), kVerify, &error_msg);
 
   if (!verify_result) {
     // DEX file couldn't be verified, don't save it in the corpus.
@@ -177,7 +188,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
   art::ScopedObjectAccess soa(art::Thread::Current());
   art::ClassLinker* class_linker = runtime->GetClassLinker();
-  jobject class_loader = RegisterDexFileAndGetClassLoader(runtime, &dex_file);
+  jobject class_loader = RegisterDexFileAndGetClassLoader(runtime, dex_file);
 
   // Scope for the handles
   {
@@ -190,9 +201,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     art::MutableHandle<art::mirror::ClassLoader> h_dex_cache_class_loader =
         scope.NewHandle(h_loader.Get());
 
-    for (art::ClassAccessor accessor : dex_file.GetClasses()) {
+    for (art::ClassAccessor accessor : dex_file->GetClasses()) {
       h_klass.Assign(
-          class_linker->FindClass(soa.Self(), dex_file, accessor.GetClassIdx(), h_loader));
+          class_linker->FindClass(soa.Self(), *dex_file, accessor.GetClassIdx(), h_loader));
       // Ignore classes that couldn't be loaded since we are looking for crashes during
       // class/method verification.
       if (h_klass == nullptr || h_klass->IsErroneous()) {
@@ -224,10 +235,10 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   // handled by the GC, but since we are not calling it every iteration, we need to delete them
   // manually.
   const art::ClassLinker::DexCacheData* dex_cache_data =
-      art::VerifyClassesFuzzerHelper::GetDexCacheData(runtime, &dex_file);
+      art::VerifyClassesFuzzerHelper::GetDexCacheData(runtime, dex_file);
   soa.Env()->GetVm()->DeleteWeakGlobalRef(soa.Self(), dex_cache_data->weak_root);
 
-  class_linker->RemoveDexFromCaches(dex_file);
+  class_linker->RemoveDexFromCaches(*dex_file);
 
   // Delete global ref and unload class loader to free RAM.
   soa.Env()->GetVm()->DeleteGlobalRef(soa.Self(), class_loader);
@@ -235,6 +246,14 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   if (skipped_gc_iterations == kMaxSkipGCIterations) {
     runtime->GetHeap()->CollectGarbage(/* clear_soft_references */ true);
     skipped_gc_iterations = 0;
+    for (uint8_t* d : data_to_delete) {
+      delete[] d;
+    }
+    data_to_delete.clear();
+    for (art::StandardDexFile* df : dex_files_to_delete) {
+      delete df;
+    }
+    dex_files_to_delete.clear();
   }
 
   return 0;

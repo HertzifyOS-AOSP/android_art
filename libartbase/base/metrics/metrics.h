@@ -132,32 +132,40 @@ enum class DatumId {
 #undef METRIC
 };
 
-// Names come from PackageManagerServiceCompilerMapping.java
-#define REASON_NAME_LIST(V)                                               \
-  V(kError, "error")                                                      \
-  V(kUnknown, "unknown")                                                  \
-  V(kFirstBoot, "first-boot")                                             \
-  V(kBootAfterOTA, "boot-after-ota")                                      \
-  V(kPostBoot, "post-boot")                                               \
-  V(kInstall, "install")                                                  \
-  V(kInstallFast, "install-fast")                                         \
-  V(kInstallBulk, "install-bulk")                                         \
-  V(kInstallBulkSecondary, "install-bulk-secondary")                      \
-  V(kInstallBulkDowngraded, "install-bulk-downgraded")                    \
-  V(kInstallBulkSecondaryDowngraded, "install-bulk-secondary-downgraded") \
-  V(kBgDexopt, "bg-dexopt")                                               \
-  V(kABOTA, "ab-ota")                                                     \
-  V(kInactive, "inactive")                                                \
-  V(kShared, "shared")                                                    \
-  V(kInstallWithDexMetadata, "install-with-dex-metadata")                 \
-  V(kPrebuilt, "prebuilt")                                                \
-  V(kCmdLine, "cmdline")                                                  \
-  V(kVdex, "vdex")                                                        \
-  V(kBootAfterMainlineUpdate, "boot-after-mainline-update")               \
-  V(kOther, "other")                                                      \
-  V(kCloud, "cloud")                                                      \
-  V(kVdexDm, "vdex-dm")                                                   \
-  V(kDefDexopt, "def-dexopt")
+// NOLINTBEGIN(readability/multiline_comment) - multi-line /*...*/-style comment needed in macro.
+#define REASON_NAME_LIST(V)                                                                       \
+  /* A special value indicating that the compilation reason is not successfully obtained from ART \
+   * due to some expected internal error. */                                                      \
+  V(kUnspecified, "unspecified")                                                                  \
+  /* A catch-all value for compilation reasons that are not explicitly listed. Usually this means \
+   * the reason is a custom reason defined by an OEM. */                                          \
+  V(kOther, "other")                                                                              \
+  /* A value representing the string literal "unknown" obtained from ART. Usually this means no   \
+   * OAT file or no dex code. */                                                                  \
+  V(kUnknown, "unknown")                                                                          \
+  V(kFirstBoot, "first-boot")                                                                     \
+  V(kBootAfterOTA, "boot-after-ota")                                                              \
+  V(kPostBoot, "post-boot")                                                                       \
+  V(kInstall, "install")                                                                          \
+  V(kInstallFast, "install-fast")                                                                 \
+  V(kInstallBulk, "install-bulk")                                                                 \
+  V(kInstallBulkSecondary, "install-bulk-secondary")                                              \
+  V(kInstallBulkDowngraded, "install-bulk-downgraded")                                            \
+  V(kInstallBulkSecondaryDowngraded, "install-bulk-secondary-downgraded")                         \
+  V(kBgDexopt, "bg-dexopt")                                                                       \
+  V(kABOTA, "ab-ota")                                                                             \
+  V(kInactive, "inactive")                                                                        \
+  V(kShared, "shared")                                                                            \
+  V(kInstallWithDexMetadata, "install-with-dex-metadata")                                         \
+  V(kPrebuilt, "prebuilt")                                                                        \
+  V(kCmdLine, "cmdline")                                                                          \
+  V(kVdex, "vdex")                                                                                \
+  V(kBootAfterMainlineUpdate, "boot-after-mainline-update")                                       \
+  V(kCloud, "cloud")                                                                              \
+  V(kVdexDm, "vdex-dm")                                                                           \
+  V(kDefDexopt, "def-dexopt")                                                                     \
+  V(kPostUr, "post-ur")
+// NOLINTEND(readability/multiline_comment)
 
 // We log compilation reasons as part of the metadata we report. Since elsewhere compilation reasons
 // are specified as a string, we define them as an enum here which indicates the reasons that we
@@ -188,22 +196,30 @@ constexpr CompilationReason CompilationReasonFromName(std::string_view name) {
 #undef REASON_FROM_NAME
 
 // NOLINTBEGIN(readability/multiline_comment) - multi-line /*...*/-style comment needed in macro.
-#define COMPILER_FILTER_REPORTING_LIST(V)                                     \
-  V(kError, "error")                    /* Error (invalid value) condition */ \
-  V(kUnknown, "unknown")                /* Unknown (not set) condition */     \
-  V(kAssumeVerified, "assume-verified") /* Standard compiler filters */       \
-  V(kExtract, "extract")                                                      \
-  V(kVerify, "verify")                                                        \
-  V(kSpaceProfile, "space-profile")                                           \
-  V(kSpace, "space")                                                          \
-  V(kSpeedProfile, "speed-profile")                                           \
-  V(kSpeed, "speed")                                                          \
-  V(kEverythingProfile, "everything-profile")                                 \
-  V(kEverything, "everything")                                                \
-  V(kRunFromApk, "run-from-apk") /* Augmented compiler filters as produces by \
-                                    OatFileAssistant#GetOptimizationStatus */ \
-  V(kRunFromApkFallback, "run-from-apk-fallback")                             \
-  V(kOther, "other")
+#define COMPILER_FILTER_REPORTING_LIST(V)                                                       \
+  /* A special value indicating that the compiler filter is not successfully obtained from ART  \
+   * due to some expected internal error. */                                                    \
+  V(kUnspecified, "unspecified")                                                                \
+  /* A catch-all value for compiler filters that are not explicitly listed. Usually this is     \
+   * unexecpted. */                                                                             \
+  V(kOther, "other")                                                                            \
+  /* A value representing the string literal "unknown" obtained from ART. Usually this means no \
+   * dex code. */                                                                               \
+  V(kUnknown, "unknown")                                                                        \
+  /* Standard compiler filters start from here. */                                              \
+  V(kAssumeVerified, "assume-verified")                                                         \
+  V(kExtract, "extract")                                                                        \
+  V(kVerify, "verify")                                                                          \
+  V(kSpaceProfile, "space-profile")                                                             \
+  V(kSpace, "space")                                                                            \
+  V(kSpeedProfile, "speed-profile")                                                             \
+  V(kSpeed, "speed")                                                                            \
+  V(kEverythingProfile, "everything-profile")                                                   \
+  V(kEverything, "everything")                                                                  \
+  /* Augmented compiler filters produced by OatFileAssistant#GetOptimizationStatus start from   \
+   * here. */                                                                                   \
+  V(kRunFromApk, "run-from-apk")                                                                \
+  V(kRunFromApkFallback, "run-from-apk-fallback")
 // NOLINTEND(readability/multiline_comment)
 
 // Augmented compiler filter enum, used in the reporting infra.
