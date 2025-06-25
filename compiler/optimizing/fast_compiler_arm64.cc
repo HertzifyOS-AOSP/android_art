@@ -29,6 +29,7 @@
 #include "code_generator_arm64.h"
 #include "data_type-inl.h"
 #include "dex/code_item_accessors-inl.h"
+#include "dex/dex_file_exception_helpers.h"
 #include "dex/dex_instruction-inl.h"
 #include "driver/dex_compilation_unit.h"
 #include "entrypoints/entrypoint_utils-inl.h"
@@ -128,6 +129,11 @@ class FastCompilerARM64 : public FastCompiler {
                                allocator->Adapter()),
         is_non_null_masks_(dex_compilation_unit.GetCodeItemAccessor().InsnsSizeInCodeUnits(),
                            allocator->Adapter()),
+        catch_pcs_(ArenaBitVector::CreateFixedSize(
+                       allocator,
+                       dex_compilation_unit.GetCodeItemAccessor().InsnsSizeInCodeUnits())),
+        catch_stack_maps_(dex_compilation_unit.GetCodeItemAccessor().TriesSize(),
+                          allocator->Adapter()),
         has_frame_(false),
         core_spill_mask_(0u),
         fpu_spill_mask_(0u),
@@ -359,6 +365,14 @@ class FastCompilerARM64 : public FastCompiler {
   // be used at the point of that pc.
   ArenaVector<uint64_t> is_non_null_masks_;
 
+  // Dex pcs that are catch targets.
+  BitVectorView<size_t> catch_pcs_;
+
+  // Pair of {dex_pc, native_pc} collected during compilation, used when
+  // generating stack map entries for catch instructions at the end of
+  // compilation.
+  ArenaVector<std::pair<uint32_t, uint32_t>> catch_stack_maps_;
+
   // Whether we've created a frame for this compiled method.
   bool has_frame_;
 
@@ -386,11 +400,6 @@ class FastCompilerARM64 : public FastCompiler {
 };
 
 bool FastCompilerARM64::InitializeParameters() {
-  if (GetCodeItemAccessor().TriesSize() != 0) {
-    // TODO: Support try/catch.
-    unimplemented_reason_ = "TryCatch";
-    return false;
-  }
   const char* shorty = dex_compilation_unit_.GetShorty();
   uint16_t number_of_vregs = GetCodeItemAccessor().RegistersSize();
   uint16_t number_of_parameters = GetCodeItemAccessor().InsSize();
@@ -428,6 +437,22 @@ bool FastCompilerARM64::InitializeParameters() {
     }
   }
   return_type_ = DataType::FromShorty(shorty[0]);
+
+  if (GetCodeItemAccessor().TriesSize() != 0) {
+    if (!EnsureHasFrame()) {
+      return false;
+    }
+    const uint8_t* handlers_ptr = GetCodeItemAccessor().GetCatchHandlerData();
+    uint32_t handlers_size = DecodeUnsignedLeb128(&handlers_ptr);
+    for (uint32_t idx = 0; idx < handlers_size; ++idx) {
+      CatchHandlerIterator iterator(handlers_ptr);
+      for (; iterator.HasNext(); iterator.Next()) {
+        catch_pcs_.SetBit(iterator.GetHandlerAddress());
+      }
+      handlers_ptr = iterator.EndDataPointer();
+    }
+  }
+
   return true;
 }
 
@@ -484,6 +509,10 @@ bool FastCompilerARM64::ProcessInstructions() {
       is_non_null_mask_ = is_non_null_masks_[pair.DexPc()];
       object_register_mask_ = object_register_masks_[pair.DexPc()];
       __ Bind(label);
+    }
+
+    if (catch_pcs_.IsBitSet(pair.DexPc())) {
+      catch_stack_maps_.push_back(std::make_pair(pair.DexPc(), GetAssembler()->CodePosition()));
     }
 
     if (!ProcessDexInstruction(pair.Inst(), pair.DexPc(), next)) {
@@ -2311,15 +2340,35 @@ bool FastCompilerARM64::Compile() {
     return false;
   }
   DCHECK(!HitUnimplemented()) << GetUnimplementedReason();
+
+  StackMapStream* stack_map_stream = code_generation_data_->GetStackMapStream();
   if (!has_frame_) {
-    code_generation_data_->GetStackMapStream()->BeginMethod(/* frame_size= */ 0u,
-                                                            /* core_spill_mask= */ 0u,
-                                                            /* fp_spill_mask= */ 0u,
-                                                            GetCodeItemAccessor().RegistersSize(),
-                                                            /* is_compiling_baseline= */ true,
-                                                            /* is_debuggable= */ false);
+    stack_map_stream->BeginMethod(/* frame_size= */ 0u,
+                                  /* core_spill_mask= */ 0u,
+                                  /* fp_spill_mask= */ 0u,
+                                  GetCodeItemAccessor().RegistersSize(),
+                                  /* is_compiling_baseline= */ true,
+                                  /* is_debuggable= */ false);
   }
-  code_generation_data_->GetStackMapStream()->EndMethod(assembler_.CodeSize());
+
+  // Catch stack maps are pushed at the end.
+  for (auto pair : catch_stack_maps_) {
+    uint32_t dex_pc = pair.first;
+    uint32_t native_pc = pair.second;
+    std::vector<uint32_t> dex_pc_list_for_verification;
+    if (kIsDebugBuild) {
+      dex_pc_list_for_verification.push_back(dex_pc);
+    }
+    stack_map_stream->BeginStackMapEntry(dex_pc,
+                                         native_pc,
+                                         /* register_mask= */ 0,
+                                         /* sp_mask= */ nullptr,
+                                         StackMap::Kind::Catch,
+                                         /* needs_vreg_info= */ false,
+                                         dex_pc_list_for_verification);
+    stack_map_stream->EndStackMapEntry();
+  }
+  stack_map_stream->EndMethod(assembler_.CodeSize());
   assembler_.FinalizeCode();
 
   if (VLOG_IS_ON(jit)) {
