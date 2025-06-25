@@ -29,7 +29,6 @@
    movq rSELF:THREAD_SELF_OFFSET, %rdi
    movq 0(%rsp), %rsi
    movq rPC, %rdx
-   movq rFP, %rcx
    call nterp_get_method
    movq %rax, %rdi
    .if $is_super
@@ -113,7 +112,6 @@
    movq rSELF:THREAD_SELF_OFFSET, %rdi
    movq 0(%rsp), %rsi
    movq rPC, %rdx
-   movq rFP, %rcx
    call nterp_get_method
    jmp .L${opcode}_resume
 
@@ -132,7 +130,6 @@
    movq rSELF:THREAD_SELF_OFFSET, %rdi
    movq 0(%rsp), %rsi
    movq rPC, %rdx
-   movq rFP, %rcx
    call nterp_get_method
    movq %rax, %rdi
    jmp $helper
@@ -169,7 +166,6 @@
    movq rSELF:THREAD_SELF_OFFSET, %rdi
    movq 0(%rsp), %rsi
    movq rPC, %rdx
-   movq rFP, %rcx
    call nterp_get_method
    movl %eax, %edi
    jmp 1b

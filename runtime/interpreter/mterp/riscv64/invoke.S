@@ -363,7 +363,6 @@
    mv a0, xSELF
    ld a1, (sp)  // We can't always rely on a0 = ArtMethod*.
    mv a2, xPC
-   mv a3, xFP
    call nterp_get_method
 
 
