@@ -1971,6 +1971,8 @@ phony {
 
 phony {
     name: "art_run_test_dependencies",
+    host_supported: true,
+    device_supported: true,
     required: [
         // Host tools required by run-tests
         "d8",
@@ -2001,6 +2003,7 @@ phony {
 // and hprof-conv.
 phony {
     name: "art_test_host_run_test_dependencies",
+    host_supported: true,
     required: [
         "art_run_test_dependencies",
         // in ART_HOST_OUT_SHARED_LIBRARIES/
