@@ -321,21 +321,32 @@ static constexpr std::array<uint8_t, 256u> GenerateOpcodeInvokeTypes() {
 ALWAYS_INLINE FLATTEN
 inline bool IsInvokeClassMismatch(ObjPtr<mirror::Class> klass, InvokeType type, ArtMethod* caller)
     REQUIRES_SHARED(Locks::mutator_lock_) {
-  DCHECK_NE(type, kInterface) << "Fast path unsupported for invokeinterface";
-  if (LIKELY(!klass->IsInterface())) {
-    return false;
-  }
-
-  DCHECK(caller->IsDefault() || caller->IsStatic());
-  if (type == kVirtual) {
+  if (type == kInterface && UNLIKELY(!klass->IsInterface())) {
     return true;
   }
 
-  if (type == kDirect && !caller->GetDexFile()->SupportsDefaultMethods()) {
+  if (type == kVirtual && UNLIKELY(klass->IsInterface())) {
     return true;
   }
 
+  if (type == kDirect &&
+      UNLIKELY(klass->IsInterface()) &&
+      !caller->GetDexFile()->SupportsDefaultMethods()) {
+    return true;
+  }
   return false;
+}
+
+static bool CanAccessFastInternal(ArtMethod* method, InvokeType type, ArtMethod* caller)
+    REQUIRES_SHARED(Locks::mutator_lock_) {
+  if (caller->SkipAccessChecks() || method == nullptr) {
+    return true;
+  }
+  ObjPtr<mirror::Class> cls = method->GetDeclaringClass<kWithoutReadBarrier>();
+  return method->IsPublic() &&
+      cls->IsPublic() &&
+      !IsInvokeClassMismatch(cls, type, caller) &&
+      !method->CheckIncompatibleClassChange(type);
 }
 
 ALWAYS_INLINE FLATTEN
@@ -347,12 +358,6 @@ static ArtMethod* FindMethodFast(ArtMethod* caller,
                                  Instruction::Code opcode)
     REQUIRES_SHARED(Locks::mutator_lock_) {
   if (caller->IsObsolete()) {
-    return nullptr;
-  }
-
-  if (type == kInterface || type == kSuper) {
-    // The case of finding the method through the caller's class
-    // are too rare for super and interface invokes to be worth it.
     return nullptr;
   }
 
@@ -382,7 +387,7 @@ static ArtMethod* FindMethodFast(ArtMethod* caller,
   }
 
   // For non-interface instance calls, check in the receiver's class.
-  if (registers != nullptr && type != kStatic) {
+  if (registers != nullptr && type != kStatic && type != kInterface) {
     uint16_t this_reg =
         (opcode >= Instruction::INVOKE_VIRTUAL_RANGE) ? inst->VRegC_3rc() : inst->VRegC_35c();
     mirror::Object* obj = reinterpret_cast32<mirror::Object*>(registers[this_reg]);
@@ -393,20 +398,11 @@ static ArtMethod* FindMethodFast(ArtMethod* caller,
         // Passing `registers` is only done in nterp, which isn't used for
         // cross-compilation.
         DCHECK_EQ(Runtime::Current()->GetClassLinker()->GetImagePointerSize(), kRuntimePointerSize);
-        ArtMethod* method =
+        ArtMethod* resolved_method =
             obj_cls->FindDeclaredClassMethod</* kOnlyLookAtIndex= */ false, kRuntimePointerSize>(
                 method_index);
-        if (caller->SkipAccessChecks() || method == nullptr) {
-          return method;
-        }
-        // No need to check for invoke class mismatch, as this only applies for
-        // interface class, and we know the declaring class of `method` is not
-        // an interface.
-        DCHECK(!method->GetDeclaringClass<kWithoutReadBarrier>()->IsInterface());
-        if (method->IsPublic() &&
-            method->GetDeclaringClass<kWithoutReadBarrier>()->IsPublic() &&
-            !method->CheckIncompatibleClassChange(type)) {
-          return method;
+        if (CanAccessFastInternal(resolved_method, type, caller)) {
+          return resolved_method;
         }
       }
     }
