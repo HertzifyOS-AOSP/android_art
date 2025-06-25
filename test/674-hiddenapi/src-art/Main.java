@@ -136,6 +136,11 @@ public class Main {
         "runTest", String.class, Integer.TYPE, Integer.TYPE, Boolean.TYPE);
     runTestMethod.invoke(null, nativeLibCopy, parentDomain.ordinal(), childDomain.ordinal(),
         addAllApisToSdk);
+
+    if (parentDomain == DexDomain.CorePlatform && childDomain == DexDomain.Platform) {
+      // Ad-hoc test for platform -> core-platform. The parent domain doesn't actually matter here.
+      childClass.getDeclaredMethod("checkNonCorePlatformApis").invoke(null);
+    }
   }
 
   // Routine which tries to figure out the absolute path of our native libarttest(d)_external.so.

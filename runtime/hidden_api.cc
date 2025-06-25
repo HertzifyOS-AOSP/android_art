@@ -343,25 +343,79 @@ bool ShouldDenyJniAccessToMember(T* member,
   struct {
     Thread* self;
     void* native_caller_addr;
+    std::optional<AccessContext> native_caller_context;
+    std::optional<AccessContext> java_caller_context;
 
-    AccessContext GetNativeCallerContext() {
-      return AccessContext::FromNativeCaller(native_caller_addr);
+    AccessContext& GetNativeCallerContext() {
+      if (!native_caller_context.has_value()) {
+        native_caller_context.emplace(AccessContext::FromNativeCaller(native_caller_addr));
+      }
+      return native_caller_context.value();
     }
 
-    AccessContext GetJavaCallerContext() REQUIRES_SHARED(Locks::mutator_lock_) {
-      ObjPtr<mirror::Class> caller = GetCallingClass(self, /* num_frames= */ 1);
-      // If the calling class cannot be determined, e.g. unattached threads, we
-      // conservatively assume the caller is trusted.
-      return caller.IsNull() ? AccessContext(/* is_trusted= */ true) : AccessContext(caller);
+    AccessContext& GetJavaCallerContext() REQUIRES_SHARED(Locks::mutator_lock_) {
+      if (!java_caller_context.has_value()) {
+        ObjPtr<mirror::Class> caller = GetCallingClass(self, /* num_frames= */ 1);
+        // If the calling class cannot be determined, e.g. unattached threads, we
+        // conservatively assume the caller is trusted.
+        java_caller_context.emplace(caller.IsNull() ? AccessContext(/* is_trusted= */ true)
+                                                    : AccessContext(caller));
+      }
+      return java_caller_context.value();
     }
   } ctx{.self = self, .native_caller_addr = native_caller_addr};
 
+  if (com::android::art::flags::hiddenapi_platform_enforcement() &&
+      (!com::android::art::flags::hiddenapi_jni_api_callers() ||
+       !EnableNativeCallerCheckForApp())) {
+    // Special case to avoid false alarms when accesses from platform to
+    // core-platform are prohibited: If the topmost java frame is in platform
+    // but it has called into native code in an app, then it's possible that the
+    // app has access to APIs that the platform hasn't (e.g. if the app has an
+    // old and permissive target SDK level).
+    //
+    // That's not a problem for apps with a recent enough target SDK level where
+    // we always check the native caller in the standard code path below, but
+    // otherwise we need to check for that specific situation.
+    AccessMethod check_only_method =
+        IsCheckOnlyMethod(access_kind) ? access_kind : AccessMethod::kCheckWithPolicy;
+    if (ShouldDenyAccessToMember(
+            member,
+            [&ctx]() REQUIRES_SHARED(Locks::mutator_lock_) {
+              AccessContext& context = ctx.GetJavaCallerContext();
+              VLOG(hiddenapi) << "hiddenapi: Managed JNI caller " << context << " from "
+                              << context.GetDomain() << " (special case)";
+              return context;
+            },
+            check_only_method) &&
+        ctx.java_caller_context.value().GetDomain() == Domain::kPlatform) {
+      // The java caller is in platform and has been denied, so check the native caller.
+      if (!ShouldDenyAccessToMember(
+              member,
+              [&ctx]() REQUIRES_SHARED(Locks::mutator_lock_) {
+                AccessContext& context = ctx.GetNativeCallerContext();
+                VLOG(hiddenapi) << "hiddenapi: Native JNI caller " << context << " from "
+                                << context.GetDomain() << " (special case)";
+                return context;
+              },
+              check_only_method) &&
+          ctx.native_caller_context.value().GetNativeCallerAddr() != nullptr) {
+        // The native caller has been positively identified
+        // (GetNativeCallerAddr() != nullptr) and is allowed, so the access is fine.
+        return false;
+      }
+    }
+    // Fall through to the standard check in all other cases. The resolved
+    // native and java callers have been cached in ctx so it should be fast.
+  }
+
+  // Standard code path for the hiddenapi check.
   return ShouldDenyAccessToMember(
       member,
       [&ctx]() REQUIRES_SHARED(Locks::mutator_lock_) {
         if (com::android::art::flags::hiddenapi_jni_api_callers()) {
           // Construct the context from the native caller address.
-          AccessContext context = ctx.GetNativeCallerContext();
+          AccessContext& context = ctx.GetNativeCallerContext();
 
           if (context.GetNativeCallerAddr() != nullptr) {
             switch (context.GetDomain()) {
@@ -407,7 +461,7 @@ bool ShouldDenyJniAccessToMember(T* member,
         // caller address then look at the first calling class on the Java stack.
         // This is the legacy approach, and it's also better than nothing if a DSO
         // cannot be identified (e.g. for generated code).
-        AccessContext context = ctx.GetJavaCallerContext();
+        AccessContext& context = ctx.GetJavaCallerContext();
         VLOG(hiddenapi) << "hiddenapi: Managed JNI caller " << context << " from "
                         << context.GetDomain();
         return context;
