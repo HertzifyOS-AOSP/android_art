@@ -337,10 +337,25 @@ inline bool IsInvokeClassMismatch(ObjPtr<mirror::Class> klass, InvokeType type, 
   return false;
 }
 
+static bool CanAccessFastInternal(ArtMethod* method, InvokeType type, ArtMethod* caller)
+    REQUIRES_SHARED(Locks::mutator_lock_) {
+  if (caller->SkipAccessChecks() || method == nullptr) {
+    return true;
+  }
+  ObjPtr<mirror::Class> cls = method->GetDeclaringClass<kWithoutReadBarrier>();
+  return method->IsPublic() &&
+      cls->IsPublic() &&
+      !IsInvokeClassMismatch(cls, type, caller) &&
+      !method->CheckIncompatibleClassChange(type);
+}
+
 ALWAYS_INLINE FLATTEN
 static ArtMethod* FindMethodFast(ArtMethod* caller,
                                  uint16_t method_index,
-                                 InvokeType type)
+                                 uint32_t* registers,
+                                 const Instruction* inst,
+                                 InvokeType type,
+                                 Instruction::Code opcode)
     REQUIRES_SHARED(Locks::mutator_lock_) {
   if (caller->IsObsolete()) {
     return nullptr;
@@ -371,6 +386,28 @@ static ArtMethod* FindMethodFast(ArtMethod* caller,
     return nullptr;
   }
 
+  // For non-interface instance calls, check in the receiver's class.
+  if (registers != nullptr && type != kStatic && type != kInterface) {
+    uint16_t this_reg =
+        (opcode >= Instruction::INVOKE_VIRTUAL_RANGE) ? inst->VRegC_3rc() : inst->VRegC_35c();
+    mirror::Object* obj = reinterpret_cast32<mirror::Object*>(registers[this_reg]);
+    if (obj != nullptr) {
+      mirror::Class* obj_cls = obj->GetClass();
+      if (obj_cls->GetDexTypeIndex() == method_id.class_idx_ &&
+          obj_cls->GetDexCache() == cls->GetDexCache()) {
+        // Passing `registers` is only done in nterp, which isn't used for
+        // cross-compilation.
+        DCHECK_EQ(Runtime::Current()->GetClassLinker()->GetImagePointerSize(), kRuntimePointerSize);
+        ArtMethod* resolved_method =
+            obj_cls->FindDeclaredClassMethod</* kOnlyLookAtIndex= */ false, kRuntimePointerSize>(
+                method_index);
+        if (CanAccessFastInternal(resolved_method, type, caller)) {
+          return resolved_method;
+        }
+      }
+    }
+  }
+
   if (caller->SkipAccessChecks()) {
     return caller->GetDexCache()->GetResolvedMethod(method_index);
   }
@@ -383,7 +420,8 @@ static constexpr std::array<uint8_t, 256u> kOpcodeInvokeTypes = GenerateOpcodeIn
 LIBART_PROTECTED FLATTEN
 extern "C" size_t NterpGetMethod(Thread* self,
                                  ArtMethod* caller,
-                                 const uint16_t* dex_pc_ptr)
+                                 const uint16_t* dex_pc_ptr,
+                                 uint32_t* registers)
     REQUIRES_SHARED(Locks::mutator_lock_) {
   UpdateHotness(caller);
   const Instruction* inst = Instruction::At(dex_pc_ptr);
@@ -398,7 +436,8 @@ extern "C" size_t NterpGetMethod(Thread* self,
   uint16_t method_index =
       (opcode >= Instruction::INVOKE_VIRTUAL_RANGE) ? inst->VRegB_3rc() : inst->VRegB_35c();
 
-  ArtMethod* resolved_method = FindMethodFast(caller, method_index, invoke_type);
+  ArtMethod* resolved_method = FindMethodFast(
+      caller, method_index, registers, inst, invoke_type, opcode);
   if (resolved_method == nullptr) {
     ClassLinker* const class_linker = Runtime::Current()->GetClassLinker();
     resolved_method = caller->SkipAccessChecks()
