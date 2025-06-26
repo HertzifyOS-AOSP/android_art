@@ -861,8 +861,8 @@ ArtMethod* Class::FindClassMethod(ObjPtr<DexCache> dex_cache,
     } else {
       constexpr PointerSize kOtherPointerSize =
           (kRuntimePointerSize == PointerSize::k64) ? PointerSize::k32 : PointerSize::k64;
-      method = FindDeclaredClassMethod</* kOnlyLookAtIndex */ false, kOtherPointerSize>(
-          dex_method_idx);
+      method =
+          FindDeclaredClassMethod</* kOnlyLookAtIndex= */ false, kOtherPointerSize>(dex_method_idx);
     }
     if (method != nullptr) {
       return method;

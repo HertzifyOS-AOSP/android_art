@@ -1375,5 +1375,3 @@ ALWAYS_INLINE FLATTEN inline ArtMethod* Class::FindDeclaredClassMethod(uint32_t 
 }  // namespace art
 
 #endif  // ART_RUNTIME_MIRROR_CLASS_INL_H_
-
-
