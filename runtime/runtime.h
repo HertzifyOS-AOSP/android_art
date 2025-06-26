@@ -96,6 +96,8 @@ class MethodVerifier;
 enum class VerifyMode : int8_t;
 }  // namespace verifier
 class ArenaPool;
+class AssumeValueSignature;
+class ArtField;
 class ArtMethod;
 enum class CalleeSaveType: uint32_t;
 class ClassLinker;
@@ -1142,6 +1144,8 @@ class Runtime {
 
   bool AreMetricsInitialized() const { return metrics_reporter_ != nullptr; }
 
+  std::optional<AssumeValueSignature> LookupAssumeValueSignature(ArtField* field) const;
+
  private:
   static void InitPlatformSignalHandlers();
 
@@ -1581,6 +1585,8 @@ class Runtime {
 
   // The info about the application code paths.
   AppInfo app_info_;
+
+  std::map<ArtField*, const AssumeValueSignature*> assume_value_field_signatures_;
 
   // Note: See comments on GetFaultMessage.
   friend std::string GetFaultMessageForAbortLogging();

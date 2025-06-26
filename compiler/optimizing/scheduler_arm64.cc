@@ -297,7 +297,7 @@ void SchedulingLatencyVisitorARM64::VisitStaticFieldGet([[maybe_unused]] HStatic
 void SchedulingLatencyVisitorARM64::VisitSuspendCheck(HSuspendCheck* instruction) {
   HBasicBlock* block = instruction->GetBlock();
   DCHECK_IMPLIES(block->GetLoopInformation() == nullptr,
-                 block->IsEntryBlock() && instruction->GetNext()->IsGoto());
+                 block->GetGraph()->IsEntryBlock(block) && instruction->GetNext()->IsGoto());
   // Users do not use any data results.
   last_visited_latency_ = 0;
 }

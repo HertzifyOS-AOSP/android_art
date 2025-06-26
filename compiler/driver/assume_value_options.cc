@@ -16,12 +16,34 @@
 
 #include "assume_value_options.h"
 
+#include "assume_value_signatures.h"
 #include "base/logging.h"
 #include "com_android_art_flags.h"
+#include "runtime.h"
 
 namespace art_flags = com::android::art::flags;
 
 namespace art HIDDEN {
+
+bool AssumeValueOptions::MaybeGetAssumedValue(ArtField* field, int32_t* value) const {
+  if (UNLIKELY(!assumed_value_overrides_.empty())) {
+    const auto it = assumed_value_overrides_.find(field);
+    if (it != assumed_value_overrides_.end()) {
+      *value = it->second;
+      return true;
+    }
+  }
+
+  const auto signature = Runtime::Current()->LookupAssumeValueSignature(field);
+  if (signature == AssumeValueSignatures::kSdkInt) {
+    if (art_flags::compile_sdk_int_constant() && HasValidSdkInt()) {
+      *value = sdk_int_;
+      return true;
+    }
+  }
+
+  return false;
+}
 
 void AssumeValueOptions::SetSdkInt(uint32_t sdk_int) {
   DCHECK(art_flags::compile_sdk_int_constant());

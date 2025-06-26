@@ -119,6 +119,8 @@ class GraphChecker final : public HGraphDelegateVisitor {
     errors_.push_back(error);
   }
 
+  bool IsExitTryBoundaryIntoExitBlock(HBasicBlock* block);
+
   // The block currently visited.
   HBasicBlock* current_block_ = nullptr;
   // Errors encountered while checking the graph.

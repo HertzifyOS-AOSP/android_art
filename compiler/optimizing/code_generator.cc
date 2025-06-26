@@ -106,7 +106,7 @@ static bool CheckType(DataType::Type type, Location location) {
 }
 
 // Check that a location summary is consistent with an instruction.
-static bool CheckTypeConsistency(HInstruction* instruction) {
+bool CodeGenerator::CheckTypeConsistency(HInstruction* instruction) {
   LocationSummary* locations = instruction->GetLocations();
   if (locations == nullptr) {
     return true;
@@ -919,35 +919,6 @@ void CodeGenerator::BlockIfInRegister(Location location, bool is_out) const {
   }
 }
 
-void CodeGenerator::AllocateLocations(HInstruction* instruction) {
-  ArenaAllocator* allocator = GetGraph()->GetAllocator();
-  for (HEnvironment* env = instruction->GetEnvironment(); env != nullptr; env = env->GetParent()) {
-    env->AllocateLocations(allocator);
-  }
-  GetLocationBuilder()->Dispatch(instruction);
-  DCHECK(CheckTypeConsistency(instruction));
-  LocationSummary* locations = instruction->GetLocations();
-  if (!instruction->IsSuspendCheckEntry()) {
-    if (locations != nullptr) {
-      if (locations->CanCall()) {
-        MarkNotLeaf();
-        if (locations->NeedsSuspendCheckEntry()) {
-          MarkNeedsSuspendCheckEntry();
-        }
-      } else if (locations->Intrinsified() &&
-                 instruction->IsInvokeStaticOrDirect() &&
-                 !instruction->AsInvokeStaticOrDirect()->HasCurrentMethodInput()) {
-        // A static method call that has been fully intrinsified, and cannot call on the slow
-        // path or refer to the current method directly, no longer needs current method.
-        return;
-      }
-    }
-    if (instruction->NeedsCurrentMethod()) {
-      SetRequiresCurrentMethod();
-    }
-  }
-}
-
 std::unique_ptr<CodeGenerator> CodeGenerator::Create(HGraph* graph,
                                                      const CompilerOptions& compiler_options,
                                                      OptimizingCompilerStats* stats) {
@@ -1023,8 +994,9 @@ CodeGenerator::CodeGenerator(HGraph* graph,
       current_slow_path_(nullptr),
       current_block_index_(0),
       is_leaf_(true),
-      needs_suspend_check_entry_(false),
-      requires_current_method_(false),
+      // We need the current method for baseline in case we reach the hotness threshold.
+      // As a side effect this makes the frame non-empty.
+      requires_current_method_(GetGraph()->IsCompilingBaseline()),
       code_generation_data_(),
       unimplemented_intrinsics_(unimplemented_intrinsics) {
   if (GetGraph()->IsCompilingOsr()) {
@@ -1040,11 +1012,6 @@ CodeGenerator::CodeGenerator(HGraph* graph,
         AddAllocatedRegister(Location::FpuRegisterLocation(i));
       }
     }
-  }
-  if (GetGraph()->IsCompilingBaseline()) {
-    // We need the current method in case we reach the hotness threshold. As a
-    // side effect this makes the frame non-empty.
-    SetRequiresCurrentMethod();
   }
 }
 

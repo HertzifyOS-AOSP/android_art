@@ -335,4 +335,8 @@ void CommonCompilerTestImpl::ClearBootImageOption() {
   compiler_options_->image_type_ = CompilerOptions::ImageType::kNone;
 }
 
+void CommonCompilerTestImpl::OverrideAssumedValue(ArtField* field, int32_t value) {
+  compiler_options_->assume_value_options_.assumed_value_overrides_.emplace(field, value);
+}
+
 }  // namespace art

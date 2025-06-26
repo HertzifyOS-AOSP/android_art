@@ -18,16 +18,25 @@
 #define ART_COMPILER_DRIVER_ASSUME_VALUE_OPTIONS_H_
 
 #include <cstdint>
+#include <map>
 
 #include "base/macros.h"
 #include "base/sdk_version.h"
 
 namespace art HIDDEN {
 
+class ArtField;
+
 // A helper class containing configured values that can be safely assumed during compile time.
 class AssumeValueOptions final {
  public:
   static constexpr uint32_t kUnsetSdkInt = static_cast<uint32_t>(SdkVersion::kUnset);
+
+  AssumeValueOptions() = default;
+
+  // Conditionally gets the assumed value for a given member, if defined.
+  // Returns whether the field has a corresponding assumed value.
+  bool MaybeGetAssumedValue(ArtField* field, int32_t* value) const;
 
   // The assumed Build.VERSION.SDK_INT value to use for compilation.
   // Defaults to kUnsetSdkInt unless explicitly configured.
@@ -42,6 +51,11 @@ class AssumeValueOptions final {
  private:
   // The assumed android.os.Build.VERSION.SDK_INT value to use during compilation.
   uint32_t sdk_int_ = kUnsetSdkInt;
+
+  // Only used for testing.
+  std::map<ArtField*, int32_t> assumed_value_overrides_;
+
+  friend class CommonCompilerTestImpl;
 };
 
 }  // namespace art

@@ -516,9 +516,6 @@ void RegisterAllocatorLinearScan::ProcessInstruction(HInstruction* instruction) 
   if (locations == nullptr) {
     return;
   }
-  if (TryRemoveSuspendCheckEntry(instruction)) {
-    return;
-  }
 
   if (locations->CanCall()) {
     // Update the `reserved_out_slots_` for invokes that make a call, including intrinsics
@@ -587,19 +584,6 @@ void RegisterAllocatorLinearScan::ProcessInstruction(HInstruction* instruction) 
     // processed first.
     AddSorted(&unhandled, current);
   }
-}
-
-bool RegisterAllocatorLinearScan::TryRemoveSuspendCheckEntry(HInstruction* instruction) {
-  LocationSummary* locations = instruction->GetLocations();
-  if (instruction->IsSuspendCheckEntry() && !codegen_->NeedsSuspendCheckEntry()) {
-    // TODO: We do this here because we do not want the suspend check to artificially
-    // create live registers. We should find another place, but this is currently the
-    // simplest.
-    DCHECK_EQ(locations->GetTempCount(), 0u);
-    instruction->GetBlock()->RemoveInstruction(instruction);
-    return true;
-  }
-  return false;
 }
 
 void RegisterAllocatorLinearScan::CheckForTempLiveIntervals(HInstruction* instruction,

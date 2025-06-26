@@ -146,6 +146,9 @@ class HGraph : public ArenaObject<kArenaAllocGraph> {
   void SetEntryBlock(HBasicBlock* block) { entry_block_ = block; }
   void SetExitBlock(HBasicBlock* block) { exit_block_ = block; }
 
+  bool IsEntryBlock(HBasicBlock* block) { return GetEntryBlock() == block; }
+  bool IsExitBlock(HBasicBlock* block) { return GetExitBlock() == block; }
+
   void AddBlock(HBasicBlock* block);
 
   void ComputeDominanceInformation();

@@ -125,7 +125,7 @@ void HGraph::RemoveDeadBlocks(BitVectorView<const size_t> visited) {
       // Remove the block from the list of blocks, so that further analyses
       // never see it.
       blocks_[i] = nullptr;
-      if (block->IsExitBlock()) {
+      if (IsExitBlock(block)) {
         SetExitBlock(nullptr);
       }
       // Mark the block as removed. This is used by the HGraphBuilder to discard
@@ -304,7 +304,7 @@ void HGraph::ComputeDominanceInformation() {
   // Populate `dominated_blocks_` information after computing all dominators.
   // The potential presence of irreducible loops requires to do it after.
   for (HBasicBlock* block : GetReversePostOrder()) {
-    if (!block->IsEntryBlock()) {
+    if (!IsEntryBlock(block)) {
       block->GetDominator()->AddDominatedBlock(block);
     }
   }
@@ -501,7 +501,7 @@ void HGraph::ComputeTryBlockInformation() {
   bool graph_has_try_catch = false;
 
   for (HBasicBlock* block : GetReversePostOrder()) {
-    if (block->IsEntryBlock() || block->IsCatchBlock()) {
+    if (IsEntryBlock(block) || block->IsCatchBlock()) {
       // Catch blocks after simplification have only exceptional predecessors
       // and hence are never in tries.
       continue;
@@ -560,7 +560,7 @@ void HGraph::SimplifyCFG() {
     }
     if (block->IsLoopHeader()) {
       SimplifyLoop(block);
-    } else if (!block->IsEntryBlock() &&
+    } else if (!IsEntryBlock(block) &&
                block->GetFirstInstruction() != nullptr &&
                block->GetFirstInstruction()->IsSuspendCheck()) {
       // We are being called by the dead code elimiation pass, and what used to be
@@ -741,7 +741,7 @@ void HGraph::DeleteDeadEmptyBlock(HBasicBlock* block) {
   DCHECK(block->GetInstructions().IsEmpty());
   DCHECK(block->GetPhis().IsEmpty());
 
-  if (block->IsExitBlock()) {
+  if (IsExitBlock(block)) {
     SetExitBlock(nullptr);
   }
 
@@ -847,9 +847,9 @@ HInstruction* HGraph::InlineInto(HGraph* outer_graph, HInvoke* invoke) {
     // Simple case of an entry block, a body block, and an exit block.
     // Put the body block's instruction into `invoke`'s block.
     HBasicBlock* body = GetBlocks()[1];
-    DCHECK(GetBlocks()[0]->IsEntryBlock());
-    DCHECK(GetBlocks()[2]->IsExitBlock());
-    DCHECK(!body->IsExitBlock());
+    DCHECK(IsEntryBlock(GetBlocks()[0]));
+    DCHECK(IsExitBlock(GetBlocks()[2]));
+    DCHECK(!IsExitBlock(body));
     DCHECK(!body->IsInLoop());
     HInstruction* last = body->GetLastInstruction();
 

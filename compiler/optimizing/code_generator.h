@@ -415,21 +415,12 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
     return is_leaf_;
   }
 
-  void MarkNotLeaf() {
-    is_leaf_ = false;
-    requires_current_method_ = true;
+  void SetIsLeaf(bool is_leaf) {
+    is_leaf_ = is_leaf;
   }
 
-  bool NeedsSuspendCheckEntry() const {
-    return needs_suspend_check_entry_;
-  }
-
-  void MarkNeedsSuspendCheckEntry() {
-    needs_suspend_check_entry_ = true;
-  }
-
-  void SetRequiresCurrentMethod() {
-    requires_current_method_ = true;
+  void SetRequiresCurrentMethod(bool requires_current_method) {
+    requires_current_method_ = requires_current_method;
   }
 
   bool RequiresCurrentMethod() const {
@@ -546,7 +537,8 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
         : allocated_registers_.ContainsFloatingPointRegister(reg);
   }
 
-  void AllocateLocations(HInstruction* instruction);
+  // Type consistency check, used only in debug builds.
+  static bool CheckTypeConsistency(HInstruction* instruction);
 
   // Tells whether the stack frame of the compiled method is
   // considered "empty", that is either actually having a size of zero,
@@ -738,6 +730,9 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
                                    GetAssembler().CodeSize());
   }
 
+  virtual HGraphVisitor* GetLocationBuilder() = 0;
+  virtual HGraphVisitor* GetInstructionVisitor() = 0;
+
  protected:
   // Patch info used for recording locations of required linker patches and their targets,
   // i.e. target method, string, type or code identified by their dex file and index,
@@ -764,9 +759,6 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
                 const CompilerOptions& compiler_options,
                 OptimizingCompilerStats* stats,
                 const art::ArrayRef<const bool>& unimplemented_intrinsics);
-
-  virtual HGraphVisitor* GetLocationBuilder() = 0;
-  virtual HGraphVisitor* GetInstructionVisitor() = 0;
 
   template <typename RegType>
   static uint32_t ComputeRegisterMask(const RegType* registers, size_t length) {
@@ -906,9 +898,6 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
 
   // Whether the method is a leaf method.
   bool is_leaf_;
-
-  // Whether the method has to emit a SuspendCheck at entry.
-  bool needs_suspend_check_entry_;
 
   // Whether an instruction in the graph accesses the current method.
   // TODO: Rename: this actually indicates that some instruction in the method

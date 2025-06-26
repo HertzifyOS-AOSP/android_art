@@ -570,10 +570,10 @@ void HDeadCodeElimination::ConnectSuccessiveBlocks() {
   // Order does not matter. Skip the entry block by starting at index 1 in reverse post order.
   for (size_t i = 1u, size = graph_->GetReversePostOrder().size(); i != size; ++i) {
     HBasicBlock* block  = graph_->GetReversePostOrder()[i];
-    DCHECK(!block->IsEntryBlock());
+    DCHECK(!graph_->IsEntryBlock(block));
     while (block->GetLastInstruction()->IsGoto()) {
       HBasicBlock* successor = block->GetSingleSuccessor();
-      if (successor->IsExitBlock() || successor->GetPredecessors().size() != 1u) {
+      if (graph_->IsExitBlock(successor) || successor->GetPredecessors().size() != 1u) {
         break;
       }
       DCHECK_LT(i, IndexOfElement(graph_->GetReversePostOrder(), successor));
@@ -668,7 +668,7 @@ void HDeadCodeElimination::RemoveTry(HBasicBlock* try_entry,
       DCHECK(!block->GetLastInstruction()->AsTryBoundary()->IsEntry());
       DisconnectHandlersAndUpdateTryBoundary(block, any_block_in_loop);
 
-      if (block->GetSingleSuccessor()->IsExitBlock()) {
+      if (graph_->IsExitBlock(block->GetSingleSuccessor())) {
         // `block` used to be a single exit TryBoundary that got turned into a Goto. It
         // is now pointing to the exit which we don't allow. To fix it, we disconnect
         // `block` from its predecessor and RemoveDeadBlocks will remove it from the

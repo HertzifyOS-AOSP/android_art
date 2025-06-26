@@ -1575,7 +1575,7 @@ void HBasicBlock::MergeWithInlined(HBasicBlock* other) {
   DCHECK(GetDominatedBlocks().empty());
   DCHECK(GetSuccessors().empty());
   DCHECK(!EndsWithControlFlowInstruction());
-  DCHECK(other->GetSinglePredecessor()->IsEntryBlock());
+  DCHECK(other->GetGraph()->IsEntryBlock(other->GetSinglePredecessor()));
   DCHECK(other->GetPhis().IsEmpty());
   DCHECK(!other->IsInLoop());
 

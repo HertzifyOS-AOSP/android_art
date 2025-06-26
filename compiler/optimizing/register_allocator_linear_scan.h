@@ -89,9 +89,6 @@ class RegisterAllocatorLinearScan : public RegisterAllocator {
   // the number of live registers at this point.
   void CheckForSafepoint(HInstruction* instruction);
 
-  // Try to remove the SuspendCheck at function entry. Returns true if it was successful.
-  bool TryRemoveSuspendCheckEntry(HInstruction* instruction);
-
   // List of intervals for core registers that must be processed, ordered by start
   // position. Last entry is the interval that has the lowest start position.
   // This list is initially populated before doing the linear scan.

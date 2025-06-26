@@ -228,14 +228,6 @@ class HBasicBlock final : public ArenaObject<kArenaAllocBasicBlock> {
     return dominated_blocks_;
   }
 
-  bool IsEntryBlock() const {
-    return graph_->GetEntryBlock() == this;
-  }
-
-  bool IsExitBlock() const {
-    return graph_->GetExitBlock() == this;
-  }
-
   bool IsSingleGoto() const;
   bool IsSingleReturn() const;
   bool IsSingleReturnOrReturnVoidAllowingPhis() const;
@@ -1764,8 +1756,6 @@ class HInstruction : public ArenaObject<kArenaAllocInstruction> {
   LiveInterval* GetLiveInterval() const { return live_interval_; }
   void SetLiveInterval(LiveInterval* interval) { live_interval_ = interval; }
   bool HasLiveInterval() const { return live_interval_ != nullptr; }
-
-  bool IsSuspendCheckEntry() const { return IsSuspendCheck() && GetBlock()->IsEntryBlock(); }
 
   // Returns whether the code generation of the instruction will require to have access
   // to the current method. Such instructions are:
@@ -6532,6 +6522,11 @@ class HStaticFieldGet final : public HExpression<1, HFieldAccess> {
     DCHECK(DataType::IsIntegralType(new_type));
     DCHECK_EQ(DataType::Size(GetType()), DataType::Size(new_type));
     SetPackedField<TypeField>(new_type);
+  }
+
+  HLoadClass* GetLoadClass() const {
+    DCHECK(InputAt(0)->IsLoadClass());
+    return InputAt(0)->AsLoadClass();
   }
 
   DECLARE_INSTRUCTION(StaticFieldGet);

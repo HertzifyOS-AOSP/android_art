@@ -45,7 +45,65 @@ void SsaLivenessAnalysis::Analyze() {
   ComputeLiveness();
 }
 
+// Local flags for location processing.
+static constexpr uint32_t kFlagNotLeaf = 1u;
+static constexpr uint32_t kFlagNeedsSuspendCheckEntry = 2u;
+static constexpr uint32_t kFlagRequiresCurrentMethod = 4u;
+
+template <bool kIsPhi>
+static inline uint32_t AllocateLocations(HGraphVisitor* location_builder,
+                                         HInstruction* instruction,
+                                         uint32_t flags,
+                                         /*out*/ HSuspendCheck** entry_suspend_check) {
+  DCHECK_EQ(kIsPhi, instruction->IsPhi());
+  if (kIsPhi) {
+    DCHECK(instruction->GetEnvironment() == nullptr);
+    location_builder->VisitPhi(instruction->AsPhi());
+  } else {
+    ArenaAllocator* allocator = location_builder->GetGraph()->GetAllocator();
+    for (HEnvironment* env = instruction->GetEnvironment();
+         env != nullptr;
+         env = env->GetParent()) {
+      env->AllocateLocations(allocator);
+    }
+    location_builder->Dispatch(instruction);
+  }
+  DCHECK(CodeGenerator::CheckTypeConsistency(instruction));
+  if (kIsPhi) {
+    DCHECK(instruction->GetLocations() != nullptr);
+    DCHECK(!instruction->GetLocations()->CanCall());
+    DCHECK(!instruction->NeedsCurrentMethod());
+  } else if (instruction->IsSuspendCheck() &&
+             location_builder->GetGraph()->IsEntryBlock(instruction->GetBlock())) {
+    DCHECK(*entry_suspend_check == nullptr);  // At most one entry suspend check.
+    *entry_suspend_check = instruction->AsSuspendCheck();
+  } else {
+    LocationSummary* locations = instruction->GetLocations();
+    if (locations != nullptr) {
+      if (locations->CanCall()) {
+        flags |= kFlagNotLeaf | kFlagRequiresCurrentMethod;
+        if (locations->NeedsSuspendCheckEntry()) {
+          flags |= kFlagNeedsSuspendCheckEntry;
+        }
+      } else if (locations->Intrinsified() &&
+                 instruction->IsInvokeStaticOrDirect() &&
+                 !instruction->AsInvokeStaticOrDirect()->HasCurrentMethodInput()) {
+        // A static method call that has been fully intrinsified, and cannot call on the slow
+        // path or refer to the current method directly, no longer needs current method.
+        return flags;
+      }
+    }
+    if (instruction->NeedsCurrentMethod()) {
+      flags |= kFlagRequiresCurrentMethod;
+    }
+  }
+  return flags;
+}
+
 void SsaLivenessAnalysis::NumberInstructions() {
+  HGraphVisitor* location_builder = codegen_->GetLocationBuilder();
+  HSuspendCheck* entry_suspend_check = nullptr;
+  uint32_t flags = 0u;
   size_t ssa_index = 0;
   size_t lifetime_position = 0;
   // Each instruction gets a lifetime position, and a block gets a lifetime
@@ -60,17 +118,17 @@ void SsaLivenessAnalysis::NumberInstructions() {
   for (HBasicBlock* block : graph_->GetLinearOrder()) {
     block->SetLifetimeStart(lifetime_position);
 
-    for (HInstructionIteratorPrefetchNext inst_it(block->GetPhis()); !inst_it.Done();
-         inst_it.Advance()) {
+    for (HInstructionIterator inst_it(block->GetPhis()); !inst_it.Done(); inst_it.Advance()) {
       HInstruction* current = inst_it.Current();
-      codegen_->AllocateLocations(current);
-      LocationSummary* locations = current->GetLocations();
-      if (locations != nullptr && locations->Out().IsValid()) {
-        instructions_from_ssa_index_.push_back(current);
-        current->SetSsaIndex(ssa_index++);
-        current->SetLiveInterval(
-            LiveInterval::MakeInterval(allocator_, current->GetType(), current));
-      }
+      flags = AllocateLocations</*kIsPhi=*/ true>(
+          location_builder, current, flags, &entry_suspend_check);
+      // Phis always have a valid output location, namely `Location::Any()`.
+      DCHECK(current->GetLocations() != nullptr);
+      DCHECK(current->GetLocations()->Out().IsValid());
+      instructions_from_ssa_index_.push_back(current);
+      current->SetSsaIndex(ssa_index++);
+      current->SetLiveInterval(
+          LiveInterval::MakeInterval(allocator_, current->GetType(), current));
       current->SetLifetimePosition(lifetime_position);
     }
     lifetime_position += kLivenessPositionsPerInstruction;
@@ -78,10 +136,11 @@ void SsaLivenessAnalysis::NumberInstructions() {
     // Add a null marker to notify we are starting a block.
     instructions_from_lifetime_position_.push_back(nullptr);
 
-    for (HInstructionIteratorPrefetchNext inst_it(block->GetInstructions()); !inst_it.Done();
+    for (HInstructionIterator inst_it(block->GetInstructions()); !inst_it.Done();
          inst_it.Advance()) {
       HInstruction* current = inst_it.Current();
-      codegen_->AllocateLocations(current);
+      flags = AllocateLocations</*kIsPhi=*/ false>(
+          location_builder, current, flags, &entry_suspend_check);
       LocationSummary* locations = current->GetLocations();
       if (locations != nullptr && locations->Out().IsValid()) {
         instructions_from_ssa_index_.push_back(current);
@@ -97,6 +156,19 @@ void SsaLivenessAnalysis::NumberInstructions() {
     block->SetLifetimeEnd(lifetime_position);
   }
   DCHECK_EQ(GetNumberOfSsaValues(), ssa_index);
+
+  DCHECK(codegen_->IsLeafMethod());  // Initial value.
+  codegen_->SetIsLeaf((flags & kFlagNotLeaf) == 0u);
+  // Update current method requirement.
+  DCHECK_EQ(codegen_->RequiresCurrentMethod(), codegen_->GetGraph()->IsCompilingBaseline());
+  codegen_->SetRequiresCurrentMethod(
+      codegen_->RequiresCurrentMethod() || (flags & kFlagRequiresCurrentMethod) != 0u);
+  if ((flags & kFlagNeedsSuspendCheckEntry) == 0u && entry_suspend_check != nullptr) {
+    // We do this here because we do not want the suspend check to artificially create live
+    // registers. This is the earliest point where we know the suspend chech is not required.
+    DCHECK_EQ(entry_suspend_check->GetLocations()->GetTempCount(), 0u);
+    entry_suspend_check->GetBlock()->RemoveInstruction(entry_suspend_check);
+  }
 }
 
 void SsaLivenessAnalysis::ComputeLiveness() {
@@ -362,7 +434,7 @@ void SsaLivenessAnalysis::DoCheckNoLiveInIrreducibleLoop(const HBasicBlock& bloc
   // and the current method, which can be trivially re-materialized.
   for (uint32_t idx : live_in.Indexes()) {
     HInstruction* instruction = GetInstructionFromSsaIndex(idx);
-    DCHECK(instruction->GetBlock()->IsEntryBlock()) << instruction->DebugName();
+    DCHECK(graph_->IsEntryBlock(instruction->GetBlock())) << instruction->DebugName();
     DCHECK(!instruction->IsParameterValue());
     DCHECK(instruction->IsCurrentMethod() || instruction->IsConstant())
         << instruction->DebugName();

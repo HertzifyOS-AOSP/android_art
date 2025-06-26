@@ -1567,7 +1567,7 @@ LSEVisitor::Value LSEVisitor::MergePredecessorValues(HBasicBlock* block, size_t 
 }
 
 void LSEVisitor::MergePredecessorRecords(HBasicBlock* block) {
-  if (block->IsExitBlock()) {
+  if (GetGraph()->IsExitBlock(block)) {
     // Exit block doesn't really merge values since the control flow ends in
     // its predecessors. Each predecessor needs to make sure stores are kept
     // if necessary.
@@ -1578,7 +1578,7 @@ void LSEVisitor::MergePredecessorRecords(HBasicBlock* block) {
   DCHECK(heap_values.empty());
   size_t num_heap_locations = heap_location_collector_.GetNumberOfHeapLocations();
   if (block->GetPredecessors().empty() || block->IsCatchBlock()) {
-    DCHECK_IMPLIES(block->GetPredecessors().empty(), block->IsEntryBlock());
+    DCHECK_IMPLIES(block->GetPredecessors().empty(), GetGraph()->IsEntryBlock(block));
     heap_values.resize(num_heap_locations,
                        {/*value=*/Value::Unknown(), /*stored_by=*/Value::Unknown()});
     return;
@@ -2538,7 +2538,7 @@ void LSEVisitor::ProcessLoopPhiWithUnknownInput(PhiPlaceholder loop_phi_with_unk
   bool replaced_heap_value_with_unknown = false;
   for (; reverse_post_order_index != reverse_post_order_size; ++reverse_post_order_index) {
     HBasicBlock* block = reverse_post_order[reverse_post_order_index];
-    if (block->IsExitBlock()) {
+    if (GetGraph()->IsExitBlock(block)) {
       continue;
     }
 
