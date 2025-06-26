@@ -29,7 +29,7 @@
 #include "assume_value_signatures.h"
 #include "base/macros.h"
 #include "cmdline_parser.h"
-#include "com_android_art_flags.h"
+#include "com_android_art_rw_flags.h"
 #include "compiler_options.h"
 
 namespace art HIDDEN {
@@ -63,7 +63,7 @@ struct CmdlineType<AssumeValueOptions> : CmdlineTypeParser<AssumeValueOptions> {
       return Result::Failure(std::string("Invalid --assume-value value: '") + args + "'");
     }
 
-    if (!com::android::art::flags::compile_sdk_int_constant()) {
+    if (!com::android::art::rw::flags::assume_value_sdk_int()) {
       // Feature disabled, silently ignore setting the value. Note that if we ever add additional
       // support beyond for more assumed values beyond SDK_INT, this will need to be adjusted.
       static_assert(AssumeValueSignatures::kSignatures.size() == 1);

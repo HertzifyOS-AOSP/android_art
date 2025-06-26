@@ -38,6 +38,7 @@
 #include "base/utils.h"
 #include "class_linker.h"
 #include "class_loader_context.h"
+#include "com_android_art_rw_flags.h"
 #include "common_runtime_test.h"
 #include "dexopt_test.h"
 #include "oat.h"
@@ -1460,7 +1461,7 @@ TEST_P(OatFileAssistantTest, AssumedValuesOutOfDate) {
     auto scoped_maybe_without_runtime = ScopedMaybeWithoutRuntime();
 
     OatFileAssistant oat_file_assistant = CreateOatFileAssistant(dex_location.c_str());
-    if (com::android::art::flags::compile_sdk_int_constant()) {
+    if (com::android::art::rw::flags::assume_value_sdk_int()) {
       // When the runtime SDK_INT differs from the compiled SDK_INT, reject the ODEX file.
       // Note that the VDEX remains usable.
       EXPECT_EQ(OatFileAssistant::kOatAssumedValuesOutOfDate, oat_file_assistant.OdexFileStatus());

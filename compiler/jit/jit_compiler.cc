@@ -24,7 +24,7 @@
 #include "base/systrace.h"
 #include "base/time_utils.h"
 #include "base/timing_logger.h"
-#include "com_android_art_flags.h"
+#include "com_android_art_rw_flags.h"
 #include "compiler.h"
 #include "debug/elf_debug_writer.h"
 #include "driver/compiler_options.h"
@@ -34,7 +34,7 @@
 #include "jit/jit_code_cache.h"
 #include "jit/jit_logger.h"
 
-namespace art_flags = com::android::art::flags;
+namespace art_rw_flags = com::android::art::rw::flags;
 
 namespace art HIDDEN {
 namespace jit {
@@ -129,7 +129,7 @@ void JitCompiler::ParseCompilerOptions() {
     jit_logger_->OpenLog();
   }
 
-  if (art_flags::compile_sdk_int_constant()) {
+  if (art_rw_flags::assume_value_sdk_int()) {
     compiler_options_->GetAssumeValueOptions().SetSdkInt(runtime->GetSdkVersion());
   }
 }
