@@ -135,7 +135,7 @@ public class DexoptHelperTest {
                 DexoptResult.DEXOPT_PERFORMED /* status2 */);
 
         lenient()
-                .when(mInjector.getPrimaryDexopter(any(), any(), any(), any()))
+                .when(mInjector.getPrimaryDexopter(any(), any(), any(), any(), any()))
                 .thenReturn(mPrimaryDexopter);
         lenient().when(mPrimaryDexopter.dexopt()).thenReturn(mPrimaryResults);
 
@@ -171,7 +171,7 @@ public class DexoptHelperTest {
                 "/somewhere/app/foo/base.apk", DexoptResult.DEXOPT_PERFORMED /* status1 */,
                 DexoptResult.DEXOPT_FAILED /* status2 */);
         lenient().when(failingPrimaryDexopter.dexopt()).thenReturn(partialFailureResults);
-        when(mInjector.getPrimaryDexopter(same(mPkgStateLibbaz), any(), any(), any()))
+        when(mInjector.getPrimaryDexopter(any(), same(mPkgStateLibbaz), any(), any(), any()))
                 .thenReturn(failingPrimaryDexopter);
 
         DexoptResult result = mDexoptHelper.dexopt(
@@ -201,27 +201,27 @@ public class DexoptHelperTest {
         // packages, in the given order, and then dexopt dependencies.
         InOrder inOrder = inOrder(mInjector);
         inOrder.verify(mInjector).getPrimaryDexopter(
-                same(mPkgStateFoo), same(mPkgFoo), same(mParams), any());
+                any(), same(mPkgStateFoo), same(mPkgFoo), same(mParams), any());
         inOrder.verify(mInjector).getSecondaryDexopter(
                 same(mPkgStateFoo), same(mPkgFoo), same(mParams), any());
         inOrder.verify(mInjector).getPrimaryDexopter(
-                same(mPkgStateBar), same(mPkgBar), same(mParams), any());
+                any(), same(mPkgStateBar), same(mPkgBar), same(mParams), any());
         inOrder.verify(mInjector).getSecondaryDexopter(
                 same(mPkgStateBar), same(mPkgBar), same(mParams), any());
         inOrder.verify(mInjector).getPrimaryDexopter(
-                same(mPkgStateLibbaz), same(mPkgLibbaz), same(mParams), any());
+                any(), same(mPkgStateLibbaz), same(mPkgLibbaz), same(mParams), any());
         inOrder.verify(mInjector).getSecondaryDexopter(
                 same(mPkgStateLibbaz), same(mPkgLibbaz), same(mParams), any());
         inOrder.verify(mInjector).getPrimaryDexopter(
-                same(mPkgStateLib1), same(mPkgLib1), same(mParams), any());
+                any(), same(mPkgStateLib1), same(mPkgLib1), same(mParams), any());
         inOrder.verify(mInjector).getSecondaryDexopter(
                 same(mPkgStateLib1), same(mPkgLib1), same(mParams), any());
         inOrder.verify(mInjector).getPrimaryDexopter(
-                same(mPkgStateLib2), same(mPkgLib2), same(mParams), any());
+                any(), same(mPkgStateLib2), same(mPkgLib2), same(mParams), any());
         inOrder.verify(mInjector).getSecondaryDexopter(
                 same(mPkgStateLib2), same(mPkgLib2), same(mParams), any());
         inOrder.verify(mInjector).getPrimaryDexopter(
-                same(mPkgStateLib4), same(mPkgLib4), same(mParams), any());
+                any(), same(mPkgStateLib4), same(mPkgLib4), same(mParams), any());
         inOrder.verify(mInjector).getSecondaryDexopter(
                 same(mPkgStateLib4), same(mPkgLib4), same(mParams), any());
 
@@ -352,7 +352,7 @@ public class DexoptHelperTest {
                 result, 5 /* index */, PKG_NAME_LIB4, DexoptResult.DEXOPT_CANCELLED, List.of());
 
         verify(mInjector).getPrimaryDexopter(
-                same(mPkgStateFoo), same(mPkgFoo), same(mParams), any());
+                any(), same(mPkgStateFoo), same(mPkgFoo), same(mParams), any());
 
         verifyNoMoreDexopt(1 /* expectedPrimaryTimes */, 0 /* expectedSecondaryTimes */);
     }
@@ -366,8 +366,8 @@ public class DexoptHelperTest {
         var dexoptStarted = new Semaphore(0);
         var dexoptCancelled = new Semaphore(0);
 
-        when(mInjector.getPrimaryDexopter(any(), any(), any(), any())).thenAnswer(invocation -> {
-            var cancellationSignal = invocation.<CancellationSignal>getArgument(3);
+        when(mInjector.getPrimaryDexopter(any(), any(), any(), any(), any())).thenAnswer(invocation -> {
+            var cancellationSignal = invocation.<CancellationSignal>getArgument(4);
             var dexopter = mock(PrimaryDexopter.class);
             when(dexopter.dexopt()).thenAnswer(innerInvocation -> {
                 // Simulate that the child thread registers its own listener.
@@ -415,8 +415,8 @@ public class DexoptHelperTest {
         var dexoptStarted = new Semaphore(0);
         var dexoptCancelled = new Semaphore(0);
 
-        when(mInjector.getPrimaryDexopter(any(), any(), any(), any())).thenAnswer(invocation -> {
-            var cancellationSignal = invocation.<CancellationSignal>getArgument(3);
+        when(mInjector.getPrimaryDexopter(any(), any(), any(), any(), any())).thenAnswer(invocation -> {
+            var cancellationSignal = invocation.<CancellationSignal>getArgument(4);
             var dexopter = mock(PrimaryDexopter.class);
             when(dexopter.dexopt()).thenAnswer(innerInvocation -> {
                 if (cancellationSignal.isCanceled()) {
@@ -643,7 +643,7 @@ public class DexoptHelperTest {
                 "/somewhere/app/foo/base.apk", DexoptResult.DEXOPT_PERFORMED /* status1 */,
                 DexoptResult.DEXOPT_FAILED /* status2 */);
         var fooPrimaryDexopter = mock(PrimaryDexopter.class);
-        when(mInjector.getPrimaryDexopter(same(mPkgStateFoo), any(), any(), any()))
+        when(mInjector.getPrimaryDexopter(any(), same(mPkgStateFoo), any(), any(), any()))
                 .thenReturn(fooPrimaryDexopter);
         when(fooPrimaryDexopter.dexopt()).thenReturn(partialFailureResults);
 
@@ -652,7 +652,7 @@ public class DexoptHelperTest {
                 "/somewhere/app/bar/base.apk", DexoptResult.DEXOPT_FAILED /* status1 */,
                 DexoptResult.DEXOPT_FAILED /* status2 */);
         var barPrimaryDexopter = mock(PrimaryDexopter.class);
-        when(mInjector.getPrimaryDexopter(same(mPkgStateBar), any(), any(), any()))
+        when(mInjector.getPrimaryDexopter(any(), same(mPkgStateBar), any(), any(), any()))
                 .thenReturn(barPrimaryDexopter);
         when(barPrimaryDexopter.dexopt()).thenReturn(totalFailureResults);
 
@@ -815,13 +815,13 @@ public class DexoptHelperTest {
     }
 
     private void verifyNoDexopt() {
-        verify(mInjector, never()).getPrimaryDexopter(any(), any(), any(), any());
+        verify(mInjector, never()).getPrimaryDexopter(any(), any(), any(), any(), any());
         verify(mInjector, never()).getSecondaryDexopter(any(), any(), any(), any());
     }
 
     private void verifyNoMoreDexopt(int expectedPrimaryTimes, int expectedSecondaryTimes) {
         verify(mInjector, times(expectedPrimaryTimes))
-                .getPrimaryDexopter(any(), any(), any(), any());
+                .getPrimaryDexopter(any(), any(), any(), any(), any());
         verify(mInjector, times(expectedSecondaryTimes))
                 .getSecondaryDexopter(any(), any(), any(), any());
     }

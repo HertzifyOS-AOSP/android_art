@@ -20,6 +20,8 @@ import static android.app.ActivityManager.RunningAppProcessInfo;
 
 import static com.android.server.art.ProfilePath.TmpProfilePath;
 
+import static java.util.stream.Collectors.toSet;
+
 import android.R;
 import android.annotation.NonNull;
 import android.annotation.Nullable;
@@ -45,10 +47,12 @@ import android.util.SparseArray;
 
 import androidx.annotation.RequiresApi;
 
+import com.android.art.flags.Flags;
 import com.android.modules.utils.build.SdkLevel;
 import com.android.modules.utils.pm.PackageStateModulesUtils;
 import com.android.server.art.model.DexoptParams;
 import com.android.server.pm.PackageManagerLocal;
+import com.android.server.pm.PackageManagerLocal.FilteredSnapshot;
 import com.android.server.pm.pkg.AndroidPackage;
 import com.android.server.pm.pkg.PackageState;
 
@@ -74,6 +78,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Future;
 import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 /** @hide */
 @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
@@ -108,13 +113,23 @@ public final class Utils {
 
     /** Returns the ABI information for the package. The primary ABI comes first. */
     @NonNull
-    public static List<Abi> getAllAbis(@NonNull PackageState pkgState) {
+    public static List<Abi> getAllPrimaryDexAbis(@NonNull PackageState pkgState) {
+        String pkgPrimaryCpuAbi = pkgState.getPrimaryCpuAbi();
+        if (Flags.dexoptSecondaryIsaOnlyWhenNeeded() && pkgPrimaryCpuAbi == null) {
+            // The package has no native code. Its DEX files can be loaded by apps using any of the
+            // device's supported native ABIs. Mark the preferred ABI as primary.
+            return getNativeAbis()
+                    .stream()
+                    .map(abi
+                            -> Abi.create(abi, VMRuntime.getInstructionSet(abi),
+                                    /* isPrimaryAbi= */ abi.equals(Constants.getPreferredAbi())))
+                    .sorted(Comparator.comparing(Abi::isPrimaryAbi).reversed())
+                    .toList();
+        }
         List<Abi> abis = new ArrayList<>();
         abis.add(getPrimaryAbi(pkgState));
-        String pkgPrimaryCpuAbi = pkgState.getPrimaryCpuAbi();
         String pkgSecondaryCpuAbi = pkgState.getSecondaryCpuAbi();
         if (pkgSecondaryCpuAbi != null) {
-            Utils.check(pkgState.getPrimaryCpuAbi() != null);
             String isa = getTranslatedIsa(VMRuntime.getInstructionSet(pkgSecondaryCpuAbi));
             if (isa != null) {
                 abis.add(Abi.create(nativeIsaToAbi(isa), isa, false /* isPrimaryAbi */));
@@ -127,6 +142,26 @@ public final class Utils {
                     pkgPrimaryCpuAbi, abis.get(0).name(), pkgSecondaryCpuAbi, abis.get(1).name()));
         }
         return abis;
+    }
+
+    /** Returns the Primary Dex ABIs used by any app, for the given dex path. */
+    @NonNull
+    public static List<Abi> getUsedPrimaryDexAbis(@NonNull DexUseManagerLocal dexUseManager,
+            @NonNull FilteredSnapshot snapshot, @NonNull PackageState pkgState,
+            @NonNull String dexPath) {
+        List<Abi> abis = getAllPrimaryDexAbis(pkgState);
+        Set<String> primaryDexUsedAbis =
+                dexUseManager.getPrimaryDexLoaders(pkgState.getPackageName(), dexPath)
+                        .stream()
+                        .map(DexUseManagerLocal.DexLoader::loadingPackageName)
+                        .map(snapshot::getPackageState)
+                        .filter(Objects::nonNull)
+                        .map(pkgS -> Utils.getPrimaryAbi(pkgS).name())
+                        .collect(toSet());
+        // Include all Primary ABIs, but only Secondary ABIs that are actually used.
+        return abis.stream()
+                .filter(abi -> abi.isPrimaryAbi() || primaryDexUsedAbis.contains(abi.name()))
+                .toList();
     }
 
     /**
@@ -205,12 +240,14 @@ public final class Utils {
                 || abiName.equals(Constants.getNative32BitAbi());
     }
 
-    public static List<String> getNativeIsas() {
-        return Arrays.asList(Constants.getNative64BitAbi(), Constants.getNative32BitAbi())
-                .stream()
+    public static List<String> getNativeAbis() {
+        return Stream.of(Constants.getNative64BitAbi(), Constants.getNative32BitAbi())
                 .filter(Objects::nonNull)
-                .map(VMRuntime::getInstructionSet)
                 .toList();
+    }
+
+    public static List<String> getNativeIsas() {
+        return getNativeAbis().stream().map(VMRuntime::getInstructionSet).toList();
     }
 
     /**

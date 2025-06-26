@@ -39,7 +39,6 @@ import java.io.IOException;
  */
 @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
 public class ArtJni {
-
     private static volatile boolean sLoaded = false;
 
     private ArtJni() {}
@@ -61,21 +60,22 @@ public class ArtJni {
                 return;
             }
 
-            // During Pre-reboot Dexopt, the code is loaded by a separate class loader from the chroot
-            // dir, where the new ART apex is mounted. In this case, loading libartservice.so is tricky.
-            // The library depends on libc++.so, libbase.so, etc. Although the classloader allows
-            // specifying a library search path, it doesn’t allow specifying how to search for
-            // dependencies. Because the classloading takes place in system server, the old linkerconfig
-            // takes effect rather than the new one, and the old linkerconfig doesn’t specify how to
-            // search for dependencies for the new libartservice.so. This leads to an undesired
-            // behavior: the dependencies are resolved to those on the old platform.
+            // During Pre-reboot Dexopt, the code is loaded by a separate class loader from the
+            // chroot dir, where the new ART apex is mounted. In this case, loading libartservice.so
+            // is tricky. The library depends on libc++.so, libbase.so, etc. Although the
+            // classloader allows specifying a library search path, it doesn’t allow specifying how
+            // to search for dependencies. Because the classloading takes place in system server,
+            // the old linkerconfig takes effect rather than the new one, and the old linkerconfig
+            // doesn’t specify how to search for dependencies for the new libartservice.so. This
+            // leads to an undesired behavior: the dependencies are resolved to those on the old
+            // platform.
             //
-            // Also, we can't statically link libartservice.so against all dependencies because it not
-            // only bloats libartservice.so by a lot, but also prevents us from accessing the global
-            // runtime instance when the code is running in the normal situation.
+            // Also, we can't statically link libartservice.so against all dependencies because it
+            // not only bloats libartservice.so by a lot, but also prevents us from accessing the
+            // global runtime instance when the code is running in the normal situation.
             //
-            // Therefore, for Pre-reboot Dexopt, we just avoid loading libartservice.so, and delegate
-            // calls to artd instead.
+            // Therefore, for Pre-reboot Dexopt, we just avoid loading libartservice.so, and
+            // delegate calls to artd instead.
             if (VMRuntime.getRuntime().vmLibrary().equals("libartd.so")) {
                 System.loadLibrary("artserviced");
             } else {

@@ -276,7 +276,7 @@ public final class ArtManagerLocal {
         PackageState pkgState = Utils.getPackageStateOrThrow(snapshot, packageName);
         AndroidPackage pkg = Utils.getPackageOrThrow(pkgState);
         List<Pair<DetailedDexInfo, Abi>> dexAndAbis =
-                mInjector.getArtFileManager().getDexAndAbis(pkgState, pkg,
+                mInjector.getArtFileManager().getDexAndAbis(snapshot, pkgState, pkg,
                         ArtFileManager.Options.builder()
                                 .setForPrimaryDex((flags & ArtFlags.FLAG_FOR_PRIMARY_DEX) != 0)
                                 .setForSecondaryDex((flags & ArtFlags.FLAG_FOR_SECONDARY_DEX) != 0)
@@ -1057,7 +1057,7 @@ public final class ArtManagerLocal {
             IArtd artd = mInjector.getArtd();
 
             UsableArtifactLists artifactLists =
-                    mInjector.getArtFileManager().getUsableArtifacts(pkgState, pkg);
+                    mInjector.getArtFileManager().getUsableArtifacts(snapshot, pkgState, pkg);
             for (ArtifactsPath artifacts : artifactLists.artifacts()) {
                 artifactsSize += artd.getArtifactsSize(artifacts);
             }
@@ -1160,7 +1160,8 @@ public final class ArtManagerLocal {
                 if (!Utils.shouldSkipDexoptDueToHibernation(
                             pkgState, mInjector.getAppHibernationManager())) {
                     UsableArtifactLists artifactLists =
-                            mInjector.getArtFileManager().getUsableArtifacts(pkgState, pkg);
+                            mInjector.getArtFileManager().getUsableArtifacts(
+                                    snapshot, pkgState, pkg);
                     artifactsToKeep.addAll(artifactLists.artifacts());
                     vdexFilesToKeep.addAll(artifactLists.vdexFiles());
                     sdmSdcFilesToKeep.addAll(artifactLists.sdmFiles());

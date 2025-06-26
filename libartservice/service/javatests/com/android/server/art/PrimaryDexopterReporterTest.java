@@ -212,8 +212,8 @@ public final class PrimaryDexopterReporterTest extends PrimaryDexopterTestBase {
     }
 
     private void mockPrimaryDexopter(DexoptParams params) {
-        mPrimaryDexopter =
-                new PrimaryDexopter(mInjector, mPkgState, mPkg, params, mCancellationSignal);
+        mPrimaryDexopter = new PrimaryDexopter(
+                mInjector, mSnapshot, mPkgState, mPkg, params, mCancellationSignal);
     }
 
     private void mockArtdDexoptResultSuccess(ArtdDexoptResult result) throws Exception {

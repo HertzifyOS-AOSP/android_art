@@ -653,7 +653,7 @@ public final class ArtShellCommand extends BasicShellCommandHandler {
                     if (results.containsKey(pass)) {
                         pw.println("Result of "
                                 + getProgressMessageForBatchDexoptPass(pass, finalReason)
-                                          .toLowerCase(Locale.US)
+                                        .toLowerCase(Locale.US)
                                 + ":");
                         printDexoptResult(
                                 pw, results.get(pass), true /* verbose */, true /* multiPackage */);
