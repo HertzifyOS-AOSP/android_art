@@ -57,6 +57,11 @@
 
 namespace art HIDDEN {
 
+static jobject Thread_currentCarrierThread(JNIEnv* env, jclass) {
+  ScopedFastNativeObjectAccess soa(env);
+  return soa.AddLocalReference<jobject>(soa.Self()->GetPeer());
+}
+
 static jobject Thread_currentThread(JNIEnv* env, jclass) {
   ScopedFastNativeObjectAccess soa(env);
   return soa.AddLocalReference<jobject>(soa.Self()->GetPeer());
@@ -392,6 +397,7 @@ static void Thread_parkVirtualInternal(
 }
 
 static JNINativeMethod gMethods[] = {
+    FAST_NATIVE_METHOD(Thread, currentCarrierThread, "()Ljava/lang/Thread;"),
     FAST_NATIVE_METHOD(Thread, currentThread, "()Ljava/lang/Thread;"),
     FAST_NATIVE_METHOD(Thread, interrupted, "()Z"),
     FAST_NATIVE_METHOD(Thread, isInterrupted, "()Z"),
