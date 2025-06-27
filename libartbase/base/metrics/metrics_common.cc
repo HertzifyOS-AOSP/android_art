@@ -52,8 +52,8 @@ SessionData SessionData::CreateDefault() {
   return SessionData{
       .session_id = kInvalidSessionId,
       .uid = uid,
-      .compilation_reason = CompilationReason::kUnspecified,
-      .compiler_filter = CompilerFilterReporting::kUnspecified,
+      .compilation_reason = CompilationReason::kAbsent,
+      .compiler_filter = CompilerFilterReporting::kAbsent,
   };
 }
 
@@ -290,8 +290,8 @@ void FileBackend::EndReport() {
 }
 
 // Make sure CompilationReasonName and CompilationReasonForName are inverses.
-static_assert(CompilationReasonFromName(CompilationReasonName(CompilationReason::kUnspecified)) ==
-              CompilationReason::kUnspecified);
+static_assert(CompilationReasonFromName(CompilationReasonName(CompilationReason::kAbsent)) ==
+              CompilationReason::kAbsent);
 static_assert(CompilationReasonFromName(CompilationReasonName(CompilationReason::kUnknown)) ==
               CompilationReason::kUnknown);
 static_assert(CompilationReasonFromName(CompilationReasonName(CompilationReason::kFirstBoot)) ==

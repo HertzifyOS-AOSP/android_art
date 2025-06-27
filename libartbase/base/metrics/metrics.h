@@ -136,7 +136,7 @@ enum class DatumId {
 #define REASON_NAME_LIST(V)                                                                       \
   /* A special value indicating that the compilation reason is not successfully obtained from ART \
    * due to some expected internal error. */                                                      \
-  V(kUnspecified, "unspecified")                                                                  \
+  V(kAbsent, "absent")                                                                            \
   /* A catch-all value for compilation reasons that are not explicitly listed. Usually this means \
    * the reason is a custom reason defined by an OEM. */                                          \
   V(kOther, "other")                                                                              \
@@ -199,7 +199,7 @@ constexpr CompilationReason CompilationReasonFromName(std::string_view name) {
 #define COMPILER_FILTER_REPORTING_LIST(V)                                                       \
   /* A special value indicating that the compiler filter is not successfully obtained from ART  \
    * due to some expected internal error. */                                                    \
-  V(kUnspecified, "unspecified")                                                                \
+  V(kAbsent, "absent")                                                                          \
   /* A catch-all value for compiler filters that are not explicitly listed. Usually this is     \
    * unexecpted. */                                                                             \
   V(kOther, "other")                                                                            \

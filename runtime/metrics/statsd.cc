@@ -228,8 +228,8 @@ constexpr int32_t EncodeCompileFilter(CompilerFilterReporting filter) {
       return statsd::ART_DATUM_REPORTED__COMPILE_FILTER__ART_COMPILATION_FILTER_EVERYTHING_PROFILE;
     case CompilerFilterReporting::kEverything:
       return statsd::ART_DATUM_REPORTED__COMPILE_FILTER__ART_COMPILATION_FILTER_EVERYTHING;
-    case CompilerFilterReporting::kUnspecified:
-      return statsd::ART_DATUM_REPORTED__COMPILE_FILTER__ART_COMPILATION_FILTER_UNSPECIFIED;
+    case CompilerFilterReporting::kAbsent:
+      return statsd::ART_DATUM_REPORTED__COMPILE_FILTER__ART_COMPILATION_FILTER_ABSENT;
     case CompilerFilterReporting::kUnknown:
       return statsd::ART_DATUM_REPORTED__COMPILE_FILTER__ART_COMPILATION_FILTER_UNKNOWN;
     case CompilerFilterReporting::kRunFromApk:
@@ -250,8 +250,8 @@ constexpr int32_t EncodeCompilationReason(CompilationReason reason) {
       return statsd::ART_DATUM_REPORTED__COMPILATION_REASON__ART_COMPILATION_REASON_AB_OTA;
     case CompilationReason::kBgDexopt:
       return statsd::ART_DATUM_REPORTED__COMPILATION_REASON__ART_COMPILATION_REASON_BG_DEXOPT;
-    case CompilationReason::kUnspecified:
-      return statsd::ART_DATUM_REPORTED__COMPILATION_REASON__ART_COMPILATION_REASON_UNSPECIFIED;
+    case CompilationReason::kAbsent:
+      return statsd::ART_DATUM_REPORTED__COMPILATION_REASON__ART_COMPILATION_REASON_ABSENT;
     case CompilationReason::kFirstBoot:
       return statsd::ART_DATUM_REPORTED__COMPILATION_REASON__ART_COMPILATION_REASON_FIRST_BOOT;
     case CompilationReason::kInactive:
