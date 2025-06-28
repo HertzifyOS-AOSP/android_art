@@ -17,7 +17,6 @@
 package com.android.server.art;
 
 import static com.android.server.art.PreRebootDexoptJob.JOB_ID;
-import static com.android.server.art.prereboot.PreRebootDriver.PreRebootResult;
 
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
@@ -46,7 +45,9 @@ import android.platform.test.flag.junit.SetFlagsRule;
 import androidx.test.filters.SmallTest;
 
 import com.android.server.art.prereboot.PreRebootDriver;
+import com.android.server.art.prereboot.PreRebootDriver.PreRebootResult;
 import com.android.server.art.prereboot.PreRebootStatsReporter;
+import com.android.server.art.proto.PreRebootStats.Status;
 import com.android.server.art.testing.CommandExecution;
 import com.android.server.art.testing.StaticMockitoRule;
 import com.android.server.pm.PackageManagerLocal;
@@ -155,7 +156,7 @@ public class ArtShellCommandTest {
         when(mInjector.getCallingUid()).thenReturn(Process.ROOT_UID);
 
         when(mPreRebootDriver.run(eq("_b"), eq(false) /* mapSnapshotsForOta */, any()))
-                .thenReturn(new PreRebootResult(true /* success */));
+                .thenReturn(new PreRebootResult(Status.STATUS_FINISHED));
 
         try (var execution = new CommandExecution(
                      createHandler(), "art", "on-ota-staged", "--slot", "_b")) {
@@ -194,7 +195,7 @@ public class ArtShellCommandTest {
                     var cancellationSignal = invocation.<CancellationSignal>getArgument(2);
                     cancellationSignal.setOnCancelListener(() -> dexoptCancelled.release());
                     assertThat(dexoptCancelled.tryAcquire(TIMEOUT_SEC, TimeUnit.SECONDS)).isTrue();
-                    return new PreRebootResult(true /* success */);
+                    return new PreRebootResult(Status.STATUS_FINISHED);
                 });
 
         try (var execution = new CommandExecution(
@@ -227,7 +228,7 @@ public class ArtShellCommandTest {
                     var cancellationSignal = invocation.<CancellationSignal>getArgument(2);
                     cancellationSignal.setOnCancelListener(() -> dexoptCancelled.release());
                     assertThat(dexoptCancelled.tryAcquire(TIMEOUT_SEC, TimeUnit.SECONDS)).isTrue();
-                    return new PreRebootResult(true /* success */);
+                    return new PreRebootResult(Status.STATUS_FINISHED);
                 });
 
         try (var execution = new CommandExecution(
@@ -257,7 +258,7 @@ public class ArtShellCommandTest {
         }
 
         when(mPreRebootDriver.run(eq("_b"), eq(false) /* mapSnapshotsForOta */, any()))
-                .thenReturn(new PreRebootResult(true /* success */));
+                .thenReturn(new PreRebootResult(Status.STATUS_FINISHED));
 
         mPreRebootDexoptJob.onStartJobImpl(mJobService, mJobParameters);
 
@@ -323,7 +324,7 @@ public class ArtShellCommandTest {
                     assertThat(dexoptCancelled.tryAcquire(TIMEOUT_SEC, TimeUnit.SECONDS)).isTrue();
 
                     // Step 4.
-                    return new PreRebootResult(true /* success */);
+                    return new PreRebootResult(Status.STATUS_FINISHED);
                 });
 
         mPreRebootDexoptJob.onStartJobImpl(mJobService, mJobParameters);
@@ -379,7 +380,7 @@ public class ArtShellCommandTest {
                     assertThat(dexoptCancelled.tryAcquire(TIMEOUT_SEC, TimeUnit.SECONDS)).isTrue();
 
                     // Step 4.
-                    return new PreRebootResult(true /* success */);
+                    return new PreRebootResult(Status.STATUS_FINISHED);
                 });
 
         mPreRebootDexoptJob.onStartJobImpl(mJobService, mJobParameters);
@@ -441,7 +442,7 @@ public class ArtShellCommandTest {
         }
 
         when(mPreRebootDriver.run(eq("_b"), eq(true) /* mapSnapshotsForOta */, any()))
-                .thenReturn(new PreRebootResult(true /* success */));
+                .thenReturn(new PreRebootResult(Status.STATUS_FINISHED));
 
         mPreRebootDexoptJob.onStartJobImpl(mJobService, mJobParameters);
         mPreRebootDexoptJob.waitForRunningJob();
@@ -466,7 +467,7 @@ public class ArtShellCommandTest {
 
         when(mPreRebootDriver.run(
                      isNull() /* otaSlot */, anyBoolean() /* mapSnapshotsForOta */, any()))
-                .thenReturn(new PreRebootResult(true /* success */));
+                .thenReturn(new PreRebootResult(Status.STATUS_FINISHED));
 
         try (var execution =
                         new CommandExecution(createHandler(), "art", "pr-dexopt-job", "--run")) {
@@ -496,7 +497,7 @@ public class ArtShellCommandTest {
         when(mInjector.getCallingUid()).thenReturn(Process.ROOT_UID);
 
         when(mPreRebootDriver.run(eq("_b"), eq(true) /* mapSnapshotsForOta */, any()))
-                .thenReturn(new PreRebootResult(true /* success */));
+                .thenReturn(new PreRebootResult(Status.STATUS_FINISHED));
 
         try (var execution = new CommandExecution(
                      createHandler(), "art", "pr-dexopt-job", "--run", "--slot", "_b")) {
@@ -513,7 +514,7 @@ public class ArtShellCommandTest {
         when(mInjector.getCallingUid()).thenReturn(Process.ROOT_UID);
 
         when(mPreRebootDriver.run(eq("_b"), eq(false) /* mapSnapshotsForOta */, any()))
-                .thenReturn(new PreRebootResult(true /* success */));
+                .thenReturn(new PreRebootResult(Status.STATUS_FINISHED));
 
         try (var execution = new CommandExecution(
                      createHandler(), "art", "pr-dexopt-job", "--run", "--slot", "_b")) {
@@ -548,7 +549,7 @@ public class ArtShellCommandTest {
 
         when(mPreRebootDriver.run(
                      isNull() /* otaSlot */, anyBoolean() /* mapSnapshotsForOta */, any()))
-                .thenReturn(new PreRebootResult(true /* success */));
+                .thenReturn(new PreRebootResult(Status.STATUS_FINISHED));
 
         mPreRebootDexoptJob.onStartJobImpl(mJobService, mJobParameters);
         mPreRebootDexoptJob.waitForRunningJob();
@@ -581,7 +582,7 @@ public class ArtShellCommandTest {
         }
 
         when(mPreRebootDriver.run(eq("_b"), eq(true) /* mapSnapshotsForOta */, any()))
-                .thenReturn(new PreRebootResult(true /* success */));
+                .thenReturn(new PreRebootResult(Status.STATUS_FINISHED));
 
         mPreRebootDexoptJob.onStartJobImpl(mJobService, mJobParameters);
         mPreRebootDexoptJob.waitForRunningJob();
@@ -601,7 +602,7 @@ public class ArtShellCommandTest {
         }
 
         when(mPreRebootDriver.run(eq("_b"), eq(false) /* mapSnapshotsForOta */, any()))
-                .thenReturn(new PreRebootResult(true /* success */));
+                .thenReturn(new PreRebootResult(Status.STATUS_FINISHED));
 
         mPreRebootDexoptJob.onStartJobImpl(mJobService, mJobParameters);
 

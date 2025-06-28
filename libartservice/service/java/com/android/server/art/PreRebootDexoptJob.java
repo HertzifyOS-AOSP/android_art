@@ -16,10 +16,6 @@
 
 package com.android.server.art;
 
-import static com.android.server.art.model.ArtFlags.ScheduleStatus;
-import static com.android.server.art.prereboot.PreRebootDriver.PreRebootResult;
-import static com.android.server.art.proto.PreRebootStats.Status;
-
 import android.annotation.NonNull;
 import android.annotation.Nullable;
 import android.annotation.SuppressLint;
@@ -43,9 +39,13 @@ import androidx.annotation.RequiresApi;
 import com.android.internal.annotations.GuardedBy;
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.server.art.model.ArtFlags;
+import com.android.server.art.model.ArtFlags.ScheduleStatus;
 import com.android.server.art.model.ArtServiceJobInterface;
 import com.android.server.art.prereboot.PreRebootDriver;
+import com.android.server.art.prereboot.PreRebootDriver.PreRebootResult;
 import com.android.server.art.prereboot.PreRebootStatsReporter;
+import com.android.server.art.proto.PreRebootStats.FailureReason;
+import com.android.server.art.proto.PreRebootStats.Status;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -180,7 +180,7 @@ public class PreRebootDexoptJob implements ArtServiceJobInterface {
             jobService.jobFinished(params, false /* wantsReschedule */);
         };
         startLocked(onJobFinishedLocked, false /* isUpdateEngineReady */).exceptionally(t -> {
-            AsLog.e("Fatal error", t);
+            AsLog.wtf("Fatal error", t);
             return null;
         });
     }
@@ -398,8 +398,8 @@ public class PreRebootDexoptJob implements ArtServiceJobInterface {
                         // This check is not strictly necessary, but is an optimization to return
                         // early.
                         if (mCancellationSignal.isCanceled()) {
-                            // The stats reporter translates success=true to STATUS_CANCELLED.
-                            statsReporter.recordJobEnded(new PreRebootResult(true /* success */));
+                            statsReporter.recordJobEnded(
+                                    new PreRebootResult(Status.STATUS_FINISHED));
                             return;
                         }
                         Utils.check(mIsUpdateEngineReady);
@@ -409,10 +409,11 @@ public class PreRebootDexoptJob implements ArtServiceJobInterface {
                         otaSlot, mapSnapshotsForOta, cancellationSignal);
                 statsReporter.recordJobEnded(result);
             } catch (UpdateEngineException e) {
-                AsLog.e("update_engine error", e);
-                statsReporter.recordJobEnded(new PreRebootResult(false /* success */));
+                AsLog.wtf("update_engine error", e);
+                statsReporter.recordJobEnded(new PreRebootResult(
+                        Status.STATUS_FAILED, FailureReason.FAILURE_UPDATE_ENGINE));
             } catch (RuntimeException e) {
-                statsReporter.recordJobEnded(new PreRebootResult(false /* success */));
+                statsReporter.recordJobEnded(new PreRebootResult(Status.STATUS_FAILED));
                 throw e;
             } finally {
                 synchronized (this) {

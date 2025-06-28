@@ -46,6 +46,13 @@ Result<void> ValidateAbsoluteNormalPath(const std::string& path_str) {
   if (path_str.find('\0') != std::string::npos) {
     return Errorf("Path '{}' has invalid character '\\0'", path_str);
   }
+  // Java entering native through JNI requires converting the jstring type to string type.
+  // The '\u0000' in Java will be encoded as' 0xC0 0x80 ', and this situation needs to be
+  // intercepted
+  constexpr const char* kOverlongNull = "\xC0\x80";
+  if (path_str.find(kOverlongNull) != std::string::npos) {
+    return Errorf("Path '{}' has overlong UTF-8 encoded NUL (\\xC0\\x80)", path_str);
+  }
   std::filesystem::path path(path_str);
   if (!path.is_absolute()) {
     return Errorf("Path '{}' is not an absolute path", path_str);

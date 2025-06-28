@@ -46,8 +46,8 @@ static constexpr int kMaxSkipGCIterations = 100;
 // Global variable to signal LSAN that we are not leaking memory.
 uint8_t* allocated_signal_stack = nullptr;
 
-std::vector<uint8_t*> data_to_delete;
-std::vector<art::StandardDexFile*> dex_files_to_delete;
+std::vector<std::unique_ptr<uint8_t[]>> data_to_delete;
+std::vector<std::unique_ptr<art::StandardDexFile>> dex_files_to_delete;
 
 namespace art {
 // A class to be friends with ClassLinker and access the internal FindDexCacheDataLocked method.
@@ -162,17 +162,18 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   // and know that the checksum would probably be erroneous (i.e. random).
   constexpr bool kVerify = false;
 
-  uint8_t* new_data = new uint8_t[size];
+  // Copy data to keep it alive. Use unique_ptr so that we don't leak.
+  data_to_delete.emplace_back(new uint8_t[size]);
+  uint8_t* new_data = data_to_delete.back().get();
   memcpy(new_data, data, size);
-  data_to_delete.push_back(new_data);
 
   auto container = std::make_shared<art::MemoryDexFileContainer>(new_data, size);
-  art::StandardDexFile* dex_file = new art::StandardDexFile(new_data,
+  dex_files_to_delete.emplace_back(new art::StandardDexFile(new_data,
                                                             /*location=*/"fuzz.dex",
                                                             /*location_checksum=*/0,
                                                             /*oat_dex_file=*/nullptr,
-                                                            container);
-  dex_files_to_delete.push_back(dex_file);
+                                                            container));
+  art::StandardDexFile* dex_file = dex_files_to_delete.back().get();
 
   std::string error_msg;
   const bool verify_result =
@@ -246,13 +247,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   if (skipped_gc_iterations == kMaxSkipGCIterations) {
     runtime->GetHeap()->CollectGarbage(/* clear_soft_references */ true);
     skipped_gc_iterations = 0;
-    for (uint8_t* d : data_to_delete) {
-      delete[] d;
-    }
     data_to_delete.clear();
-    for (art::StandardDexFile* df : dex_files_to_delete) {
-      delete df;
-    }
     dex_files_to_delete.clear();
   }
 

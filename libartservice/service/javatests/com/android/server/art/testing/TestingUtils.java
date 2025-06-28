@@ -36,6 +36,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 public final class TestingUtils {
+    public static final String FLAGS_PREFIX = "com.android.server.art.jarjar.";
     private static final String TAG = "ArtServiceTesting";
 
     private TestingUtils() {}

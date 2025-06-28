@@ -33,6 +33,7 @@ import android.os.UserHandle;
 
 import androidx.annotation.RequiresApi;
 
+import com.android.art.flags.Flags;
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.modules.utils.build.SdkLevel;
 import com.android.modules.utils.pm.PackageStateModulesUtils;
@@ -40,6 +41,7 @@ import com.android.server.art.model.ArtFlags;
 import com.android.server.art.model.Config;
 import com.android.server.art.model.DexoptParams;
 import com.android.server.art.model.DexoptResult;
+import com.android.server.pm.PackageManagerLocal.FilteredSnapshot;
 import com.android.server.pm.pkg.AndroidPackage;
 import com.android.server.pm.pkg.PackageState;
 
@@ -52,19 +54,22 @@ import java.util.concurrent.Executor;
 public class PrimaryDexopter extends Dexopter<DetailedPrimaryDexInfo> {
     private final int mSharedGid;
 
+    private final FilteredSnapshot mSnapshot;
+
     public PrimaryDexopter(@NonNull Context context, @NonNull Config config,
-            Executor reporterExecutor, @NonNull PackageState pkgState, @NonNull AndroidPackage pkg,
+            @NonNull Executor reporterExecutor, @NonNull FilteredSnapshot snapshot,
+            @NonNull PackageState pkgState, @NonNull AndroidPackage pkg,
             @NonNull DexoptParams params, @NonNull CancellationSignal cancellationSignal) {
-        this(new Injector(context, config, reporterExecutor), pkgState, pkg, params,
+        this(new Injector(context, config, reporterExecutor), snapshot, pkgState, pkg, params,
                 cancellationSignal);
     }
 
     @VisibleForTesting
-    public PrimaryDexopter(@NonNull Injector injector, @NonNull PackageState pkgState,
-            @NonNull AndroidPackage pkg, @NonNull DexoptParams params,
-            @NonNull CancellationSignal cancellationSignal) {
+    public PrimaryDexopter(@NonNull Injector injector, @NonNull FilteredSnapshot snapshot,
+            @NonNull PackageState pkgState, @NonNull AndroidPackage pkg,
+            @NonNull DexoptParams params, @NonNull CancellationSignal cancellationSignal) {
         super(injector, pkgState, pkg, params, cancellationSignal);
-
+        this.mSnapshot = snapshot;
         if (pkgState.getAppId() < 0) {
             mSharedGid = Process.SYSTEM_UID;
         } else {
@@ -151,7 +156,11 @@ public class PrimaryDexopter extends Dexopter<DetailedPrimaryDexInfo> {
     @Override
     @NonNull
     protected List<Abi> getAllAbis(@NonNull DetailedPrimaryDexInfo dexInfo) {
-        return Utils.getAllAbis(mPkgState);
+        if (Flags.dexoptSecondaryIsaOnlyWhenNeeded()) {
+            return Utils.getUsedPrimaryDexAbis(
+                    mInjector.getDexUseManager(), mSnapshot, mPkgState, dexInfo.dexPath());
+        }
+        return Utils.getAllPrimaryDexAbis(mPkgState);
     }
 
     @Override

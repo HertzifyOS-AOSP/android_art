@@ -16,11 +16,6 @@
 
 package com.android.server.art.prereboot;
 
-import static com.android.server.art.prereboot.PreRebootDriver.PreRebootResult;
-import static com.android.server.art.proto.PreRebootStats.JobRun;
-import static com.android.server.art.proto.PreRebootStats.JobType;
-import static com.android.server.art.proto.PreRebootStats.Status;
-
 import android.annotation.NonNull;
 import android.os.Build;
 
@@ -35,7 +30,12 @@ import com.android.server.art.AsLog;
 import com.android.server.art.ReasonMapping;
 import com.android.server.art.Utils;
 import com.android.server.art.model.DexoptStatus;
+import com.android.server.art.prereboot.PreRebootDriver.PreRebootResult;
 import com.android.server.art.proto.PreRebootStats;
+import com.android.server.art.proto.PreRebootStats.FailureReason;
+import com.android.server.art.proto.PreRebootStats.JobRun;
+import com.android.server.art.proto.PreRebootStats.JobType;
+import com.android.server.art.proto.PreRebootStats.Status;
 import com.android.server.pm.PackageManagerLocal;
 
 import java.io.File;
@@ -110,6 +110,7 @@ public class PreRebootStatsReporter {
         JobRun.Builder runBuilder =
                 JobRun.newBuilder().setJobStartedTimestampMillis(mInjector.getCurrentTimeMillis());
         statsBuilder.setStatus(Status.STATUS_STARTED)
+                .clearFailureReason()
                 .addJobRuns(runBuilder)
                 .setSkippedPackageCount(0)
                 .setOptimizedPackageCount(0)
@@ -157,30 +158,15 @@ public class PreRebootStatsReporter {
         JobRun.Builder runBuilder = JobRun.newBuilder(lastRun).setJobEndedTimestampMillis(
                 mInjector.getCurrentTimeMillis());
 
-        Status status;
-        if (result.success()) {
-            // The job is cancelled if it hasn't done package scanning (total package count is 0),
-            // or it's interrupted in the middle of package processing (package counts don't add up
-            // to the total).
-            // TODO(b/336239721): Move this logic to the server.
-            if (statsBuilder.getTotalPackageCount() > 0
-                    && (statsBuilder.getOptimizedPackageCount()
-                               + statsBuilder.getFailedPackageCount()
-                               + statsBuilder.getSkippedPackageCount())
-                            == statsBuilder.getTotalPackageCount()) {
-                status = Status.STATUS_FINISHED;
-            } else {
-                status = Status.STATUS_CANCELLED;
-            }
-        } else {
-            if (result.systemRequirementCheckFailed()) {
-                status = Status.STATUS_ABORTED_SYSTEM_REQUIREMENTS;
-            } else {
-                status = Status.STATUS_FAILED;
-            }
-        }
+        Utils.check(result.status() == Status.STATUS_FINISHED
+                || result.status() == Status.STATUS_FAILED
+                || result.status() == Status.STATUS_ABORTED_SYSTEM_REQUIREMENTS);
 
-        statsBuilder.setStatus(status).setJobRuns(jobRuns.size() - 1, runBuilder);
+        statsBuilder.setStatus(result.status())
+                .setFailureReason(result.status() == Status.STATUS_FAILED
+                                ? result.failureReason()
+                                : FailureReason.FAILURE_UNSPECIFIED)
+                .setJobRuns(jobRuns.size() - 1, runBuilder);
         save(statsBuilder);
     }
 
@@ -250,49 +236,57 @@ public class PreRebootStatsReporter {
                     jobDurationMs, jobLatencyMs, mPackagesWithArtifacts.size(),
                     packagesWithArtifactsUsableCount, jobRuns.size(),
                     statsBuilder.getPackagesWithArtifactsBeforeRebootCount(),
-                    getJobTypeForStatsd(statsBuilder.getJobType()));
+                    getJobTypeForStatsd(statsBuilder.getJobType()),
+                    getFailureReasonForStatsd(statsBuilder.getFailureReason()));
         }
     }
 
     private int getStatusForStatsd(@NonNull Status status) {
-        switch (status) {
-            case STATUS_UNKNOWN:
-                return ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__STATUS__STATUS_UNKNOWN;
-            case STATUS_SCHEDULED:
-                return ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__STATUS__STATUS_SCHEDULED;
-            case STATUS_STARTED:
-                return ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__STATUS__STATUS_STARTED;
-            case STATUS_FINISHED:
-                return ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__STATUS__STATUS_FINISHED;
-            case STATUS_FAILED:
-                return ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__STATUS__STATUS_FAILED;
-            case STATUS_CANCELLED:
-                return ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__STATUS__STATUS_CANCELLED;
-            case STATUS_ABORTED_SYSTEM_REQUIREMENTS:
-                return ArtStatsLog
-                        .PRE_REBOOT_DEXOPT_JOB_ENDED__STATUS__STATUS_ABORTED_SYSTEM_REQUIREMENTS;
-            case STATUS_NOT_SCHEDULED_DISABLED:
-                return ArtStatsLog
-                        .PRE_REBOOT_DEXOPT_JOB_ENDED__STATUS__STATUS_NOT_SCHEDULED_DISABLED;
-            case STATUS_NOT_SCHEDULED_JOB_SCHEDULER:
-                return ArtStatsLog
-                        .PRE_REBOOT_DEXOPT_JOB_ENDED__STATUS__STATUS_NOT_SCHEDULED_JOB_SCHEDULER;
-            default:
-                throw new IllegalStateException("Unknown status: " + status.getNumber());
-        }
+        return switch (status) {
+            case STATUS_UNKNOWN -> ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__STATUS__STATUS_UNKNOWN;
+            case STATUS_SCHEDULED ->
+                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__STATUS__STATUS_SCHEDULED;
+            case STATUS_STARTED -> ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__STATUS__STATUS_STARTED;
+            case STATUS_FINISHED ->
+                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__STATUS__STATUS_FINISHED;
+            case STATUS_FAILED -> ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__STATUS__STATUS_FAILED;
+            case STATUS_CANCELLED ->
+                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__STATUS__STATUS_CANCELLED;
+            case STATUS_ABORTED_SYSTEM_REQUIREMENTS ->
+                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__STATUS__STATUS_ABORTED_SYSTEM_REQUIREMENTS;
+            case STATUS_NOT_SCHEDULED_DISABLED ->
+                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__STATUS__STATUS_NOT_SCHEDULED_DISABLED;
+            case STATUS_NOT_SCHEDULED_JOB_SCHEDULER ->
+                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__STATUS__STATUS_NOT_SCHEDULED_JOB_SCHEDULER;
+            default -> throw new IllegalStateException("Unknown status: " + status.getNumber());
+        };
     }
 
     private int getJobTypeForStatsd(@NonNull JobType jobType) {
-        switch (jobType) {
-            case JOB_TYPE_UNKNOWN:
-                return ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__JOB_TYPE__JOB_TYPE_UNKNOWN;
-            case JOB_TYPE_OTA:
-                return ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__JOB_TYPE__JOB_TYPE_OTA;
-            case JOB_TYPE_MAINLINE:
-                return ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__JOB_TYPE__JOB_TYPE_MAINLINE;
-            default:
-                throw new IllegalStateException("Unknown job type: " + jobType.getNumber());
-        }
+        return switch (jobType) {
+            case JOB_TYPE_UNKNOWN ->
+                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__JOB_TYPE__JOB_TYPE_UNKNOWN;
+            case JOB_TYPE_OTA -> ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__JOB_TYPE__JOB_TYPE_OTA;
+            case JOB_TYPE_MAINLINE ->
+                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__JOB_TYPE__JOB_TYPE_MAINLINE;
+            default -> throw new IllegalStateException("Unknown job type: " + jobType.getNumber());
+        };
+    }
+
+    private int getFailureReasonForStatsd(@NonNull FailureReason failureReason) {
+        return switch (failureReason) {
+            case FAILURE_UNSPECIFIED ->
+                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__FAILURE_REASON__FAILURE_UNSPECIFIED;
+            case FAILURE_UPDATE_ENGINE ->
+                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__FAILURE_REASON__FAILURE_UPDATE_ENGINE;
+            case FAILURE_CHROOT_SETUP ->
+                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__FAILURE_REASON__FAILURE_CHROOT_SETUP;
+            case FAILURE_CLASS_LOADER ->
+                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__FAILURE_REASON__FAILURE_CLASS_LOADER;
+            default ->
+                throw new IllegalStateException(
+                        "Unknown failure reason: " + failureReason.getNumber());
+        };
     }
 
     private boolean hasUsablePreRebootArtifacts(@NonNull DexoptStatus status) {
@@ -375,12 +369,12 @@ public class PreRebootStatsReporter {
                 long jobDurationMillis, long jobLatencyMillis,
                 int packagesWithArtifactsAfterRebootCount,
                 int packagesWithArtifactsUsableAfterRebootCount, int jobRunCount,
-                int packagesWithArtifactsBeforeRebootCount, int jobType) {
+                int packagesWithArtifactsBeforeRebootCount, int jobType, int failureReason) {
             ArtStatsLog.write(code, status, optimizedPackageCount, failedPackageCount,
                     skippedPackageCount, totalPackageCount, jobDurationMillis, jobLatencyMillis,
                     packagesWithArtifactsAfterRebootCount,
                     packagesWithArtifactsUsableAfterRebootCount, jobRunCount,
-                    packagesWithArtifactsBeforeRebootCount, jobType);
+                    packagesWithArtifactsBeforeRebootCount, jobType, failureReason);
         }
     }
 }

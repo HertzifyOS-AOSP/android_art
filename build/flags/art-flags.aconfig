@@ -160,3 +160,12 @@ flag {
   is_fixed_read_only: true
   is_exported: false
 }
+
+flag {
+  name: "dexopt_secondary_isa_only_when_needed"
+  namespace: "art_cloud"
+  description: "Flag to enable secondary ISA dexopt only when needed"
+  bug: "306362133"
+  is_fixed_read_only: true
+  is_exported: false
+}

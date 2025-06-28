@@ -33,6 +33,7 @@ import android.os.storage.StorageManager;
 import com.android.modules.utils.pm.PackageStateModulesUtils;
 import com.android.server.art.model.Config;
 import com.android.server.art.testing.StaticMockitoRule;
+import com.android.server.pm.PackageManagerLocal.FilteredSnapshot;
 import com.android.server.pm.pkg.AndroidPackage;
 import com.android.server.pm.pkg.AndroidPackageSplit;
 import com.android.server.pm.pkg.PackageState;
@@ -61,6 +62,7 @@ public class PrimaryDexopterTestBase {
             Constants.class, PackageStateModulesUtils.class, Dex2OatStatsReporter.class);
 
     @Mock protected PrimaryDexopter.Injector mInjector;
+    @Mock protected FilteredSnapshot mSnapshot;
     @Mock protected IArtd mArtd;
     @Mock protected UserManager mUserManager;
     @Mock protected DexUseManagerLocal mDexUseManager;

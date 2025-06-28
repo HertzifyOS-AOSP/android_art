@@ -253,6 +253,7 @@ android_test {
     ],
 
     static_libs: [
+        "art-aconfig-flags-java-lib",
         "androidx.test.ext.junit",
         "androidx.test.ext.truth",
         "androidx.test.runner",
@@ -274,6 +275,8 @@ android_test {
         "libdexmakerjvmtiagent",
         "libstaticjvmtiagent",
     ],
+
+    jarjar_rules: "test-jarjar-rules.txt",
     compile_multilib: "first",
 
     sdk_version: "system_server_current",

@@ -509,7 +509,8 @@ static inline bool IsStringInit(const Instruction& instr, ArtMethod* caller)
 }
 
 LIBART_PROTECTED
-extern "C" size_t NterpGetMethod(Thread* self, ArtMethod* caller, const uint16_t* dex_pc_ptr);
+extern "C" size_t NterpGetMethod(
+    Thread* self, ArtMethod* caller, const uint16_t* dex_pc_ptr, uint32_t* registers);
 
 template <InvokeType type>
 ArtMethod* FindMethodToCall(Thread* self,
@@ -531,7 +532,8 @@ ArtMethod* FindMethodToCall(Thread* self,
     // NterpGetMethod can suspend, so save this_object.
     StackHandleScope<1> hs(self);
     HandleWrapperObjPtr<mirror::Object> h_this(hs.NewHandleWrapper(this_object));
-    tls_value = NterpGetMethod(self, caller, reinterpret_cast<const uint16_t*>(&inst));
+    tls_value = NterpGetMethod(
+        self, caller, reinterpret_cast<const uint16_t*>(&inst), /* registers= */ nullptr);
     if (self->IsExceptionPending()) {
       return nullptr;
     }
