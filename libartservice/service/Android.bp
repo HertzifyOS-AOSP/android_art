@@ -103,6 +103,7 @@ java_defaults {
     static_libs: [
         "android.content.pm.flags-aconfig-java-export",
         "android.os.flags-aconfig-java-export",
+        "art-aconfig-rw-flags-java-lib",
         "art-statslog-art-java",
         "artd-aidl-java",
         "dexopt_chroot_setup-aidl-java",

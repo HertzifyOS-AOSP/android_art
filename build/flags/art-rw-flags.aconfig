@@ -12,11 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-package: "com.android.art.native.flags"
+package: "com.android.art.rw.flags"
 container: "com.android.art"
 
-# No flags here can be used in java. It should only contain read-write flags in this file.
-# Read-only flags should go into the art-flags.aconfig file instead.
+# No flags here can be used in libcore in Java. It should only contain read-write flags in this
+# file. Read-only flags should go into the art-flags.aconfig file instead.
 
 flag {
   name: "test_rw_flag"

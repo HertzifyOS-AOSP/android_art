@@ -250,6 +250,8 @@ class FastCompilerARM64 : public FastCompiler {
   bool BuildNewInstance(
       uint32_t vreg, dex::TypeIndex string_index, uint32_t dex_pc, const Instruction* next);
   bool BuildCheckCast(uint32_t vreg, dex::TypeIndex type_index, uint32_t dex_pc);
+  bool BuildInstanceOf(
+      uint32_t vreg, uint32_t vreg_result, dex::TypeIndex type_index, uint32_t dex_pc);
   bool LoadMethod(Register reg, ArtMethod* method);
   void DoReadBarrierOn(Register reg, vixl::aarch64::Label* exit = nullptr, bool do_mr_check = true);
   bool CanGenerateCodeFor(ArtField* field, bool can_receiver_be_null)
@@ -1128,6 +1130,83 @@ bool FastCompilerARM64::BuildCheckCast(uint32_t vreg, dex::TypeIndex type_index,
   }
   InvokeRuntime(kQuickCheckInstanceOf, dex_pc);
 
+  __ Bind(&exit);
+  return true;
+}
+
+bool FastCompilerARM64::BuildInstanceOf(uint32_t vreg,
+                                        uint32_t vreg_result,
+                                        dex::TypeIndex type_index,
+                                        uint32_t dex_pc) {
+  if (!EnsureHasFrame()) {
+    return false;
+  }
+
+  InvokeRuntimeCallingConvention calling_convention;
+  UseScratchRegisterScope temps(GetVIXLAssembler());
+  Register cls = calling_convention.GetRegisterAt(1);
+  Register obj_cls = temps.AcquireW();
+  Register obj = WRegisterFrom(GetExistingRegisterLocation(vreg, DataType::Type::kReference));
+  Location result = GetExistingRegisterLocation(vreg_result, DataType::Type::kInt32);
+  if (HitUnimplemented()) {
+    return false;
+  }
+
+  vixl::aarch64::Label exit, read_barrier_exit, set_zero, set_one;
+  {
+    ScopedObjectAccess soa(Thread::Current());
+    ObjPtr<mirror::Class> klass = dex_compilation_unit_.GetClassLinker()->ResolveType(
+        type_index, dex_compilation_unit_.GetDexCache(), dex_compilation_unit_.GetClassLoader());
+    if (klass == nullptr || !method_->GetDeclaringClass()->CanAccess(klass)) {
+      soa.Self()->ClearException();
+      unimplemented_reason_ = "UnsupportedCheckCast";
+      return false;
+    }
+    Handle<mirror::Class> h_klass = handles_->NewHandle(klass);
+    __ Cbz(obj, &set_zero);
+    __ Ldr(cls.W(), jit_patches_.DeduplicateJitClassLiteral(GetDexFile(),
+                                                            type_index,
+                                                            h_klass,
+                                                            code_generation_data_.get()));
+  }
+  __ Ldr(cls.W(), MemOperand(cls.X()));
+  __ Ldr(obj_cls.W(), MemOperand(obj.X()));
+  __ Cmp(cls.W(), obj_cls.W());
+  __ B(eq, &set_one);
+
+  // Read barrier on the GC Root.
+  DoReadBarrierOn(cls, &read_barrier_exit);
+  // Read barrier on the object's class.
+  DoReadBarrierOn(obj_cls, &read_barrier_exit, /* do_mr_check= */ false);
+
+  __ Bind(&read_barrier_exit);
+  __ Cmp(cls.W(), obj_cls.W());
+  __ B(eq, &set_one);
+  if (!MoveLocation(LocationFrom(calling_convention.GetRegisterAt(0)),
+                    LocationFrom(obj),
+                    DataType::Type::kReference)) {
+    return false;
+  }
+  InvokeRuntime(kQuickInstanceofNonTrivial, dex_pc);
+  if (!MoveLocation(result,
+                    calling_convention.GetReturnLocation(DataType::Type::kInt32),
+                    DataType::Type::kInt32)) {
+    return false;
+  }
+  __ B(&exit);
+  __ Bind(&set_zero);
+  if (!MoveLocation(result,
+                    Location::ConstantLocation(new (allocator_) HIntConstant(0)),
+                    DataType::Type::kInt32)) {
+    return false;
+  }
+  __ B(&exit);
+  __ Bind(&set_one);
+  if (!MoveLocation(result,
+                    Location::ConstantLocation(new (allocator_) HIntConstant(1)),
+                    DataType::Type::kInt32)) {
+    return false;
+  }
   __ Bind(&exit);
   return true;
 }
@@ -2294,7 +2373,10 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
     }
 
     case Instruction::INSTANCE_OF: {
-      break;
+      uint8_t destination = instruction.VRegA_22c();
+      uint8_t reference = instruction.VRegB_22c();
+      dex::TypeIndex type_index(instruction.VRegC_22c());
+      return BuildInstanceOf(reference, destination, type_index, dex_pc);
     }
 
     case Instruction::CHECK_CAST: {

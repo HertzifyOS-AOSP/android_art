@@ -57,6 +57,11 @@
 
 namespace art HIDDEN {
 
+static jobject Thread_currentCarrierThread(JNIEnv* env, jclass) {
+  ScopedFastNativeObjectAccess soa(env);
+  return soa.AddLocalReference<jobject>(soa.Self()->GetPeer());
+}
+
 static jobject Thread_currentThread(JNIEnv* env, jclass) {
   ScopedFastNativeObjectAccess soa(env);
   return soa.AddLocalReference<jobject>(soa.Self()->GetPeer());
@@ -239,9 +244,7 @@ static void Thread_sleep(JNIEnv* env, jclass, jobject java_lock, jlong ms, jint 
  * The exact behavior is poorly defined.  Some discussion here:
  *   http://www.cs.umd.edu/~pugh/java/memoryModel/archive/0944.html
  */
-static void Thread_yield(JNIEnv*, jobject) {
-  sched_yield();
-}
+static void Thread_yield0(JNIEnv*, jobject) { sched_yield(); }
 
 enum PinningReason {
   kNoReason = 0,
@@ -394,6 +397,7 @@ static void Thread_parkVirtualInternal(
 }
 
 static JNINativeMethod gMethods[] = {
+    FAST_NATIVE_METHOD(Thread, currentCarrierThread, "()Ljava/lang/Thread;"),
     FAST_NATIVE_METHOD(Thread, currentThread, "()Ljava/lang/Thread;"),
     FAST_NATIVE_METHOD(Thread, interrupted, "()Z"),
     FAST_NATIVE_METHOD(Thread, isInterrupted, "()Z"),
@@ -407,7 +411,7 @@ static JNINativeMethod gMethods[] = {
     NATIVE_METHOD(Thread, setNiceness0, "(I)I"),
     NATIVE_METHOD(Thread, setPriority0, "(II)V"),
     FAST_NATIVE_METHOD(Thread, sleep, "(Ljava/lang/Object;JI)V"),
-    NATIVE_METHOD(Thread, yield, "()V"),
+    NATIVE_METHOD(Thread, yield0, "()V"),
     NATIVE_METHOD(Thread,
                   parkVirtualInternal,
                   "(Ldalvik/system/VirtualThreadContext;Ldalvik/system/"
