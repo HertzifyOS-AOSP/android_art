@@ -14,8 +14,6 @@
  * limitations under the License.
  */
 
-import android.system.Os;
-
 import dalvik.system.VirtualThreadContext;
 
 import java.text.DateFormat;
@@ -28,6 +26,8 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+
+import jdk.internal.access.SharedSecrets;
 
 /**
  * Implement a thread sleeping for virtual thread on top of a single-threaded {@link Timer}.
@@ -195,12 +195,11 @@ public class Main {
         private static void sleepingTask(ConcurrentLinkedQueue<ParkedSleepingThreadHolder> queue,
                 long numOfThreads, long sleepDurationMs,
                 AtomicInteger joinedCounter, LinkedBlockingQueue<Object> allJoinedNotifier) {
-            int tid1 = Os.gettid();
+            long tid1 = getCarrierThreadId();
             parkVirtual(queue,  sleepDurationMs);
-            int tid2 = Os.gettid();
+            long tid2 = getCarrierThreadId();
             if (tid1 == tid2) {
-                // It may actually happen when tid is re-used for a separate Thread object.
-                throw new RuntimeException("tid shouldn't normally be the same: "
+                throw new RuntimeException("thread id shouldn't be the same: "
                         + tid1 + " != " + tid2);
             }
 
@@ -209,6 +208,10 @@ public class Main {
             if (c >= numOfThreads) {
                 allJoinedNotifier.add(new Object());
             }
+        }
+
+        private static long getCarrierThreadId() {
+            return SharedSecrets.getJavaLangAccess().currentCarrierThread().threadId();
         }
 
         private static void parkVirtual(ConcurrentLinkedQueue<ParkedSleepingThreadHolder> queue,
