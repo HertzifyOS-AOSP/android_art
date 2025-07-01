@@ -1628,7 +1628,10 @@
                 "2390-virtual-thread-parking-error-leak",
                 "2391-virtual-thread-sleeps",
                 "2392-virtual-thread-pinning-jni",
-                "2393-virtual-thread-pinning-monitor"],
+                "2393-virtual-thread-pinning-monitor",
+                "2394-continuation-yields",
+                "2395-virtual-thread-reentrantlock",
+                "2395-virtual-thread-sleep-api"],
       "variant": "jvm",
       "description": ["Tests for ART-specific Virtual Thread APIs."]
     },

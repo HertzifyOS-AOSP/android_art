@@ -261,6 +261,7 @@ static void Thread_parkVirtualInternal(
   VirtualThreadPark(soa.Decode<mirror::Object>(v_context),
                     soa.Decode<mirror::Object>(parked_states),
                     soa.Decode<mirror::Throwable>(vm_error),
+                    false,
                     reason);
 }
 

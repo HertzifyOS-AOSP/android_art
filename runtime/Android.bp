@@ -376,6 +376,7 @@ cc_defaults {
         "native/java_lang_reflect_Proxy.cc",
         "native/java_util_concurrent_atomic_AtomicLong.cc",
         "native/jdk_internal_misc_Unsafe.cc",
+        "native/jdk_internal_vm_Continuation.cc",
         "native/libcore_io_Memory.cc",
         "native/libcore_util_CharsetUtils.cc",
         "native/org_apache_harmony_dalvik_ddmc_DdmServer.cc",

@@ -1376,7 +1376,15 @@ static inline bool DoCallCommon(ArtMethod* called_method,
 void FillVirtualThreadFrame(Thread* self, ShadowFrame* frame) {
   ScopedAssertNoThreadSuspension ns("No thread suspension when filling virtual thread frame)");
   ObjPtr<mirror::Object> jpeer = self->GetPeer();
-  ObjPtr<mirror::Object> v_context = WellKnownClasses::java_lang_Thread_target->GetObject(jpeer);
+  ObjPtr<mirror::Object> v_context;
+  if (self->AreVirtualThreadFlagsEnabled(kContinuation)) {
+    ObjPtr<mirror::Object> cont = WellKnownClasses::java_lang_Thread_cont->GetObject(jpeer);
+    DCHECK(!cont.IsNull());
+    v_context =
+        WellKnownClasses::jdk_internal_vm_Continuation_virtualThreadContext->GetObject(cont);
+  } else {
+    v_context = WellKnownClasses::java_lang_Thread_target->GetObject(jpeer);
+  }
   DCHECK(v_context->GetClass()->DescriptorEquals("Ldalvik/system/VirtualThreadContext;"))
       << frame->GetMethod()->PrettyMethod();
   ObjPtr<mirror::Object> parked_states =

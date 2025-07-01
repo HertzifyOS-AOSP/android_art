@@ -207,10 +207,14 @@ enum class WeakRefAccessState : int32_t {
 enum VirtualThreadFlag : uint8_t {
   // This flag is set only when a virtual thread is running on the given carrier thread.
   kIsVirtual = 1u,
+  // This flag is set only when carrier thread enters a jdk.internal.vm.Continuation.
+  // In this case, the Continuation is the internal implementation details of virtual thread.
+  // Importantly, virtual thread frames are on top of the carrier thread frames.
+  kContinuation = 1u << 1,
   // The flag is set when a virtual thread is being parked and unmounted from the carrier thread.
-  kParking = 1u << 1,
+  kParking = 1u << 2,
   // The flag is set when a virtual thread is being unparked and mounted from the carrier thread.
-  kUnparking = 1u << 2,
+  kUnparking = 1u << 3,
 };
 
 // ART uses two types of ABI/code: quick and native.

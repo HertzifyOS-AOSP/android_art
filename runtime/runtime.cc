@@ -56,10 +56,10 @@
 #include "base/aborting.h"
 #include "base/arena_allocator.h"
 #include "base/atomic.h"
+#include "base/calloc_arena_pool.h"
 #include "base/dumpable.h"
 #include "base/file_utils.h"
 #include "base/flags.h"
-#include "base/calloc_arena_pool.h"
 #include "base/mem_map_arena_pool.h"
 #include "base/memory_tool.h"
 #include "base/mutex.h"
@@ -146,6 +146,7 @@
 #include "native/java_lang_reflect_Proxy.h"
 #include "native/java_util_concurrent_atomic_AtomicLong.h"
 #include "native/jdk_internal_misc_Unsafe.h"
+#include "native/jdk_internal_vm_Continuation.h"
 #include "native/libcore_io_Memory.h"
 #include "native/libcore_util_CharsetUtils.h"
 #include "native/org_apache_harmony_dalvik_ddmc_DdmServer.h"
@@ -2460,6 +2461,7 @@ void Runtime::RegisterRuntimeNativeMethods(JNIEnv* env) {
   register_java_lang_VMClassLoader(env);
   register_java_util_concurrent_atomic_AtomicLong(env);
   register_jdk_internal_misc_Unsafe(env);
+  register_jdk_internal_vm_Continuation(env);
   register_libcore_io_Memory(env);
   register_libcore_util_CharsetUtils(env);
   register_org_apache_harmony_dalvik_ddmc_DdmServer(env);

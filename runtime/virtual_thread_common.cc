@@ -41,23 +41,41 @@
 
 namespace art HIDDEN {
 
+inline static ArtMethod* get_enter_method(bool is_continuation_api) {
+  return is_continuation_api ? WellKnownClasses::jdk_internal_vm_Continuation_enterSpecial
+                             : nullptr;
+}
+
+inline static ArtMethod* get_park_method(bool is_continuation_api) {
+  if (is_continuation_api) {
+    return WellKnownClasses::jdk_internal_vm_Continuation_doYieldNative;
+  } else {
+    return WellKnownClasses::java_lang_Thread_parkVirtualInternal;
+  }
+}
+
 struct VirtualThreadParkingVisitor final : public StackVisitor {
-  explicit VirtualThreadParkingVisitor(Thread* thread) REQUIRES_SHARED(Locks::mutator_lock_)
+  VirtualThreadParkingVisitor(Thread* thread, bool is_continuation_api)
+      REQUIRES_SHARED(Locks::mutator_lock_)
       : StackVisitor(thread, nullptr, StackVisitor::StackWalkKind::kIncludeInlinedFrames, true),
+        enter_method_(get_enter_method(is_continuation_api)),
+        park_method_(get_park_method(is_continuation_api)),
         shadow_frame_count_(0),
         reason_(kNoReason) {}
   bool VisitFrame() override REQUIRES_SHARED(Locks::mutator_lock_) {
     ShadowFrame* shadow_frame = GetCurrentShadowFrame();
 
     if (shadow_frame == nullptr) {
-      // Stack walking continues only if the only non-interpreted frame is
-      // Thread.parkVirtualInternal until JIT and AOT frame is supported.
       ArtMethod** quick_frame = GetCurrentQuickFrame();
       ArtMethod* method = quick_frame != nullptr ? *quick_frame : nullptr;
       if (method != nullptr && method->IsNative()) {
-        if (method == WellKnownClasses::java_lang_Thread_parkVirtualInternal) {
-          // Continue walking for this park method.
+        if (method == park_method_) {
+          // Stack walking continues only if the only non-interpreted frame is
+          // a known method parking the virtual thread / yielding the continuation.
           return true;
+        } else if (method == enter_method_) {
+          // The rest of the stack belongs to the carrier thread.
+          return false;
         }
 
         reason_ = kNativeMethod;
@@ -93,6 +111,8 @@ struct VirtualThreadParkingVisitor final : public StackVisitor {
     reinterpret_cast<VirtualThreadParkingVisitor*>(visitor)->reason_ = kMonitor;
   }
 
+  const ArtMethod* const enter_method_;
+  const ArtMethod* const park_method_;
   std::vector<const ShadowFrame*> shadow_frames_;
   size_t shadow_frame_count_;
   PinningReason reason_;
@@ -101,8 +121,15 @@ struct VirtualThreadParkingVisitor final : public StackVisitor {
 bool VirtualThreadPark(ObjPtr<mirror::Object> v_context,
                        ObjPtr<mirror::Object> parked_states,
                        ObjPtr<mirror::Throwable> vm_error,
+                       bool is_continuation_api,
                        PinningReason& reason_) {
   Thread* self = Thread::Current();
+  if (self->AreVirtualThreadFlagsEnabled(kContinuation) != is_continuation_api) {
+    self->ThrowNewExceptionF("Ljava/lang/IllegalStateException;",
+                             "unmatched kContinuation value when Virtual Thread is parking: %d",
+                             is_continuation_api);
+    return false;
+  }
 
   StackHandleScope<9> hs(self);
   ClassLinker* cl = Runtime::Current()->GetClassLinker();
@@ -112,7 +139,7 @@ bool VirtualThreadPark(ObjPtr<mirror::Object> v_context,
   Handle<mirror::Object> opeer_h = hs.NewHandle(self->GetPeer());
   Handle<mirror::Throwable> vm_error_h = hs.NewHandle(vm_error);
 
-  VirtualThreadParkingVisitor dump_visitor(self);
+  VirtualThreadParkingVisitor dump_visitor(self, is_continuation_api);
   dump_visitor.WalkStack();
 
   DCHECK_NE(dump_visitor.reason_, kUnsupportedFrame) << "JIT / AOT frame isn't supported.";
