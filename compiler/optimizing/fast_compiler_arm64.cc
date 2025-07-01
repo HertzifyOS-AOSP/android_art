@@ -1143,9 +1143,10 @@ bool FastCompilerARM64::BuildInstanceOf(uint32_t vreg,
   }
 
   InvokeRuntimeCallingConvention calling_convention;
-  UseScratchRegisterScope temps(GetVIXLAssembler());
   Register cls = calling_convention.GetRegisterAt(1);
-  Register obj_cls = temps.AcquireW();
+  // Use a temporary register for `obj_cls`. Cannot be a vixl temp as it needs
+  // to survive a read barrier.
+  Register obj_cls = calling_convention.GetRegisterAt(0);
   Register obj = WRegisterFrom(GetExistingRegisterLocation(vreg, DataType::Type::kReference));
   Location result = GetExistingRegisterLocation(vreg_result, DataType::Type::kInt32);
   if (HitUnimplemented()) {
@@ -1182,6 +1183,7 @@ bool FastCompilerARM64::BuildInstanceOf(uint32_t vreg,
   __ Bind(&read_barrier_exit);
   __ Cmp(cls.W(), obj_cls.W());
   __ B(eq, &set_one);
+  // We clobber `obj_cls` here, which is fine as we don't need it anymore.
   if (!MoveLocation(LocationFrom(calling_convention.GetRegisterAt(0)),
                     LocationFrom(obj),
                     DataType::Type::kReference)) {
