@@ -17,18 +17,31 @@
 #ifndef ART_RUNTIME_TRACE_COMMON_H_
 #define ART_RUNTIME_TRACE_COMMON_H_
 
+#include "android-base/file.h"
 #include "android-base/stringprintf.h"
 #include "art_method-inl.h"
+#include "com_android_art_rw_flags.h"
+#include "compiler_callbacks.h"
 #include "dex/descriptors_names.h"
 #include "oat/oat_quick_method_header.h"
 
+using ::android::base::GetBoolProperty;
 using android::base::StringPrintf;
 
 namespace art HIDDEN {
 
+inline bool ShouldEnableProfileCode() {
+  if (Runtime::Current() != nullptr && Runtime::Current()->IsAotCompiler()) {
+    // For dex2oat invocations just look at the flag passed to the dex2oat command.
+    return Runtime::Current()->GetCompilerCallbacks()->ShouldEnableProfileCode();
+  }
+  bool build_enabled = GetBoolProperty("dalvik.vm.allow_profile_code", false);
+  return com::android::art::rw::flags::enable_profile_code_rw() && build_enabled;
+}
+
 static constexpr double kSecondsToNanoseconds = 1000 * 1000 * 1000;
 
-static std::string GetMethodInfoLine(ArtMethod* method) REQUIRES_SHARED(Locks::mutator_lock_) {
+inline std::string GetMethodInfoLine(ArtMethod* method) REQUIRES_SHARED(Locks::mutator_lock_) {
   method = method->GetInterfaceMethodIfProxy(kRuntimePointerSize);
   return StringPrintf("%s\t%s\t%s\t%s\n",
                       PrettyDescriptor(method->GetDeclaringClassDescriptor()).c_str(),

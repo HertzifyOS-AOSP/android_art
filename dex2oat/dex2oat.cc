@@ -978,6 +978,8 @@ class Dex2Oat final {
       key_value_store_->Put(OatHeader::kAssumeValueSdkIntKey,
                             std::to_string(compiler_options_->GetAssumeValueOptions().SdkInt()));
     }
+    key_value_store_->Put(OatHeader::kEnableProfileCodeKey,
+                          compiler_options_->enable_profile_code_);
     if (invocation_file_.get() != -1) {
       std::ostringstream oss;
       for (int i = 0; i < argc; ++i) {
@@ -1473,6 +1475,8 @@ class Dex2Oat final {
     if (!PrepareRuntimeOptions(&runtime_options, callbacks_.get())) {
       return dex2oat::ReturnCode::kOther;
     }
+
+    callbacks_->SetShouldEnableProfileCode(compiler_options_->EnableProfileCode());
 
     CreateOatWriters();
     if (!AddDexFileSources()) {

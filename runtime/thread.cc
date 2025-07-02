@@ -113,6 +113,7 @@
 #include "thread-inl.h"
 #include "thread_list.h"
 #include "trace.h"
+#include "trace_common.h"
 #include "trace_profile.h"
 #include "unwindstack/AndroidUnwinder.h"
 #include "verify_object.h"
@@ -1105,7 +1106,7 @@ bool Thread::Init(ThreadList* thread_list, JavaVMExt* java_vm, JNIEnvExt* jni_en
 
   ScopedTrace trace3("ThreadList::Register");
   thread_list->Register(this);
-  if (art_flags::always_enable_profile_code()) {
+  if (ShouldEnableProfileCode()) {
     UpdateTlsLowOverheadTraceEntrypoints(TraceProfiler::GetTraceType());
   }
   return true;

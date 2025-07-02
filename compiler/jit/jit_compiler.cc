@@ -33,6 +33,7 @@
 #include "jit/jit.h"
 #include "jit/jit_code_cache.h"
 #include "jit/jit_logger.h"
+#include "trace_common.h"
 
 namespace art_rw_flags = com::android::art::rw::flags;
 
@@ -131,6 +132,10 @@ void JitCompiler::ParseCompilerOptions() {
 
   if (art_rw_flags::assume_value_sdk_int()) {
     compiler_options_->GetAssumeValueOptions().SetSdkInt(runtime->GetSdkVersion());
+  }
+
+  if (ShouldEnableProfileCode()) {
+    compiler_options_->enable_profile_code_ = true;
   }
 }
 

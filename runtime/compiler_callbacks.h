@@ -81,6 +81,8 @@ class CompilerCallbacks {
     return false;
   }
 
+  virtual bool ShouldEnableProfileCode() { return false; }
+
  protected:
   explicit CompilerCallbacks(CallbackMode mode) : mode_(mode) { }
 

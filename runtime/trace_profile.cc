@@ -23,7 +23,6 @@
 #include "base/mutex.h"
 #include "base/systrace.h"
 #include "base/unix_file/fd_file.h"
-#include "com_android_art_flags.h"
 #include "dex/descriptors_names.h"
 #include "gc/task_processor.h"
 #include "oat/oat_quick_method_header.h"
@@ -34,8 +33,6 @@
 #include "thread_list.h"
 #include "trace.h"
 #include "trace_common.h"
-
-namespace art_flags = com::android::art::flags;
 
 namespace art HIDDEN {
 
@@ -115,7 +112,7 @@ void TraceData::AppendToLongRunningMethods(const uint8_t* buffer, size_t size) {
 }
 
 void TraceProfiler::AllocateBuffer(Thread* thread) {
-  if (!art_flags::always_enable_profile_code()) {
+  if (!ShouldEnableProfileCode()) {
     return;
   }
 
@@ -310,8 +307,9 @@ static class AllMethodsTraceStartCheckpoint final : public Closure {
 } all_methods_checkpoint_;
 
 void TraceProfiler::Start(LowOverheadTraceType trace_type, uint64_t trace_duration_ns) {
-  if (!art_flags::always_enable_profile_code()) {
-    LOG(ERROR) << "Feature not supported. Please build with ART_ALWAYS_ENABLE_PROFILE_CODE.";
+  if (!ShouldEnableProfileCode()) {
+    LOG(ERROR) << "Feature not supported. Please build with ALLOW_PROFILE_CODE and enable "
+                  "com.android.art.rw.flags.enable_profile_code_rw";
     return;
   }
 
@@ -383,8 +381,9 @@ void TraceProfiler::Start() {
 }
 
 void TraceProfiler::Stop() {
-  if (!art_flags::always_enable_profile_code()) {
-    LOG(ERROR) << "Feature not supported. Please build with ART_ALWAYS_ENABLE_PROFILE_CODE.";
+  if (!ShouldEnableProfileCode()) {
+    LOG(ERROR) << "Feature not supported. Please build with ALLOW_PROFILE_CODE and enable "
+                  "com.android.art.rw.flags.enable_profile_code_rw";
     return;
   }
 
@@ -473,8 +472,9 @@ size_t TraceProfiler::DumpBuffer(uint32_t thread_id,
 }
 
 void TraceProfiler::Dump(int fd) {
-  if (!art_flags::always_enable_profile_code()) {
-    LOG(ERROR) << "Feature not supported. Please build with ART_ALWAYS_ENABLE_PROFILE_CODE.";
+  if (!ShouldEnableProfileCode()) {
+    LOG(ERROR) << "Feature not supported. Please build with ALLOW_PROFILE_CODE and enable "
+                  "com.android.art.rw.flags.enable_profile_code_rw";
     return;
   }
 
@@ -484,8 +484,9 @@ void TraceProfiler::Dump(int fd) {
 }
 
 void TraceProfiler::Dump(const char* filename) {
-  if (!art_flags::always_enable_profile_code()) {
-    LOG(ERROR) << "Feature not supported. Please build with ART_ALWAYS_ENABLE_PROFILE_CODE.";
+  if (!ShouldEnableProfileCode()) {
+    LOG(ERROR) << "Feature not supported. Please build with ALLOW_PROFILE_CODE and enable "
+                  "com.android.art.rw.flags.enable_profile_code_rw";
     return;
   }
 
@@ -709,7 +710,7 @@ void TraceProfiler::FlushBufferAndRecordTraceEvent(ArtMethod* method,
 }
 
 std::string TraceProfiler::GetLongRunningMethodsString() {
-  if (!art_flags::always_enable_profile_code()) {
+  if (!ShouldEnableProfileCode()) {
     return std::string();
   }
 

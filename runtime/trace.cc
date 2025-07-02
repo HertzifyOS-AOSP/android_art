@@ -32,7 +32,6 @@
 #include "base/unix_file/fd_file.h"
 #include "base/utils.h"
 #include "class_linker.h"
-#include "com_android_art_flags.h"
 #include "common_throws.h"
 #include "debugger.h"
 #include "dex/descriptors_names.h"
@@ -53,8 +52,6 @@
 #include "thread_list.h"
 #include "trace_common.h"
 #include "trace_profile.h"
-
-namespace art_flags = com::android::art::flags;
 
 namespace art HIDDEN {
 
@@ -835,7 +832,7 @@ void Trace::FlushThreadBuffer(Thread* self) {
   // Check if we still need to flush inside the trace_lock_. If we are stopping tracing it is
   // possible we already deleted the trace and flushed the buffer too.
   if (the_trace_ == nullptr) {
-    if (art_flags::always_enable_profile_code()) {
+    if (ShouldEnableProfileCode()) {
       TraceProfiler::ReleaseThreadBuffer(self);
     }
     DCHECK_EQ(self->GetMethodTraceBuffer(), nullptr);
@@ -849,7 +846,7 @@ void Trace::ReleaseThreadBuffer(Thread* self) {
   // Check if we still need to flush inside the trace_lock_. If we are stopping tracing it is
   // possible we already deleted the trace and flushed the buffer too.
   if (the_trace_ == nullptr) {
-    if (art_flags::always_enable_profile_code()) {
+    if (ShouldEnableProfileCode()) {
       TraceProfiler::ReleaseThreadBuffer(self);
     }
     DCHECK_EQ(self->GetMethodTraceBuffer(), nullptr);

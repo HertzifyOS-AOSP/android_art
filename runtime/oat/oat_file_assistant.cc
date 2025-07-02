@@ -55,6 +55,7 @@
 #include "oat_file_assistant_context.h"
 #include "runtime.h"
 #include "scoped_thread_state_change-inl.h"
+#include "trace_common.h"
 #include "vdex_file.h"
 #include "zlib.h"
 
@@ -531,6 +532,13 @@ OatFileAssistant::OatStatus OatFileAssistant::GivenOatFileStatus(const OatFile& 
                             file.GetOatHeader().GetAssumeValueSdkInt(),
                             GetRuntimeOptions().sdk_version);
     return kOatAssumedValuesOutOfDate;
+  }
+
+  if (file.GetOatHeader().IsProfileCodeEnabled() != ShouldEnableProfileCode()) {
+    *error_msg = ART_FORMAT("Profile code Enabled mismatch (compiled='{}', runtime='{}')",
+                            file.GetOatHeader().IsProfileCodeEnabled(),
+                            ShouldEnableProfileCode());
+    return kOatCannotOpen;
   }
 
   return kOatUpToDate;

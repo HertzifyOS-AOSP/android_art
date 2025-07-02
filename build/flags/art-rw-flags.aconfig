@@ -66,3 +66,12 @@ flag {
   is_fixed_read_only: false
   is_exported: false
 }
+
+flag {
+  name: "enable_profile_code_rw"
+  namespace: "art_performance"
+  description: "Flag to control on-demand method tracing feature"
+  bug: "352518093"
+  is_fixed_read_only: false
+  is_exported: false
+}
