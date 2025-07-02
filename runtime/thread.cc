@@ -649,6 +649,7 @@ void* Thread::CreateCallback(void* arg) {
     // Copy peer into self, deleting global reference when done.
     CHECK(self->tlsPtr_.jpeer != nullptr);
     self->tlsPtr_.opeer = soa.Decode<mirror::Object>(self->tlsPtr_.jpeer).Ptr();
+    self->tlsPtr_.current_peer = self->tlsPtr_.opeer;
     // Make sure nothing can observe both opeer and jpeer set at the same time.
     self->DeleteJPeer(self->GetJniEnv());
     self->SetThreadName(self->GetThreadName()->ToModifiedUtf8().c_str());
@@ -1220,6 +1221,7 @@ Thread* Thread::Attach(const char* thread_name, bool as_daemon, jobject thread_p
     ScopedObjectAccess soa(self);
     ObjPtr<mirror::Object> peer = soa.Decode<mirror::Object>(thread_peer);
     self->tlsPtr_.opeer = peer.Ptr();
+    self->tlsPtr_.current_peer = peer.Ptr();
     SetNativePeer</*kSupportTransaction=*/ false>(peer, self);
     return true;
   };
@@ -1254,6 +1256,7 @@ void Thread::CreatePeer(const char* name, bool as_daemon, jobject thread_group) 
     return;
   }
   tlsPtr_.opeer = peer.Get();
+  tlsPtr_.current_peer = peer.Get();
   WellKnownClasses::java_lang_Thread_init->InvokeInstance<'V', 'L', 'L', 'I', 'Z'>(
       self, peer.Get(), thr_group.Get(), thread_name.Get(), thread_niceness, as_daemon);
   if (self->IsExceptionPending()) {
@@ -2730,6 +2733,7 @@ void Thread::Destroy(bool should_run_callbacks) {
     }
 
     tlsPtr_.opeer = nullptr;
+    tlsPtr_.current_peer = nullptr;
   }
 
   {
@@ -4554,6 +4558,7 @@ template <bool kPrecise>
 void Thread::VisitRoots(RootVisitor* visitor) {
   const uint32_t thread_id = GetThreadId();
   visitor->VisitRootIfNonNull(&tlsPtr_.opeer, RootInfo(kRootThreadObject, thread_id));
+  visitor->VisitRootIfNonNull(&tlsPtr_.current_peer, RootInfo(kRootThreadObject, thread_id));
   if (tlsPtr_.exception != nullptr && tlsPtr_.exception != GetDeoptimizationException()) {
     visitor->VisitRoot(reinterpret_cast<mirror::Object**>(&tlsPtr_.exception),
                        RootInfo(kRootNativeStack, thread_id));

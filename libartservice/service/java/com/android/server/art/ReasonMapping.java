@@ -69,6 +69,13 @@ public class ReasonMapping {
      * Dexopt.
      */
     public static final String REASON_PRE_REBOOT_DEXOPT = "ab-ota";
+    /**
+     * Dexopting apps after the reboot for an OTA or a mainline update, if the reboot is
+     * unattended, known as Post-UR Dexopt.
+     *
+     * @hide
+     */
+    public static final String REASON_POST_UNATTENDED_REBOOT = "post-ur";
 
     // Reasons for Play Install Hints (go/install-hints).
     public static final String REASON_INSTALL_FAST = "install-fast";
@@ -87,7 +94,7 @@ public class ReasonMapping {
     /** @hide */
     public static final Set<String> BATCH_DEXOPT_REASONS =
             Set.of(REASON_FIRST_BOOT, REASON_BOOT_AFTER_OTA, REASON_BOOT_AFTER_MAINLINE_UPDATE,
-                    REASON_BG_DEXOPT, REASON_PRE_REBOOT_DEXOPT);
+                    REASON_BG_DEXOPT, REASON_PRE_REBOOT_DEXOPT, REASON_POST_UNATTENDED_REBOOT);
 
     /** @hide */
     public static final Set<String> BOOT_REASONS =
@@ -105,6 +112,7 @@ public class ReasonMapping {
         REASON_BOOT_AFTER_MAINLINE_UPDATE,
         REASON_BG_DEXOPT,
         REASON_PRE_REBOOT_DEXOPT,
+        REASON_POST_UNATTENDED_REBOOT,
     })
     // clang-format on
     @Retention(RetentionPolicy.SOURCE)
@@ -138,6 +146,11 @@ public class ReasonMapping {
     public static String getCompilerFilterForReason(@NonNull String reason) {
         String value = SystemProperties.get("pm.dexopt." + reason);
         if (TextUtils.isEmpty(value)) {
+            if (reason.equals(REASON_POST_UNATTENDED_REBOOT)) {
+                // The Post unattended reboot job is supposed to use the bg-dexopt compiler filter,
+                // unless explicitly overridden.
+                return getCompilerFilterForReason(REASON_BG_DEXOPT);
+            }
             throw new IllegalArgumentException("No compiler filter for reason '" + reason + "'");
         }
         if (!Utils.isValidArtServiceCompilerFilter(value)) {
@@ -189,6 +202,7 @@ public class ReasonMapping {
                 return ArtFlags.PRIORITY_INTERACTIVE;
             case REASON_BG_DEXOPT:
             case REASON_PRE_REBOOT_DEXOPT:
+            case REASON_POST_UNATTENDED_REBOOT:
             case REASON_INACTIVE:
             case REASON_INSTALL_BULK:
             case REASON_INSTALL_BULK_SECONDARY:
@@ -209,8 +223,16 @@ public class ReasonMapping {
      */
     public static int getConcurrencyForReason(@NonNull @BatchDexoptReason String reason) {
         // TODO(jiakaiz): Revisit the concurrency for non-boot reasons.
-        return SystemProperties.getInt("pm.dexopt." + reason + ".concurrency",
-                BOOT_REASONS.contains(reason) ? 4 : 1 /* def */);
+        int defaultValue = 1;
+        if (BOOT_REASONS.contains(reason)) {
+            defaultValue = 4;
+        } else if (reason.equals(REASON_POST_UNATTENDED_REBOOT)) {
+            // The Post unattended reboot job is supposed to use the bg-dexopt concurrency, unless
+            // explicitly overridden.
+            defaultValue = getConcurrencyForReason(REASON_BG_DEXOPT);
+        }
+
+        return SystemProperties.getInt("pm.dexopt." + reason + ".concurrency", defaultValue);
     }
 
     /**

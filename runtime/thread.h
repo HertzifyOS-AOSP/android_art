@@ -737,6 +737,18 @@ class EXPORT Thread {
     return tlsPtr_.jpeer != nullptr || tlsPtr_.opeer != nullptr;
   }
 
+  // Set the current Thread object returned by Thread.currentThread().
+  void SetCurrentPeer(mirror::Object* peer) REQUIRES_SHARED(Locks::mutator_lock_) {
+    DCHECK(Thread::Current() == this) << "Don't call this from another thread.";
+    tlsPtr_.current_peer = peer;
+  }
+
+  // Get the current Thread object returned by Thread.currentThread().
+  mirror::Object* GetCurrentPeer() REQUIRES_SHARED(Locks::mutator_lock_) {
+    DCHECK(Thread::Current() == this) << "Don't call this from another thread.";
+    return tlsPtr_.current_peer;
+  }
+
   RuntimeStats* GetStats() {
     return &tls64_.stats;
   }
@@ -1166,6 +1178,11 @@ class EXPORT Thread {
     return ThreadOffsetFromTlsPtr<pointer_size>(OFFSETOF_MEMBER(tls_ptr_sized_values, opeer));
   }
 
+  template <PointerSize pointer_size>
+  static constexpr ThreadOffset<pointer_size> CurrentPeerOffset() {
+    return ThreadOffsetFromTlsPtr<pointer_size>(
+        OFFSETOF_MEMBER(tls_ptr_sized_values, current_peer));
+  }
 
   template<PointerSize pointer_size>
   static constexpr ThreadOffset<pointer_size> CardTableOffset() {
@@ -2324,7 +2341,8 @@ class EXPORT Thread {
           method_trace_buffer_curr_entry(nullptr),
           thread_exit_flags(nullptr),
           last_no_thread_suspension_cause(nullptr),
-          last_no_transaction_checks_cause(nullptr) {
+          last_no_transaction_checks_cause(nullptr),
+          current_peer(nullptr) {
       std::fill(held_mutexes, held_mutexes + kLockLevelCount, nullptr);
     }
 
@@ -2508,6 +2526,10 @@ class EXPORT Thread {
     // If the thread is asserting that there should be no transaction checks,
     // what is causing that assertion (debug builds only).
     const char* last_no_transaction_checks_cause;
+
+    // Hold either the same reference as opeer or a VirtualThread instance. Mainly used for the
+    // java.lang.Thread.currentThread() API.
+    mirror::Object* current_peer;
   } tlsPtr_;
 
   // Small thread-local cache to be used from the interpreter.

@@ -64,7 +64,13 @@ static jobject Thread_currentCarrierThread(JNIEnv* env, jclass) {
 
 static jobject Thread_currentThread(JNIEnv* env, jclass) {
   ScopedFastNativeObjectAccess soa(env);
-  return soa.AddLocalReference<jobject>(soa.Self()->GetPeer());
+  return soa.AddLocalReference<jobject>(soa.Self()->GetCurrentPeer());
+}
+
+static void Thread_setCurrentThreadNative(JNIEnv* env, jclass, jobject java_thread) {
+  ScopedFastNativeObjectAccess soa(env);
+  ObjPtr<mirror::Object> new_current_thread = soa.Decode<mirror::Object>(java_thread);
+  soa.Self()->SetCurrentPeer(new_current_thread.Ptr());
 }
 
 static jboolean Thread_interrupted(JNIEnv* env, jclass) {
@@ -399,6 +405,7 @@ static void Thread_parkVirtualInternal(
 static JNINativeMethod gMethods[] = {
     FAST_NATIVE_METHOD(Thread, currentCarrierThread, "()Ljava/lang/Thread;"),
     FAST_NATIVE_METHOD(Thread, currentThread, "()Ljava/lang/Thread;"),
+    FAST_NATIVE_METHOD(Thread, setCurrentThreadNative, "(Ljava/lang/Thread;)V"),
     FAST_NATIVE_METHOD(Thread, interrupted, "()Z"),
     FAST_NATIVE_METHOD(Thread, isInterrupted, "()Z"),
     NATIVE_METHOD(Thread, nativeCreate, "(Ljava/lang/Thread;JZ)V"),
