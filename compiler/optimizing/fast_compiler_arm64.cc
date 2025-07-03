@@ -250,8 +250,11 @@ class FastCompilerARM64 : public FastCompiler {
   bool BuildNewInstance(
       uint32_t vreg, dex::TypeIndex string_index, uint32_t dex_pc, const Instruction* next);
   bool BuildCheckCast(uint32_t vreg, dex::TypeIndex type_index, uint32_t dex_pc);
-  bool BuildInstanceOf(
-      uint32_t vreg, uint32_t vreg_result, dex::TypeIndex type_index, uint32_t dex_pc);
+  bool BuildInstanceOf(uint32_t vreg,
+                       uint32_t vreg_result,
+                       dex::TypeIndex type_index,
+                       uint32_t dex_pc,
+                       const Instruction* next);
   bool BuildMove(
       uint32_t dest_reg, uint32_t src_reg, DataType::Type type, const Instruction* next);
   bool LoadMethod(Register reg, ArtMethod* method);
@@ -1146,7 +1149,8 @@ bool FastCompilerARM64::BuildCheckCast(uint32_t vreg, dex::TypeIndex type_index,
 bool FastCompilerARM64::BuildInstanceOf(uint32_t vreg,
                                         uint32_t vreg_result,
                                         dex::TypeIndex type_index,
-                                        uint32_t dex_pc) {
+                                        uint32_t dex_pc,
+                                        const Instruction* next) {
   if (!EnsureHasFrame()) {
     return false;
   }
@@ -1157,7 +1161,7 @@ bool FastCompilerARM64::BuildInstanceOf(uint32_t vreg,
   // to survive a read barrier.
   Register obj_cls = calling_convention.GetRegisterAt(0);
   Register obj = WRegisterFrom(GetExistingRegisterLocation(vreg, DataType::Type::kReference));
-  Location result = GetExistingRegisterLocation(vreg_result, DataType::Type::kInt32);
+  Location result = CreateNewRegisterLocation(vreg_result, DataType::Type::kInt32, next);
   if (HitUnimplemented()) {
     return false;
   }
@@ -2425,7 +2429,7 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
       uint8_t destination = instruction.VRegA_22c();
       uint8_t reference = instruction.VRegB_22c();
       dex::TypeIndex type_index(instruction.VRegC_22c());
-      return BuildInstanceOf(reference, destination, type_index, dex_pc);
+      return BuildInstanceOf(reference, destination, type_index, dex_pc, next);
     }
 
     case Instruction::CHECK_CAST: {
