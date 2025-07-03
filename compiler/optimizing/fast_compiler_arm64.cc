@@ -265,6 +265,14 @@ class FastCompilerARM64 : public FastCompiler {
              uint32_t dex_pc,
              const Instruction* next);
 
+  // Update registers and masks for the merge point.
+  void PrepareToBranch(uint32_t dex_pc) {
+    // We are going to branch, move all constants to registers to make the merge
+    // point use the same locations.
+    MoveConstantsToRegisters();
+    UpdateMasks(dex_pc);
+  }
+
   // Mark whether dex register `vreg_index` is an object.
   void UpdateRegisterMask(uint32_t vreg_index, bool is_object) {
     // Note that the register mask is only useful when there is a frame, so we
@@ -505,8 +513,7 @@ bool FastCompilerARM64::ProcessInstructions() {
     vixl::aarch64::Label* label = GetLabelOf(pair.DexPc());
     if (label->IsLinked()) {
       // Emulate a branch to this pc.
-      MoveConstantsToRegisters();
-      UpdateMasks(pair.DexPc());
+      PrepareToBranch(pair.DexPc());
       // Set new masks based on all incoming edges.
       is_non_null_mask_ = is_non_null_masks_[pair.DexPc()];
       object_register_mask_ = object_register_masks_[pair.DexPc()];
@@ -1280,8 +1287,7 @@ bool FastCompilerARM64::If_21_22t(const Instruction& instruction, uint32_t dex_p
   if (kCompareWithZero) {
     // We are going to branch, move all constants to registers to make the merge
     // point use the same locations.
-    MoveConstantsToRegisters();
-    UpdateMasks(dex_pc + target_offset);
+    PrepareToBranch(dex_pc + target_offset);
     if (location.IsConstant()) {
       DCHECK(location.GetConstant()->IsIntConstant());
       int32_t constant = location.GetConstant()->AsIntConstant()->GetValue();
@@ -1322,8 +1328,7 @@ bool FastCompilerARM64::If_21_22t(const Instruction& instruction, uint32_t dex_p
   Location other_location = vreg_locations_[instruction.VRegB_22t()];
   // We are going to branch, move all constants to registers to make the merge
   // point use the same locations.
-  MoveConstantsToRegisters();
-  UpdateMasks(dex_pc + target_offset);
+  PrepareToBranch(dex_pc + target_offset);
   if (location.IsConstant() && other_location.IsConstant()) {
     int32_t constant = location.GetConstant()->AsIntConstant()->GetValue();
     int32_t other_constant = other_location.GetConstant()->AsIntConstant()->GetValue();
@@ -1532,7 +1537,16 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
     case Instruction::GOTO:
     case Instruction::GOTO_16:
     case Instruction::GOTO_32: {
-      break;
+      int32_t target_offset = instruction.GetTargetOffset();
+      if (target_offset <= 0) {
+        // TODO: Support for negative branches requires two passes.
+        unimplemented_reason_ = "NegativeBranch";
+        return false;
+      }
+      PrepareToBranch(dex_pc + target_offset);
+      vixl::aarch64::Label* label = GetLabelOf(dex_pc + target_offset);
+      __ B(label);
+      return true;
     }
 
     case Instruction::RETURN:

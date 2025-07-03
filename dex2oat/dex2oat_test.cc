@@ -35,7 +35,7 @@
 #include "base/mutex-inl.h"
 #include "base/utils.h"
 #include "base/zip_archive.h"
-#include "com_android_art_flags.h"
+#include "com_android_art_rw_flags.h"
 #include "common_runtime_test.h"
 #include "dex/art_dex_file_loader.h"
 #include "dex/base64_test_util.h"
@@ -2144,7 +2144,7 @@ TEST_F(Dex2oatTest, AssumedValuesPropagateToOatHeader) {
                                                    &error_msg));
   ASSERT_TRUE(odex_file != nullptr);
   // The assumed SDK_INT arg should only propagate when the feature flag is enabled.
-  if (com::android::art::flags::compile_sdk_int_constant()) {
+  if (com::android::art::rw::flags::assume_value_sdk_int()) {
     ASSERT_TRUE(odex_file->GetOatHeader().HasAssumeValueSdkInt());
     EXPECT_EQ(odex_file->GetOatHeader().GetAssumeValueSdkInt(), 77);
   } else {
