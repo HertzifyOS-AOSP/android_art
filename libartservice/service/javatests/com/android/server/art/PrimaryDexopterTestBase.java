@@ -16,6 +16,10 @@
 
 package com.android.server.art;
 
+import static com.android.server.art.testing.TestDataHelper.newPackageState;
+import static com.android.server.art.testing.TestDataHelper.newSplit;
+import static com.android.server.art.testing.TestDataHelper.newUserState;
+
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.anyBoolean;
 import static org.mockito.Mockito.argThat;
@@ -81,8 +85,8 @@ public class PrimaryDexopterTestBase {
 
     @Before
     public void setUp() throws Exception {
-        mPkgUserStateNotInstalled = createPackageUserState(false /* installed */);
-        mPkgUserStateInstalled = createPackageUserState(true /* installed */);
+        mPkgUserStateNotInstalled = newUserState().setInstalled(false).build();
+        mPkgUserStateInstalled = newUserState().setInstalled(true).build();
         mPkgState = createPackageState();
         mPkg = mPkgState.getAndroidPackage();
         mCancellationSignal = new CancellationSignal();
@@ -135,67 +139,35 @@ public class PrimaryDexopterTestBase {
         lenient()
                 .when(mDexUseManager.getPrimaryDexLoaders(eq(PKG_NAME), any() /* dexPath */))
                 .thenReturn(loaders);
-        PackageState state = createPackageState(loadingPkgName, "armeabi-v7a");
+        PackageState state = newPackageState(loadingPkgName).setAbi("armeabi-v7a").build();
         lenient().when(mSnapshot.getPackageState(eq(loadingPkgName))).thenReturn(state);
     }
 
-    private AndroidPackage createPackage() {
-        // This package has the base APK and one split APK that has code.
-        AndroidPackage pkg = mock(AndroidPackage.class);
-        var baseSplit = mock(AndroidPackageSplit.class);
-        lenient().when(baseSplit.getPath()).thenReturn("/somewhere/app/foo/base.apk");
-        lenient().when(baseSplit.isHasCode()).thenReturn(true);
-        lenient().when(baseSplit.getClassLoaderName()).thenReturn(PathClassLoader.class.getName());
-
-        var split0 = mock(AndroidPackageSplit.class);
-        lenient().when(split0.getName()).thenReturn("split_0");
-        lenient().when(split0.getPath()).thenReturn("/somewhere/app/foo/split_0.apk");
-        lenient().when(split0.isHasCode()).thenReturn(true);
-
-        var split1 = mock(AndroidPackageSplit.class);
-        lenient().when(split1.getName()).thenReturn("split_1");
-        lenient().when(split1.getPath()).thenReturn("/somewhere/app/foo/split_1.apk");
-        lenient().when(split1.isHasCode()).thenReturn(false);
-
-        var splits = List.of(baseSplit, split0, split1);
-        lenient().when(pkg.getSplits()).thenReturn(splits);
-
-        lenient().when(pkg.isVmSafeMode()).thenReturn(false);
-        lenient().when(pkg.isDebuggable()).thenReturn(false);
-        lenient().when(pkg.getTargetSdkVersion()).thenReturn(123);
-        lenient().when(pkg.isSignedWithPlatformKey()).thenReturn(false);
-        lenient().when(pkg.isNonSdkApiRequested()).thenReturn(false);
-        lenient().when(pkg.getVersionName()).thenReturn(APP_VERSION_NAME);
-        lenient().when(pkg.getLongVersionCode()).thenReturn(APP_VERSION_CODE);
-        return pkg;
-    }
-
     private PackageState createPackageState() {
-        PackageState pkgState = createPackageState(PKG_NAME, "arm64-v8a");
-        lenient().when(pkgState.getSecondaryCpuAbi()).thenReturn("armeabi-v7a");
-        lenient().when(pkgState.getAppId()).thenReturn(UID);
-        lenient().when(pkgState.getSharedLibraryDependencies()).thenReturn(new ArrayList<>());
-        lenient().when(pkgState.getStateForUser(any())).thenReturn(mPkgUserStateNotInstalled);
-        AndroidPackage pkg = createPackage();
-        lenient().when(pkgState.getAndroidPackage()).thenReturn(pkg);
-        lenient()
-                .when(PackageStateModulesUtils.isLoadableInOtherProcesses(
-                        same(pkgState), anyBoolean()))
-                .thenReturn(false);
-        return pkgState;
-    }
-
-    private PackageState createPackageState(String packageName, String primaryAbi) {
-        PackageState pkgState = mock(PackageState.class);
-        lenient().when(pkgState.getPackageName()).thenReturn(packageName);
-        lenient().when(pkgState.getPrimaryCpuAbi()).thenReturn(primaryAbi);
-        return pkgState;
-    }
-
-    private PackageUserState createPackageUserState(boolean isInstalled) {
-        PackageUserState pkgUserState = mock(PackageUserState.class);
-        lenient().when(pkgUserState.isInstalled()).thenReturn(isInstalled);
-        return pkgUserState;
+        return newPackageState(PKG_NAME)
+                .setAbis("arm64-v8a", "armeabi-v7a")
+                .setAppId(UID)
+                .setUserStateForAny(mPkgUserStateNotInstalled)
+                .setLoadableInOtherProcesses(false)
+                .setTargetSdkVersion(123)
+                .setVersionName(APP_VERSION_NAME)
+                .setLongVersionCode(APP_VERSION_CODE)
+                .addSplit(newSplit()
+                                .setPath("/somewhere/app/foo/base.apk")
+                                .setHasCode(true)
+                                .setClassLoaderName(PathClassLoader.class.getName())
+                                .build())
+                .addSplit(newSplit()
+                                .setName("split_0")
+                                .setPath("/somewhere/app/foo/split_0.apk")
+                                .setHasCode(true)
+                                .build())
+                .addSplit(newSplit()
+                                .setName("split_1")
+                                .setPath("/somewhere/app/foo/split_1.apk")
+                                .setHasCode(false)
+                                .build())
+                .build();
     }
 
     protected GetDexoptNeededResult dexoptIsNotNeeded() {

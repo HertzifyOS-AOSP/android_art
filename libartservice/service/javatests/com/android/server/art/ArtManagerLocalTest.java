@@ -26,6 +26,9 @@ import static com.android.server.art.ProfilePath.PrimaryCurProfilePath;
 import static com.android.server.art.model.DexoptResult.DexContainerFileDexoptResult;
 import static com.android.server.art.model.DexoptResult.PackageDexoptResult;
 import static com.android.server.art.model.DexoptStatus.DexContainerFileDexoptStatus;
+import static com.android.server.art.testing.TestDataHelper.newPackageState;
+import static com.android.server.art.testing.TestDataHelper.newSplit;
+import static com.android.server.art.testing.TestDataHelper.newUserState;
 import static com.android.server.art.testing.TestingUtils.deepEq;
 import static com.android.server.art.testing.TestingUtils.inAnyOrder;
 import static com.android.server.art.testing.TestingUtils.inAnyOrderDeepEquals;
@@ -87,6 +90,7 @@ import com.android.server.art.model.DexoptStatus;
 import com.android.server.art.prereboot.PreRebootStatsReporter;
 import com.android.server.art.proto.DexMetadataConfig;
 import com.android.server.art.testing.StaticMockitoRule;
+import com.android.server.art.testing.TestDataHelper.PackageStateBuilder;
 import com.android.server.art.testing.TestingUtils;
 import com.android.server.pm.PackageManagerLocal;
 import com.android.server.pm.pkg.AndroidPackage;
@@ -288,7 +292,7 @@ public class ArtManagerLocalTest {
             // used and dexopted when calling {@link Utils#getUsedPrimaryDexAbis()}.
             String loadingPkgName1 = "com.example.foo.1";
             loaders.add(DexLoader.create(loadingPkgName1, false /* isolatedProcess */));
-            PackageState state1 = createPackageState(loadingPkgName1, "armeabi-v7a");
+            PackageState state1 = newPackageState(loadingPkgName1).setAbi("armeabi-v7a").build();
             lenient().when(mSnapshot.getPackageState(eq(loadingPkgName1))).thenReturn(state1);
         }
         lenient()
@@ -1832,85 +1836,50 @@ public class ArtManagerLocalTest {
                 .schedule(BackgroundDexoptJob.JobType.POST_UNATTENDED_REBOOT);
     }
 
-    private AndroidPackage createPackage(boolean multiSplit) {
-        AndroidPackage pkg = mock(AndroidPackage.class);
-
-        var baseSplit = mock(AndroidPackageSplit.class);
-        lenient().when(baseSplit.getPath()).thenReturn("/somewhere/app/foo/base.apk");
-        lenient().when(baseSplit.isHasCode()).thenReturn(true);
-
-        if (multiSplit) {
-            // split_0 has code while split_1 doesn't.
-            var split0 = mock(AndroidPackageSplit.class);
-            lenient().when(split0.getName()).thenReturn("split_0");
-            lenient().when(split0.getPath()).thenReturn("/somewhere/app/foo/split_0.apk");
-            lenient().when(split0.isHasCode()).thenReturn(true);
-            var split1 = mock(AndroidPackageSplit.class);
-            lenient().when(split1.getName()).thenReturn("split_1");
-            lenient().when(split1.getPath()).thenReturn("/somewhere/app/foo/split_1.apk");
-            lenient().when(split1.isHasCode()).thenReturn(false);
-
-            lenient().when(pkg.getSplits()).thenReturn(List.of(baseSplit, split0, split1));
-        } else {
-            lenient().when(pkg.getSplits()).thenReturn(List.of(baseSplit));
-        }
-
-        return pkg;
-    }
-
-    private PackageUserState createPackageUserState() {
-        PackageUserState pkgUserState = mock(PackageUserState.class);
-        lenient().when(pkgUserState.isInstalled()).thenReturn(true);
-        // All packages are by default pre-installed.
-        lenient().when(pkgUserState.getFirstInstallTimeMillis()).thenReturn(0l);
-        return pkgUserState;
-    }
-
-    private PackageState createPackageState(
-            String packageName, boolean isDexoptable, boolean multiSplit) {
-        PackageState pkgState = createPackageState(packageName, "arm64-v8a");
-
-        lenient().when(pkgState.getSecondaryCpuAbi()).thenReturn("armeabi-v7a");
-        lenient().when(pkgState.getAppId()).thenReturn(APP_ID);
-
-        AndroidPackage pkg = createPackage(multiSplit);
-        lenient().when(pkgState.getAndroidPackage()).thenReturn(pkg);
-
-        PackageUserState pkgUserState0 = createPackageUserState();
-        lenient().when(pkgState.getStateForUser(UserHandle.of(0))).thenReturn(pkgUserState0);
-        PackageUserState pkgUserState1 = createPackageUserState();
-        lenient().when(pkgState.getStateForUser(UserHandle.of(1))).thenReturn(pkgUserState1);
-
-        lenient().when(PackageStateModulesUtils.isDexoptable(pkgState)).thenReturn(isDexoptable);
-
-        return pkgState;
-    }
-
-    private PackageState createPackageState(String packageName, String primaryAbi) {
-        PackageState pkgState = mock(PackageState.class);
-        lenient().when(pkgState.getPackageName()).thenReturn(packageName);
-        lenient().when(pkgState.getPrimaryCpuAbi()).thenReturn(primaryAbi);
-        return pkgState;
+    private PackageStateBuilder newPackageStateWithDefaults(String packageName) {
+        return newPackageState(packageName)
+                .setAbis("arm64-v8a", "armeabi-v7a")
+                .setAppId(APP_ID)
+                .addSplit(newSplit().setPath("/somewhere/app/foo/base.apk").build())
+                .setUserState(0, newUserState().build())
+                .setUserState(1, newUserState().build());
     }
 
     private List<PackageState> createPackageStates() {
-        PackageState pkgState1 =
-                createPackageState(PKG_NAME_1, true /* isDexoptable */, true /* multiSplit */);
+        // split_0 has code while split_1 doesn't.
+        AndroidPackageSplit split0 = newSplit()
+                                             .setName("split_0")
+                                             .setPath("/somewhere/app/foo/split_0.apk")
+                                             .setHasCode(true)
+                                             .build();
+        AndroidPackageSplit split1 = newSplit()
+                                             .setName("split_1")
+                                             .setPath("/somewhere/app/foo/split_1.apk")
+                                             .setHasCode(false)
+                                             .build();
+
+        PackageState pkgState1 = newPackageStateWithDefaults(PKG_NAME_1)
+                                         .setDexoptable(true)
+                                         .addSplit(split0)
+                                         .addSplit(split1)
+                                         .build();
 
         PackageState pkgState2 =
-                createPackageState(PKG_NAME_2, true /* isDexoptable */, false /* multiSplit */);
+                newPackageStateWithDefaults(PKG_NAME_2).setDexoptable(true).build();
 
         // This should not be dexopted because it's hibernating. However, it should be included
         // when snapshotting boot image profile.
-        PackageState pkgHibernatingState = createPackageState(
-                PKG_NAME_HIBERNATING, true /* isDexoptable */, false /* multiSplit */);
+        PackageState pkgHibernatingState =
+                newPackageStateWithDefaults(PKG_NAME_HIBERNATING).setDexoptable(true).build();
         lenient()
                 .when(mAppHibernationManager.isHibernatingGlobally(PKG_NAME_HIBERNATING))
                 .thenReturn(true);
 
         // This should not be dexopted because it's not dexoptable.
-        PackageState nonDexoptablePkgState = createPackageState(
-                "com.example.non-dexoptable", false /* isDexoptable */, false /* multiSplit */);
+        PackageState nonDexoptablePkgState =
+                newPackageStateWithDefaults("com.example.non-dexoptable")
+                        .setDexoptable(false)
+                        .build();
 
         return List.of(pkgState1, pkgState2, pkgHibernatingState, nonDexoptablePkgState);
     }
