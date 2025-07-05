@@ -250,8 +250,13 @@ class FastCompilerARM64 : public FastCompiler {
   bool BuildNewInstance(
       uint32_t vreg, dex::TypeIndex string_index, uint32_t dex_pc, const Instruction* next);
   bool BuildCheckCast(uint32_t vreg, dex::TypeIndex type_index, uint32_t dex_pc);
-  bool BuildInstanceOf(
-      uint32_t vreg, uint32_t vreg_result, dex::TypeIndex type_index, uint32_t dex_pc);
+  bool BuildInstanceOf(uint32_t vreg,
+                       uint32_t vreg_result,
+                       dex::TypeIndex type_index,
+                       uint32_t dex_pc,
+                       const Instruction* next);
+  bool BuildMove(
+      uint32_t dest_reg, uint32_t src_reg, DataType::Type type, const Instruction* next);
   bool LoadMethod(Register reg, ArtMethod* method);
   void DoReadBarrierOn(Register reg, vixl::aarch64::Label* exit = nullptr, bool do_mr_check = true);
   bool CanGenerateCodeFor(ArtField* field, bool can_receiver_be_null)
@@ -1144,7 +1149,8 @@ bool FastCompilerARM64::BuildCheckCast(uint32_t vreg, dex::TypeIndex type_index,
 bool FastCompilerARM64::BuildInstanceOf(uint32_t vreg,
                                         uint32_t vreg_result,
                                         dex::TypeIndex type_index,
-                                        uint32_t dex_pc) {
+                                        uint32_t dex_pc,
+                                        const Instruction* next) {
   if (!EnsureHasFrame()) {
     return false;
   }
@@ -1155,7 +1161,7 @@ bool FastCompilerARM64::BuildInstanceOf(uint32_t vreg,
   // to survive a read barrier.
   Register obj_cls = calling_convention.GetRegisterAt(0);
   Register obj = WRegisterFrom(GetExistingRegisterLocation(vreg, DataType::Type::kReference));
-  Location result = GetExistingRegisterLocation(vreg_result, DataType::Type::kInt32);
+  Location result = CreateNewRegisterLocation(vreg_result, DataType::Type::kInt32, next);
   if (HitUnimplemented()) {
     return false;
   }
@@ -1446,6 +1452,23 @@ bool FastCompilerARM64::DoGet(const MemOperand& mem,
   return true;
 }
 
+bool FastCompilerARM64::BuildMove(uint32_t dest_reg,
+                                  uint32_t src_reg,
+                                  DataType::Type type,
+                                  const Instruction* next) {
+  UpdateLocal(dest_reg, /* is_object= */ type == DataType::Type::kReference, CanBeNull(src_reg));
+
+  // Translate a move into an actual move instruction. We could just update
+  // `vreg_locations_`, but that would require tracking aliases, which may be
+  // costly in compile time.
+  if (!MoveLocation(CreateNewRegisterLocation(dest_reg, type, next),
+                    vreg_locations_[src_reg],
+                    type)) {
+    return false;
+  }
+  return true;
+}
+
 bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
                                               uint32_t dex_pc,
                                               const Instruction* next) {
@@ -1493,10 +1516,17 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
       break;
     }
 
-    case Instruction::MOVE:
-    case Instruction::MOVE_FROM16:
+    case Instruction::MOVE: {
+      return BuildMove(
+          instruction.VRegA_12x(), instruction.VRegB_12x(), DataType::Type::kInt32, next);
+    }
+    case Instruction::MOVE_FROM16: {
+      return BuildMove(
+          instruction.VRegA_22x(), instruction.VRegB_22x(), DataType::Type::kInt32, next);
+    }
     case Instruction::MOVE_16: {
-      break;
+      return BuildMove(
+          instruction.VRegA_32x(), instruction.VRegB_32x(), DataType::Type::kInt32, next);
     }
 
     case Instruction::MOVE_WIDE:
@@ -1505,10 +1535,17 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
       break;
     }
 
-    case Instruction::MOVE_OBJECT:
-    case Instruction::MOVE_OBJECT_16:
+    case Instruction::MOVE_OBJECT: {
+      return BuildMove(
+          instruction.VRegA_12x(), instruction.VRegB_12x(), DataType::Type::kReference, next);
+    }
+    case Instruction::MOVE_OBJECT_16: {
+      return BuildMove(
+          instruction.VRegA_22x(), instruction.VRegB_22x(), DataType::Type::kReference, next);
+    }
     case Instruction::MOVE_OBJECT_FROM16: {
-      break;
+      return BuildMove(
+          instruction.VRegA_32x(), instruction.VRegB_32x(), DataType::Type::kReference, next);
     }
 
     case Instruction::RETURN_VOID: {
@@ -2392,7 +2429,7 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
       uint8_t destination = instruction.VRegA_22c();
       uint8_t reference = instruction.VRegB_22c();
       dex::TypeIndex type_index(instruction.VRegC_22c());
-      return BuildInstanceOf(reference, destination, type_index, dex_pc);
+      return BuildInstanceOf(reference, destination, type_index, dex_pc, next);
     }
 
     case Instruction::CHECK_CAST: {

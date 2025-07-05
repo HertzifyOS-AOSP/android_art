@@ -1742,7 +1742,9 @@ public class ArtManagerLocalTest {
     @Test
     @RequiresFlagsEnabled(FLAG_POST_UR_JOB)
     public void testPostUrJobNotBootAfterOtaOrMainline() throws Exception {
-        when(SystemProperties.get(eq("sys.boot.reason"))).thenReturn("reboot,unattended,ota");
+        lenient()
+                .when(SystemProperties.get(eq("sys.boot.reason")))
+                .thenReturn("reboot,unattended,ota");
         mArtManagerLocal.systemReady();
 
         simulateBroadcast(Intent.ACTION_BOOT_COMPLETED);
