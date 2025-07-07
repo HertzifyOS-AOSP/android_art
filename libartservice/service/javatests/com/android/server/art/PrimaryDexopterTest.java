@@ -16,8 +16,11 @@
 
 package com.android.server.art;
 
+import static android.platform.test.flag.junit.DeviceFlagsValueProvider.createCheckFlagsRule;
+
 import static com.android.server.art.OutputArtifacts.PermissionSettings;
 import static com.android.server.art.model.DexoptResult.DexContainerFileDexoptResult;
+import static com.android.server.art.testing.TestingUtils.FLAGS_PREFIX;
 import static com.android.server.art.testing.TestingUtils.deepEq;
 
 import static com.google.common.truth.Truth.assertThat;
@@ -45,6 +48,7 @@ import android.os.UserHandle;
 import androidx.test.filters.SmallTest;
 import androidx.test.runner.AndroidJUnit4;
 
+import com.android.art.flags.Flags;
 import com.android.server.art.model.ArtFlags;
 import com.android.server.art.model.DexoptParams;
 import com.android.server.art.model.DexoptResult;
@@ -59,6 +63,7 @@ import org.mockito.InOrder;
 import java.nio.file.NoSuchFileException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
@@ -229,6 +234,10 @@ public class PrimaryDexopterTest extends PrimaryDexopterTestBase {
 
     @Test
     public void testDexoptUsesRefProfile() throws Exception {
+        // No secondary ISA is used by other apps.
+        lenient()
+                .when(mDexUseManager.getPrimaryDexLoaders(eq(PKG_NAME), any() /* dexPath */))
+                .thenReturn(Set.of());
         makeProfileUsable(mRefProfile);
         when(mArtd.getProfileVisibility(deepEq(mRefProfile)))
                 .thenReturn(FileVisibility.NOT_OTHER_READABLE);
@@ -246,20 +255,21 @@ public class PrimaryDexopterTest extends PrimaryDexopterTestBase {
         checkDexoptWithProfile(
                 verify(mArtd), mDexPath, "arm64", mRefProfile, false /* isOtherReadable */);
 
-        verify(mArtd).getDexoptNeeded(
-                eq(mDexPath), eq("arm"), any(), eq("speed-profile"), eq(mDefaultDexoptTrigger));
-        checkDexoptWithProfile(
-                verify(mArtd), mDexPath, "arm", mRefProfile, false /* isOtherReadable */);
-
         // There is no profile for split 0, so it should fall back to "verify".
         verify(mArtd).getDexoptNeeded(
                 eq(mSplit0DexPath), eq("arm64"), any(), eq("verify"), eq(mDefaultDexoptTrigger));
         checkDexoptWithNoProfile(verify(mArtd), mSplit0DexPath, "arm64", "verify");
 
-        verify(mArtd).getDexoptNeeded(
-                eq(mSplit0DexPath), eq("arm"), any(), eq("verify"), eq(mDefaultDexoptTrigger));
-        checkDexoptWithNoProfile(verify(mArtd), mSplit0DexPath, "arm", "verify");
+        if (!Flags.dexoptSecondaryIsaOnlyWhenNeeded()) {
+            verify(mArtd).getDexoptNeeded(
+                    eq(mDexPath), eq("arm"), any(), eq("speed-profile"), eq(mDefaultDexoptTrigger));
+            checkDexoptWithProfile(
+                    verify(mArtd), mDexPath, "arm", mRefProfile, false /* isOtherReadable */);
 
+            verify(mArtd).getDexoptNeeded(
+                    eq(mSplit0DexPath), eq("arm"), any(), eq("verify"), eq(mDefaultDexoptTrigger));
+            checkDexoptWithNoProfile(verify(mArtd), mSplit0DexPath, "arm", "verify");
+        }
         verifyProfileNotUsed(mPrebuiltProfile);
         verifyProfileNotUsed(mDmProfile);
         verifyEmbeddedProfileNotUsed(mDexPath);

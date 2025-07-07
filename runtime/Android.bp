@@ -426,6 +426,7 @@ cc_defaults {
         "trace_profile.cc",
         "var_handles.cc",
         "vdex_file.cc",
+        "virtual_thread_common.cc",
         "verifier/class_verifier.cc",
         "verifier/instruction_flags.cc",
         "verifier/method_verifier.cc",

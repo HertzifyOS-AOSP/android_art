@@ -20,6 +20,9 @@ import static com.android.server.art.ArtManagerLocal.DexoptDoneCallback;
 import static com.android.server.art.model.DexoptResult.DexContainerFileDexoptResult;
 import static com.android.server.art.model.DexoptResult.DexoptResultStatus;
 import static com.android.server.art.model.DexoptResult.PackageDexoptResult;
+import static com.android.server.art.testing.TestDataHelper.newLibrary;
+import static com.android.server.art.testing.TestDataHelper.newPackageState;
+import static com.android.server.art.testing.TestDataHelper.newSplit;
 
 import static com.google.common.truth.Truth.assertThat;
 
@@ -48,6 +51,7 @@ import com.android.server.art.model.DexoptParams;
 import com.android.server.art.model.DexoptResult;
 import com.android.server.art.model.OperationProgress;
 import com.android.server.art.testing.StaticMockitoRule;
+import com.android.server.art.testing.TestDataHelper.PackageStateBuilder;
 import com.android.server.pm.PackageManagerLocal;
 import com.android.server.pm.pkg.AndroidPackage;
 import com.android.server.pm.pkg.AndroidPackageSplit;
@@ -288,7 +292,7 @@ public class DexoptHelperTest {
                           .build();
 
         PackageState sdkPackageState =
-                createPackageState(PKG_NAME_SDK, -1 /* appId */, List.of(), false);
+                newPackageStateWithDefaults(PKG_NAME_SDK).setAppId(-1).build();
         lenient().when(mSnapshot.getPackageState(PKG_NAME_SDK)).thenReturn(sdkPackageState);
         mRequestedPackages = List.of(PKG_NAME_SDK);
 
@@ -712,48 +716,11 @@ public class DexoptHelperTest {
                                 PKG_NAME_LIBBAZ, fileResults, null /* packageLevelStatus */))));
     }
 
-    private AndroidPackage createPackage(boolean multiSplit) {
-        AndroidPackage pkg = mock(AndroidPackage.class);
-
-        var baseSplit = mock(AndroidPackageSplit.class);
-
-        if (multiSplit) {
-            var split0 = mock(AndroidPackageSplit.class);
-            lenient().when(split0.getName()).thenReturn("split_0");
-
-            lenient().when(pkg.getSplits()).thenReturn(List.of(baseSplit, split0));
-        } else {
-            lenient().when(pkg.getSplits()).thenReturn(List.of(baseSplit));
-        }
-
-        return pkg;
-    }
-
-    private PackageState createPackageState(
-            String packageName, List<SharedLibrary> deps, boolean multiSplit) {
-        return createPackageState(packageName, 12345, deps, multiSplit);
-    }
-
-    private PackageState createPackageState(
-            String packageName, int appId, List<SharedLibrary> deps, boolean multiSplit) {
-        PackageState pkgState = mock(PackageState.class);
-        lenient().when(pkgState.getPackageName()).thenReturn(packageName);
-        lenient().when(pkgState.getAppId()).thenReturn(appId);
-        lenient().when(pkgState.getSharedLibraryDependencies()).thenReturn(deps);
-        AndroidPackage pkg = createPackage(multiSplit);
-        lenient().when(pkgState.getAndroidPackage()).thenReturn(pkg);
-        lenient().when(PackageStateModulesUtils.isDexoptable(pkgState)).thenReturn(true);
-        return pkgState;
-    }
-
-    private SharedLibrary createLibrary(
-            String libraryName, String packageName, List<SharedLibrary> deps) {
-        SharedLibrary library = mock(SharedLibrary.class);
-        lenient().when(library.getName()).thenReturn(libraryName);
-        lenient().when(library.getPackageName()).thenReturn(packageName);
-        lenient().when(library.getDependencies()).thenReturn(deps);
-        lenient().when(library.isNative()).thenReturn(false);
-        return library;
+    private PackageStateBuilder newPackageStateWithDefaults(String packageName) {
+        return newPackageState(packageName)
+                .setAppId(12345)
+                .addSplit(newSplit().build())
+                .setDexoptable(true);
     }
 
     private void preparePackagesAndLibraries() {
@@ -770,46 +737,62 @@ public class DexoptHelperTest {
         mRequestedPackages = List.of(PKG_NAME_FOO, PKG_NAME_BAR, PKG_NAME_LIBBAZ);
 
         // The native library is not dexoptable.
-        SharedLibrary libNative = createLibrary("libnative", "com.example.libnative", List.of());
-        lenient().when(libNative.isNative()).thenReturn(true);
+        SharedLibrary libNative = newLibrary()
+                                          .setName("libnative")
+                                          .setPackageName("com.example.libnative")
+                                          .setNative(true)
+                                          .build();
 
-        SharedLibrary libbaz = createLibrary("libbaz", PKG_NAME_LIBBAZ, List.of());
-        SharedLibrary lib4 = createLibrary("lib4", PKG_NAME_LIB4, List.of());
-        SharedLibrary lib3 = createLibrary("lib3", PKG_NAME_LIB3, List.of());
-        SharedLibrary lib2 = createLibrary("lib2", PKG_NAME_LIB2, List.of());
-        SharedLibrary lib1a = createLibrary("lib1a", PKG_NAME_LIB1, List.of(libbaz, lib2));
-        SharedLibrary lib1b = createLibrary("lib1b", PKG_NAME_LIB1, List.of(lib2, libNative, lib4));
-        SharedLibrary lib1c = createLibrary("lib1c", PKG_NAME_LIB1, List.of(lib3));
+        SharedLibrary libbaz =
+                newLibrary().setName("libbaz").setPackageName(PKG_NAME_LIBBAZ).build();
+        SharedLibrary lib4 = newLibrary().setName("lib4").setPackageName(PKG_NAME_LIB4).build();
+        SharedLibrary lib3 = newLibrary().setName("lib3").setPackageName(PKG_NAME_LIB3).build();
+        SharedLibrary lib2 = newLibrary().setName("lib2").setPackageName(PKG_NAME_LIB2).build();
+        SharedLibrary lib1a = newLibrary()
+                                      .setName("lib1a")
+                                      .setPackageName(PKG_NAME_LIB1)
+                                      .addDeps(libbaz, lib2)
+                                      .build();
+        SharedLibrary lib1b = newLibrary()
+                                      .setName("lib1b")
+                                      .setPackageName(PKG_NAME_LIB1)
+                                      .addDeps(lib2, libNative, lib4)
+                                      .build();
+        SharedLibrary lib1c =
+                newLibrary().setName("lib1c").setPackageName(PKG_NAME_LIB1).addDeps(lib3).build();
 
-        mPkgStateFoo =
-                createPackageState(PKG_NAME_FOO, List.of(lib1a, libNative), true /* multiSplit */);
+        mPkgStateFoo = newPackageStateWithDefaults(PKG_NAME_FOO)
+                               .addSharedLibraryDeps(lib1a, libNative)
+                               .addSplit(newSplit().setName("split_0").build())
+                               .build();
         mPkgFoo = mPkgStateFoo.getAndroidPackage();
         lenient().when(mSnapshot.getPackageState(PKG_NAME_FOO)).thenReturn(mPkgStateFoo);
 
-        mPkgStateBar = createPackageState(PKG_NAME_BAR, List.of(lib1b), false /* multiSplit */);
+        mPkgStateBar =
+                newPackageStateWithDefaults(PKG_NAME_BAR).addSharedLibraryDeps(lib1b).build();
         mPkgBar = mPkgStateBar.getAndroidPackage();
         lenient().when(mSnapshot.getPackageState(PKG_NAME_BAR)).thenReturn(mPkgStateBar);
 
-        mPkgStateLib1 = createPackageState(
-                PKG_NAME_LIB1, List.of(libbaz, lib2, lib3, lib4), false /* multiSplit */);
+        mPkgStateLib1 = newPackageStateWithDefaults(PKG_NAME_LIB1)
+                                .addSharedLibraryDeps(libbaz, lib2, lib3, lib4)
+                                .build();
         mPkgLib1 = mPkgStateLib1.getAndroidPackage();
         lenient().when(mSnapshot.getPackageState(PKG_NAME_LIB1)).thenReturn(mPkgStateLib1);
 
-        mPkgStateLib2 = createPackageState(PKG_NAME_LIB2, List.of(), false /* multiSplit */);
+        mPkgStateLib2 = newPackageStateWithDefaults(PKG_NAME_LIB2).build();
         mPkgLib2 = mPkgStateLib2.getAndroidPackage();
         lenient().when(mSnapshot.getPackageState(PKG_NAME_LIB2)).thenReturn(mPkgStateLib2);
 
         // This should not be considered as a transitive dependency of any requested package, even
         // though it is a dependency of package "lib1".
-        PackageState pkgStateLib3 =
-                createPackageState(PKG_NAME_LIB3, List.of(), false /* multiSplit */);
+        PackageState pkgStateLib3 = newPackageStateWithDefaults(PKG_NAME_LIB3).build();
         lenient().when(mSnapshot.getPackageState(PKG_NAME_LIB3)).thenReturn(pkgStateLib3);
 
-        mPkgStateLib4 = createPackageState(PKG_NAME_LIB4, List.of(), false /* multiSplit */);
+        mPkgStateLib4 = newPackageStateWithDefaults(PKG_NAME_LIB4).build();
         mPkgLib4 = mPkgStateLib4.getAndroidPackage();
         lenient().when(mSnapshot.getPackageState(PKG_NAME_LIB4)).thenReturn(mPkgStateLib4);
 
-        mPkgStateLibbaz = createPackageState(PKG_NAME_LIBBAZ, List.of(), false /* multiSplit */);
+        mPkgStateLibbaz = newPackageStateWithDefaults(PKG_NAME_LIBBAZ).build();
         mPkgLibbaz = mPkgStateLibbaz.getAndroidPackage();
         lenient().when(mSnapshot.getPackageState(PKG_NAME_LIBBAZ)).thenReturn(mPkgStateLibbaz);
     }
