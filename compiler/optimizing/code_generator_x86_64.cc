@@ -8605,14 +8605,22 @@ bool InstructionCodeGeneratorX86_64::CpuHasAvx2FeatureFlag() {
   return codegen_->GetInstructionSetFeatures().HasAVX2();
 }
 
-void LocationsBuilderX86_64::VisitBitwiseNegatedRight(
-    [[maybe_unused]] HBitwiseNegatedRight* instruction) {
-  LOG(FATAL) << "Unimplemented";
+void LocationsBuilderX86_64::VisitBitwiseNegatedRight(HBitwiseNegatedRight* instruction) {
+  DCHECK(codegen_->GetInstructionSetFeatures().HasAVX2());
+  DCHECK(DataType::IsIntegralType(instruction->GetType())) << instruction->GetType();
+  LocationSummary* locations = LocationSummary::CreateNoCall(allocator_, instruction);
+  locations->SetInAt(0, Location::RequiresRegister());
+  locations->SetInAt(1, Location::RequiresRegister());
+  locations->SetOut(Location::RequiresRegister(), Location::kNoOutputOverlap);
 }
 
-void InstructionCodeGeneratorX86_64::VisitBitwiseNegatedRight(
-    [[maybe_unused]] HBitwiseNegatedRight* instruction) {
-  LOG(FATAL) << "Unimplemented";
+void InstructionCodeGeneratorX86_64::VisitBitwiseNegatedRight(HBitwiseNegatedRight* instruction) {
+  LocationSummary* locations = instruction->GetLocations();
+  Location first = locations->InAt(0);
+  Location second = locations->InAt(1);
+  Location dest = locations->Out();
+  __ andn(dest.AsRegister<CpuRegister>(), second.AsRegister<CpuRegister>(),
+          first.AsRegister<CpuRegister>());
 }
 
 #undef __
