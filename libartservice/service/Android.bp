@@ -117,17 +117,6 @@ java_defaults {
     ],
 }
 
-// Used by tests to allow tests to mock the right classes.
-java_library {
-    name: "service-art-pre-jarjar",
-    defaults: ["service-art-defaults"],
-    installable: false,
-    visibility: [
-        "//visibility:override",
-        "//visibility:private",
-    ],
-}
-
 // Provides the API and implementation of the ART Service class that will be
 // loaded by the System Server.
 java_sdk_library {
@@ -241,9 +230,10 @@ art_cc_test {
     test_config_template: ":art-gtests-target-standalone-non-multilib-template",
 }
 
-android_test {
-    name: "ArtServiceTests",
-
+// Used by tests to allow tests to jarjar flags.
+java_library {
+    name: "service-art-tests",
+    defaults: ["service-art-defaults"],
     // Include all test java files.
     srcs: [
         "javatests/**/*.java",
@@ -264,7 +254,20 @@ android_test {
         // We need ExtendedMockito to mock static methods.
         "mockito-target-extended-minus-junit4",
         "modules-utils-package-state",
-        "service-art-pre-jarjar",
+    ],
+    jarjar_rules: "test-jarjar-rules.txt",
+    installable: false,
+    visibility: [
+        "//visibility:override",
+        "//visibility:private",
+    ],
+}
+
+android_test {
+    name: "ArtServiceTests",
+
+    static_libs: [
+        "service-art-tests",
         // Statically link against system server to allow us to mock system
         // server APIs. This won't work on master-art, but it's fine because we
         // don't run this test on master-art.
@@ -277,7 +280,6 @@ android_test {
         "libstaticjvmtiagent",
     ],
 
-    jarjar_rules: "test-jarjar-rules.txt",
     compile_multilib: "first",
 
     sdk_version: "system_server_current",

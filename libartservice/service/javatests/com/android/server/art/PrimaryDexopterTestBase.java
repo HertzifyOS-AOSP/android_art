@@ -31,6 +31,7 @@ import android.os.UserManager;
 import android.os.storage.StorageManager;
 
 import com.android.modules.utils.pm.PackageStateModulesUtils;
+import com.android.server.art.DexUseManagerLocal.DexLoader;
 import com.android.server.art.model.Config;
 import com.android.server.art.testing.StaticMockitoRule;
 import com.android.server.pm.PackageManagerLocal.FilteredSnapshot;
@@ -47,6 +48,7 @@ import org.mockito.Mock;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ThreadPoolExecutor;
 
 public class PrimaryDexopterTestBase {
@@ -124,6 +126,17 @@ public class PrimaryDexopterTestBase {
         lenient().when(mDexUseManager.isPrimaryDexUsedByOtherApps(any(), any())).thenReturn(false);
 
         lenient().when(mStorageManager.getAllocatableBytes(any())).thenReturn(1l);
+
+        // Set up the primary dex loaders to make sure that the secondary ISA is
+        // used and dexopted when calling {@link Utils#getUsedPrimaryDexAbis()}.
+        String loadingPkgName = "com.example.foo.1";
+        Set<DexLoader> loaders =
+                Set.of(DexLoader.create(loadingPkgName, true /* isolatedProcess */));
+        lenient()
+                .when(mDexUseManager.getPrimaryDexLoaders(eq(PKG_NAME), any() /* dexPath */))
+                .thenReturn(loaders);
+        PackageState state = createPackageState(loadingPkgName, "armeabi-v7a");
+        lenient().when(mSnapshot.getPackageState(eq(loadingPkgName))).thenReturn(state);
     }
 
     private AndroidPackage createPackage() {
@@ -158,9 +171,7 @@ public class PrimaryDexopterTestBase {
     }
 
     private PackageState createPackageState() {
-        PackageState pkgState = mock(PackageState.class);
-        lenient().when(pkgState.getPackageName()).thenReturn(PKG_NAME);
-        lenient().when(pkgState.getPrimaryCpuAbi()).thenReturn("arm64-v8a");
+        PackageState pkgState = createPackageState(PKG_NAME, "arm64-v8a");
         lenient().when(pkgState.getSecondaryCpuAbi()).thenReturn("armeabi-v7a");
         lenient().when(pkgState.getAppId()).thenReturn(UID);
         lenient().when(pkgState.getSharedLibraryDependencies()).thenReturn(new ArrayList<>());
@@ -171,6 +182,13 @@ public class PrimaryDexopterTestBase {
                 .when(PackageStateModulesUtils.isLoadableInOtherProcesses(
                         same(pkgState), anyBoolean()))
                 .thenReturn(false);
+        return pkgState;
+    }
+
+    private PackageState createPackageState(String packageName, String primaryAbi) {
+        PackageState pkgState = mock(PackageState.class);
+        lenient().when(pkgState.getPackageName()).thenReturn(packageName);
+        lenient().when(pkgState.getPrimaryCpuAbi()).thenReturn(primaryAbi);
         return pkgState;
     }
 

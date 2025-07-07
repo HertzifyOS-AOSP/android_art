@@ -73,7 +73,9 @@ import android.system.OsConstants;
 
 import androidx.test.filters.SmallTest;
 
+import com.android.art.flags.Flags;
 import com.android.modules.utils.pm.PackageStateModulesUtils;
+import com.android.server.art.DexUseManagerLocal.DexLoader;
 import com.android.server.art.model.ArtFlags;
 import com.android.server.art.model.ArtManagedFileStats;
 import com.android.server.art.model.BatchDexoptParams;
@@ -110,6 +112,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -168,12 +171,14 @@ public class ArtManagerLocalTest {
 
     // True if the artifacts should be in dalvik-cache.
     @Parameter(0) public boolean mIsInDalvikCache;
+    @Parameter(1) public boolean mIsSecondaryAbiUsedByOtherApps;
 
     private ArtManagerLocal mArtManagerLocal;
 
-    @Parameters(name = "mIsInDalvikCache={0}")
+    @Parameters(name = "mIsInDalvikCache={0}, mIsSecondaryAbiUsedByOtherApps={1}")
     public static Iterable<Object[]> data() {
-        return List.of(new Object[] {true}, new Object[] {false});
+        // mIsInDalvikCache is independent of mIsSecondaryAbiUsedByOtherApps.
+        return List.of(new Object[] {true, true}, new Object[] {false, false});
     }
 
     @Before
@@ -275,6 +280,20 @@ public class ArtManagerLocalTest {
                 .when(mDexUseManager)
                 .getCheckedSecondaryDexInfo(
                         eq(PKG_NAME_1), eq(true) /* excludeObsoleteDexesAndLoaders */);
+
+        // Set up the primary dex loaders.
+        Set<DexLoader> loaders = new HashSet<>();
+        if (mIsSecondaryAbiUsedByOtherApps) {
+            // Set up the primary dex loaders to make sure that the secondary ISA is
+            // used and dexopted when calling {@link Utils#getUsedPrimaryDexAbis()}.
+            String loadingPkgName1 = "com.example.foo.1";
+            loaders.add(DexLoader.create(loadingPkgName1, false /* isolatedProcess */));
+            PackageState state1 = createPackageState(loadingPkgName1, "armeabi-v7a");
+            lenient().when(mSnapshot.getPackageState(eq(loadingPkgName1))).thenReturn(state1);
+        }
+        lenient()
+                .when(mDexUseManager.getPrimaryDexLoaders(eq(PKG_NAME_1), any() /* dexPath */))
+                .thenReturn(loaders);
 
         simulateStorageNotLow();
 
@@ -451,21 +470,11 @@ public class ArtManagerLocalTest {
                          false /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus("/somewhere/app/foo/base.apk", "arm64", "PCL[]");
-        doReturn(createGetDexoptStatusResult("speed-profile", "compilation-reason-1",
-                         "location-debug-string-1", ArtifactsLocation.NEXT_TO_DEX,
-                         false /* isBackedByVdexOnly */))
-                .when(mArtd)
-                .getDexoptStatus("/somewhere/app/foo/base.apk", "arm", "PCL[]");
         doReturn(createGetDexoptStatusResult("verify", "compilation-reason-2",
                          "location-debug-string-2", ArtifactsLocation.NEXT_TO_DEX,
                          false /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus("/somewhere/app/foo/split_0.apk", "arm64", "PCL[base.apk]");
-        doReturn(createGetDexoptStatusResult("extract", "compilation-reason-3",
-                         "location-debug-string-3", ArtifactsLocation.NEXT_TO_DEX,
-                         false /* isBackedByVdexOnly */))
-                .when(mArtd)
-                .getDexoptStatus("/somewhere/app/foo/split_0.apk", "arm", "PCL[base.apk]");
         doReturn(createGetDexoptStatusResult("run-from-apk", "unknown", "unknown",
                          ArtifactsLocation.NEXT_TO_DEX, false /* isBackedByVdexOnly */))
                 .when(mArtd)
@@ -475,29 +484,50 @@ public class ArtManagerLocalTest {
                 .when(mArtd)
                 .getDexoptStatus("/data/user/0/foo/not_found.apk", "arm64", "CLC");
 
-        DexoptStatus result = mArtManagerLocal.getDexoptStatus(mSnapshot, PKG_NAME_1);
-
-        assertThat(result.getDexContainerFileDexoptStatuses())
-                .comparingElementsUsing(TestingUtils.<DexContainerFileDexoptStatus>deepEquality())
-                .containsExactly(
-                        DexContainerFileDexoptStatus.create("/somewhere/app/foo/base.apk",
+        // If the secondary ABI is used by other apps, we will return the secondary ABI's dexopt
+        // status in addition to the primary ABI's dexopt status.
+        List<DexContainerFileDexoptStatus> expectedDexContainerFileDexoptStatuses =
+                new ArrayList<>();
+        expectedDexContainerFileDexoptStatuses.addAll(
+                List.of(DexContainerFileDexoptStatus.create("/somewhere/app/foo/base.apk",
                                 true /* isPrimaryDex */, true /* isPrimaryAbi */, "arm64-v8a",
                                 "speed", "compilation-reason-0", "location-debug-string-0"),
-                        DexContainerFileDexoptStatus.create("/somewhere/app/foo/base.apk",
-                                true /* isPrimaryDex */, false /* isPrimaryAbi */, "armeabi-v7a",
-                                "speed-profile", "compilation-reason-1", "location-debug-string-1"),
                         DexContainerFileDexoptStatus.create("/somewhere/app/foo/split_0.apk",
                                 true /* isPrimaryDex */, true /* isPrimaryAbi */, "arm64-v8a",
                                 "verify", "compilation-reason-2", "location-debug-string-2"),
-                        DexContainerFileDexoptStatus.create("/somewhere/app/foo/split_0.apk",
-                                true /* isPrimaryDex */, false /* isPrimaryAbi */, "armeabi-v7a",
-                                "extract", "compilation-reason-3", "location-debug-string-3"),
                         DexContainerFileDexoptStatus.create("/data/user/0/foo/1.apk",
                                 false /* isPrimaryDex */, true /* isPrimaryAbi */, "arm64-v8a",
                                 "run-from-apk", "unknown", "unknown"),
                         DexContainerFileDexoptStatus.create("/data/user/0/foo/not_found.apk",
                                 false /* isPrimaryDex */, true /* isPrimaryAbi */, "arm64-v8a",
-                                "unknown", "unknown", "error"));
+                                "unknown", "unknown", "error")));
+
+        if (mIsSecondaryAbiUsedByOtherApps || !Flags.dexoptSecondaryIsaOnlyWhenNeeded()) {
+            doReturn(createGetDexoptStatusResult("speed-profile", "compilation-reason-1",
+                             "location-debug-string-1", ArtifactsLocation.NEXT_TO_DEX,
+                             false /* isBackedByVdexOnly */))
+                    .when(mArtd)
+                    .getDexoptStatus("/somewhere/app/foo/base.apk", "arm", "PCL[]");
+            doReturn(createGetDexoptStatusResult("extract", "compilation-reason-3",
+                             "location-debug-string-3", ArtifactsLocation.NEXT_TO_DEX,
+                             false /* isBackedByVdexOnly */))
+                    .when(mArtd)
+                    .getDexoptStatus("/somewhere/app/foo/split_0.apk", "arm", "PCL[base.apk]");
+            expectedDexContainerFileDexoptStatuses.addAll(List.of(
+                    DexContainerFileDexoptStatus.create("/somewhere/app/foo/base.apk",
+                            true /* isPrimaryDex */, false /* isPrimaryAbi */, "armeabi-v7a",
+                            "speed-profile", "compilation-reason-1", "location-debug-string-1"),
+                    DexContainerFileDexoptStatus.create("/somewhere/app/foo/split_0.apk",
+                            true /* isPrimaryDex */, false /* isPrimaryAbi */, "armeabi-v7a",
+                            "extract", "compilation-reason-3", "location-debug-string-3")));
+        }
+
+        DexoptStatus result = mArtManagerLocal.getDexoptStatus(mSnapshot, PKG_NAME_1);
+
+        assertThat(result.getDexContainerFileDexoptStatuses())
+                .comparingElementsUsing(TestingUtils.<DexContainerFileDexoptStatus>deepEquality())
+                .containsExactly(expectedDexContainerFileDexoptStatuses.toArray(
+                        DexContainerFileDexoptStatus[] ::new));
     }
 
     @Test(expected = IllegalArgumentException.class)
@@ -522,7 +552,11 @@ public class ArtManagerLocalTest {
         DexoptStatus result = mArtManagerLocal.getDexoptStatus(mSnapshot, PKG_NAME_1);
 
         List<DexContainerFileDexoptStatus> statuses = result.getDexContainerFileDexoptStatuses();
-        assertThat(statuses.size()).isEqualTo(6);
+        assertThat(statuses.size())
+                .isEqualTo(
+                        mIsSecondaryAbiUsedByOtherApps || !Flags.dexoptSecondaryIsaOnlyWhenNeeded()
+                                ? 6
+                                : 4);
 
         for (DexContainerFileDexoptStatus status : statuses) {
             assertThat(status.getCompilerFilter()).isEqualTo("error");
@@ -1280,17 +1314,28 @@ public class ArtManagerLocalTest {
                 .when(mArtd)
                 .getDexoptStatus(eq("/somewhere/app/foo/split_0.apk"), eq("arm64"), any());
 
-        // It should only keep VDEX files and runtime images.
-        doReturn(createGetDexoptStatusResult("verify", "vdex", "location",
-                         ArtifactsLocation.NEXT_TO_DEX, true /* isBackedByVdexOnly */))
-                .when(mArtd)
-                .getDexoptStatus(eq("/somewhere/app/foo/split_0.apk"), eq("arm"), any());
+        var runtimeArtifactsPaths = new ArrayList<>();
+        runtimeArtifactsPaths.add(AidlUtils.buildRuntimeArtifactsPath(
+                PKG_NAME_1, "/somewhere/app/foo/split_0.apk", "arm64"));
+        var vdexPaths = new ArrayList<>();
+        if (mIsSecondaryAbiUsedByOtherApps || !Flags.dexoptSecondaryIsaOnlyWhenNeeded()) {
+            // It should only keep VDEX files and runtime images.
+            doReturn(createGetDexoptStatusResult("verify", "vdex", "location",
+                             ArtifactsLocation.NEXT_TO_DEX, true /* isBackedByVdexOnly */))
+                    .when(mArtd)
+                    .getDexoptStatus(eq("/somewhere/app/foo/split_0.apk"), eq("arm"), any());
 
-        // It should not keep any artifacts or runtime images.
-        doReturn(createGetDexoptStatusResult("run-from-apk", "unknown", "unknown",
-                         ArtifactsLocation.NONE_OR_ERROR, false /* isBackedByVdexOnly */))
-                .when(mArtd)
-                .getDexoptStatus(eq("/somewhere/app/foo/base.apk"), eq("arm"), any());
+            // It should not keep any artifacts or runtime images.
+            doReturn(createGetDexoptStatusResult("run-from-apk", "unknown", "unknown",
+                             ArtifactsLocation.NONE_OR_ERROR, false /* isBackedByVdexOnly */))
+                    .when(mArtd)
+                    .getDexoptStatus(eq("/somewhere/app/foo/base.apk"), eq("arm"), any());
+
+            runtimeArtifactsPaths.add(AidlUtils.buildRuntimeArtifactsPath(
+                    PKG_NAME_1, "/somewhere/app/foo/split_0.apk", "arm"));
+            vdexPaths.add(VdexPath.artifactsPath(AidlUtils.buildArtifactsPathAsInput(
+                    "/somewhere/app/foo/split_0.apk", "arm", false /* isInDalvikCache */)));
+        }
 
         when(mSnapshot.getPackageStates()).thenReturn(Map.of(PKG_NAME_1, mPkgState1));
         mArtManagerLocal.cleanup(mSnapshot);
@@ -1316,13 +1361,9 @@ public class ArtManagerLocalTest {
                                 "/data/user/0/foo/1.apk", "arm64", false /* isInDalvikCache */),
                         AidlUtils.buildArtifactsPathAsInput("/somewhere/app/foo/split_0.apk",
                                 "arm64", true /* isInDalvikCache */)),
-                inAnyOrderDeepEquals(VdexPath.artifactsPath(AidlUtils.buildArtifactsPathAsInput(
-                        "/somewhere/app/foo/split_0.apk", "arm", false /* isInDalvikCache */))),
+                inAnyOrderDeepEquals(vdexPaths.toArray(VdexPath[] ::new)),
                 inAnyOrderDeepEquals() /* sdmSdcFilesToKeep */,
-                inAnyOrderDeepEquals(AidlUtils.buildRuntimeArtifactsPath(
-                                             PKG_NAME_1, "/somewhere/app/foo/split_0.apk", "arm64"),
-                        AidlUtils.buildRuntimeArtifactsPath(
-                                PKG_NAME_1, "/somewhere/app/foo/split_0.apk", "arm")),
+                inAnyOrderDeepEquals(runtimeArtifactsPaths.toArray(RuntimeArtifactsPath[] ::new)),
                 eq(keepPreRebootStagedFiles));
     }
 
@@ -1336,23 +1377,11 @@ public class ArtManagerLocalTest {
                 .when(mArtd)
                 .getDexoptStatus(eq("/somewhere/app/foo/base.apk"), eq("arm64"), any());
 
-        // It should keep the SDM file, but not runtime images.
-        doReturn(createGetDexoptStatusResult("speed-profile", "cloud", "location",
-                         ArtifactsLocation.SDM_DALVIK_CACHE, false /* isBackedByVdexOnly */))
-                .when(mArtd)
-                .getDexoptStatus(eq("/somewhere/app/foo/base.apk"), eq("arm"), any());
-
         // It should keep the SDM file and runtime images.
         doReturn(createGetDexoptStatusResult("verify", "cloud", "location",
                          ArtifactsLocation.SDM_NEXT_TO_DEX, false /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus(eq("/somewhere/app/foo/split_0.apk"), eq("arm64"), any());
-
-        // It should only keep runtime images.
-        doReturn(createGetDexoptStatusResult("verify", "vdex", "location", ArtifactsLocation.DM,
-                         true /* isBackedByVdexOnly */))
-                .when(mArtd)
-                .getDexoptStatus(eq("/somewhere/app/foo/split_0.apk"), eq("arm"), any());
 
         // This file is uninteresting in this test.
         doReturn(createGetDexoptStatusResult("run-from-apk", "unknown", "unknown",
@@ -1361,23 +1390,44 @@ public class ArtManagerLocalTest {
                 .getDexoptStatus(eq("/data/user/0/foo/1.apk"), eq("arm64"), any());
 
         when(mSnapshot.getPackageStates()).thenReturn(Map.of(PKG_NAME_1, mPkgState1));
+
+        var expectedSdmPaths = new ArrayList<>();
+        expectedSdmPaths.addAll(List.of(
+                AidlUtils.buildSecureDexMetadataWithCompanionPaths(
+                        "/somewhere/app/foo/base.apk", "arm64", false /* isInDalvikCache */),
+
+                AidlUtils.buildSecureDexMetadataWithCompanionPaths(
+                        "/somewhere/app/foo/split_0.apk", "arm64", false /* isInDalvikCache */)));
+        var expectedRuntimeArtifactsPaths = new ArrayList<>();
+        expectedRuntimeArtifactsPaths.add(AidlUtils.buildRuntimeArtifactsPath(
+                PKG_NAME_1, "/somewhere/app/foo/split_0.apk", "arm64"));
+
+        if (mIsSecondaryAbiUsedByOtherApps || !Flags.dexoptSecondaryIsaOnlyWhenNeeded()) {
+            // It should keep the SDM file, but not runtime images.
+            doReturn(createGetDexoptStatusResult("speed-profile", "cloud", "location",
+                             ArtifactsLocation.SDM_DALVIK_CACHE, false /* isBackedByVdexOnly */))
+                    .when(mArtd)
+                    .getDexoptStatus(eq("/somewhere/app/foo/base.apk"), eq("arm"), any());
+            // It should only keep runtime images.
+            doReturn(createGetDexoptStatusResult("verify", "vdex", "location", ArtifactsLocation.DM,
+                             true /* isBackedByVdexOnly */))
+                    .when(mArtd)
+                    .getDexoptStatus(eq("/somewhere/app/foo/split_0.apk"), eq("arm"), any());
+            expectedSdmPaths.add(AidlUtils.buildSecureDexMetadataWithCompanionPaths(
+                    "/somewhere/app/foo/base.apk", "arm", true /* isInDalvikCache */));
+            expectedRuntimeArtifactsPaths.add(AidlUtils.buildRuntimeArtifactsPath(
+                    PKG_NAME_1, "/somewhere/app/foo/split_0.apk", "arm"));
+        }
+
         mArtManagerLocal.cleanup(mSnapshot);
 
         verify(mArtd).cleanup(any() /* profilesToKeep */,
                 inAnyOrderDeepEquals() /* artifactsToKeep */,
                 inAnyOrderDeepEquals() /* vdexFilesToKeep */,
-                inAnyOrderDeepEquals(AidlUtils.buildSecureDexMetadataWithCompanionPaths(
-                                             "/somewhere/app/foo/base.apk", "arm64",
-                                             false /* isInDalvikCache */),
-                        AidlUtils.buildSecureDexMetadataWithCompanionPaths(
-                                "/somewhere/app/foo/base.apk", "arm", true /* isInDalvikCache */),
-                        AidlUtils.buildSecureDexMetadataWithCompanionPaths(
-                                "/somewhere/app/foo/split_0.apk", "arm64",
-                                false /* isInDalvikCache */)),
-                inAnyOrderDeepEquals(AidlUtils.buildRuntimeArtifactsPath(
-                                             PKG_NAME_1, "/somewhere/app/foo/split_0.apk", "arm64"),
-                        AidlUtils.buildRuntimeArtifactsPath(
-                                PKG_NAME_1, "/somewhere/app/foo/split_0.apk", "arm")),
+                inAnyOrderDeepEquals(
+                        expectedSdmPaths.toArray(SecureDexMetadataWithCompanionPaths[] ::new)),
+                inAnyOrderDeepEquals(
+                        expectedRuntimeArtifactsPaths.toArray(RuntimeArtifactsPath[] ::new)),
                 eq(false) /* keepPreRebootStagedFiles */);
     }
 
@@ -1425,18 +1475,6 @@ public class ArtManagerLocalTest {
                 .when(mArtd)
                 .getDexoptStatus(eq("/somewhere/app/foo/split_0.apk"), eq("arm64"), any());
 
-        // It should only count VDEX files and runtime images.
-        doReturn(createGetDexoptStatusResult("verify", "vdex", "location",
-                         ArtifactsLocation.NEXT_TO_DEX, true /* isBackedByVdexOnly */))
-                .when(mArtd)
-                .getDexoptStatus(eq("/somewhere/app/foo/split_0.apk"), eq("arm"), any());
-
-        // It should not count any artifacts or runtime images.
-        doReturn(createGetDexoptStatusResult("run-from-apk", "unknown", "unknown",
-                         ArtifactsLocation.NONE_OR_ERROR, false /* isBackedByVdexOnly */))
-                .when(mArtd)
-                .getDexoptStatus(eq("/somewhere/app/foo/base.apk"), eq("arm"), any());
-
         // These are counted as TYPE_DEXOPT_ARTIFACT.
         doReturn(1l << 0).when(mArtd).getArtifactsSize(deepEq(AidlUtils.buildArtifactsPathAsInput(
                 "/somewhere/app/foo/base.apk", "arm64", false /* isInDalvikCache */)));
@@ -1444,20 +1482,38 @@ public class ArtManagerLocalTest {
                 "/data/user/0/foo/1.apk", "arm64", false /* isInDalvikCache */)));
         doReturn(1l << 2).when(mArtd).getArtifactsSize(deepEq(AidlUtils.buildArtifactsPathAsInput(
                 "/somewhere/app/foo/split_0.apk", "arm64", true /* isInDalvikCache */)));
-        doReturn(1l << 3).when(mArtd).getVdexFileSize(
-                deepEq(VdexPath.artifactsPath(AidlUtils.buildArtifactsPathAsInput(
-                        "/somewhere/app/foo/split_0.apk", "arm", false /* isInDalvikCache */))));
         doReturn(1l << 4).when(mArtd).getRuntimeArtifactsSize(
                 deepEq(AidlUtils.buildRuntimeArtifactsPath(
                         PKG_NAME_1, "/somewhere/app/foo/split_0.apk", "arm64")));
-        doReturn(1l << 5).when(mArtd).getRuntimeArtifactsSize(
-                deepEq(AidlUtils.buildRuntimeArtifactsPath(
-                        PKG_NAME_1, "/somewhere/app/foo/split_0.apk", "arm")));
-        long expectedDexoptArtifactSize =
-                (1l << 0) + (1l << 1) + (1l << 2) + (1l << 3) + (1l << 4) + (1l << 5);
+
+        long expectedDexoptArtifactSize = (1l << 0) + (1l << 1) + (1l << 2) + (1l << 4);
         int expectedGetArtifactsSizeCalls = 3;
-        int expectedGetVdexFileSizeCalls = 1;
-        int expectedGetRuntimeArtifactsSizeCalls = 2;
+        int expectedGetVdexFileSizeCalls = 0;
+        int expectedGetRuntimeArtifactsSizeCalls = 1;
+        if (mIsSecondaryAbiUsedByOtherApps || !Flags.dexoptSecondaryIsaOnlyWhenNeeded()) {
+            // If other apps are using the secondary ABI, then we expect to get
+            // the artifact calls for the secondary ABI as well.
+            // It should only count VDEX files and runtime images.
+            doReturn(1l << 3).when(mArtd).getVdexFileSize(deepEq(VdexPath.artifactsPath(
+                    AidlUtils.buildArtifactsPathAsInput("/somewhere/app/foo/split_0.apk", "arm",
+                            false /* isInDalvikCache */))));
+            doReturn(1l << 5).when(mArtd).getRuntimeArtifactsSize(
+                    deepEq(AidlUtils.buildRuntimeArtifactsPath(
+                            PKG_NAME_1, "/somewhere/app/foo/split_0.apk", "arm")));
+            doReturn(createGetDexoptStatusResult("verify", "vdex", "location",
+                             ArtifactsLocation.NEXT_TO_DEX, true /* isBackedByVdexOnly */))
+                    .when(mArtd)
+                    .getDexoptStatus(eq("/somewhere/app/foo/split_0.apk"), eq("arm"), any());
+
+            // It should not count any artifacts or runtime images.
+            doReturn(createGetDexoptStatusResult("run-from-apk", "unknown", "unknown",
+                             ArtifactsLocation.NONE_OR_ERROR, false /* isBackedByVdexOnly */))
+                    .when(mArtd)
+                    .getDexoptStatus(eq("/somewhere/app/foo/base.apk"), eq("arm"), any());
+            expectedDexoptArtifactSize += (1l << 3) + (1l << 5);
+            expectedGetVdexFileSizeCalls += 1;
+            expectedGetRuntimeArtifactsSizeCalls += 1;
+        }
 
         // These are counted as TYPE_REF_PROFILE.
         doReturn(1l << 6).when(mArtd).getProfileSize(
@@ -1539,23 +1595,11 @@ public class ArtManagerLocalTest {
                 .when(mArtd)
                 .getDexoptStatus(eq("/somewhere/app/foo/base.apk"), eq("arm64"), any());
 
-        // It should count the SDM file, but not runtime images.
-        doReturn(createGetDexoptStatusResult("speed-profile", "cloud", "location",
-                         ArtifactsLocation.SDM_DALVIK_CACHE, false /* isBackedByVdexOnly */))
-                .when(mArtd)
-                .getDexoptStatus(eq("/somewhere/app/foo/base.apk"), eq("arm"), any());
-
         // It should count the SDM file and runtime images.
         doReturn(createGetDexoptStatusResult("verify", "cloud", "location",
                          ArtifactsLocation.SDM_NEXT_TO_DEX, false /* isBackedByVdexOnly */))
                 .when(mArtd)
                 .getDexoptStatus(eq("/somewhere/app/foo/split_0.apk"), eq("arm64"), any());
-
-        // It should only count runtime images.
-        doReturn(createGetDexoptStatusResult("verify", "vdex", "location", ArtifactsLocation.DM,
-                         true /* isBackedByVdexOnly */))
-                .when(mArtd)
-                .getDexoptStatus(eq("/somewhere/app/foo/split_0.apk"), eq("arm"), any());
 
         // This file is uninteresting in this test.
         doReturn(createGetDexoptStatusResult("run-from-apk", "unknown", "unknown",
@@ -1567,27 +1611,46 @@ public class ArtManagerLocalTest {
         doReturn(1l << 0).when(mArtd).getSdmFileSize(
                 deepEq(AidlUtils.buildSecureDexMetadataWithCompanionPaths(
                         "/somewhere/app/foo/base.apk", "arm64", false /* isInDalvikCache */)));
-        doReturn(1l << 1).when(mArtd).getSdmFileSize(
-                deepEq(AidlUtils.buildSecureDexMetadataWithCompanionPaths(
-                        "/somewhere/app/foo/base.apk", "arm", true /* isInDalvikCache */)));
         doReturn(1l << 2).when(mArtd).getSdmFileSize(
                 deepEq(AidlUtils.buildSecureDexMetadataWithCompanionPaths(
                         "/somewhere/app/foo/split_0.apk", "arm64", false /* isInDalvikCache */)));
         doReturn(1l << 3).when(mArtd).getRuntimeArtifactsSize(
                 deepEq(AidlUtils.buildRuntimeArtifactsPath(
                         PKG_NAME_1, "/somewhere/app/foo/split_0.apk", "arm64")));
-        doReturn(1l << 4).when(mArtd).getRuntimeArtifactsSize(
-                deepEq(AidlUtils.buildRuntimeArtifactsPath(
-                        PKG_NAME_1, "/somewhere/app/foo/split_0.apk", "arm")));
+
+        long expectedTotalSize = (1l << 0) + (1l << 2) + (1l << 3);
+        int expectedNumberofSdmFiles = 2;
+        int expectedNumberofRuntimeArtifacts = 1;
+        if (mIsSecondaryAbiUsedByOtherApps || !Flags.dexoptSecondaryIsaOnlyWhenNeeded()) {
+            // It should count the SDM file, but not runtime images.
+            doReturn(createGetDexoptStatusResult("speed-profile", "cloud", "location",
+                             ArtifactsLocation.SDM_DALVIK_CACHE, false /* isBackedByVdexOnly */))
+                    .when(mArtd)
+                    .getDexoptStatus(eq("/somewhere/app/foo/base.apk"), eq("arm"), any());
+            // It should only count runtime images.
+            doReturn(createGetDexoptStatusResult("verify", "vdex", "location", ArtifactsLocation.DM,
+                             true /* isBackedByVdexOnly */))
+                    .when(mArtd)
+                    .getDexoptStatus(eq("/somewhere/app/foo/split_0.apk"), eq("arm"), any());
+            doReturn(1l << 1).when(mArtd).getSdmFileSize(
+                    deepEq(AidlUtils.buildSecureDexMetadataWithCompanionPaths(
+                            "/somewhere/app/foo/base.apk", "arm", true /* isInDalvikCache */)));
+            doReturn(1l << 4).when(mArtd).getRuntimeArtifactsSize(
+                    deepEq(AidlUtils.buildRuntimeArtifactsPath(
+                            PKG_NAME_1, "/somewhere/app/foo/split_0.apk", "arm")));
+            expectedTotalSize += (1l << 1) + (1l << 4);
+            expectedNumberofSdmFiles += 1;
+            expectedNumberofRuntimeArtifacts += 1;
+        }
 
         ArtManagedFileStats stats = mArtManagerLocal.getArtManagedFileStats(mSnapshot, PKG_NAME_1);
         assertThat(stats.getTotalSizeBytesByType(ArtManagedFileStats.TYPE_DEXOPT_ARTIFACT))
-                .isEqualTo((1l << 0) + (1l << 1) + (1l << 2) + (1l << 3) + (1l << 4));
+                .isEqualTo(expectedTotalSize);
 
         verify(mArtd, never()).getArtifactsSize(any());
         verify(mArtd, never()).getVdexFileSize(any());
-        verify(mArtd, times(3)).getSdmFileSize(any());
-        verify(mArtd, times(2)).getRuntimeArtifactsSize(any());
+        verify(mArtd, times(expectedNumberofSdmFiles)).getSdmFileSize(any());
+        verify(mArtd, times(expectedNumberofRuntimeArtifacts)).getRuntimeArtifactsSize(any());
     }
 
     @Test
@@ -1805,10 +1868,8 @@ public class ArtManagerLocalTest {
 
     private PackageState createPackageState(
             String packageName, boolean isDexoptable, boolean multiSplit) {
-        PackageState pkgState = mock(PackageState.class);
+        PackageState pkgState = createPackageState(packageName, "arm64-v8a");
 
-        lenient().when(pkgState.getPackageName()).thenReturn(packageName);
-        lenient().when(pkgState.getPrimaryCpuAbi()).thenReturn("arm64-v8a");
         lenient().when(pkgState.getSecondaryCpuAbi()).thenReturn("armeabi-v7a");
         lenient().when(pkgState.getAppId()).thenReturn(APP_ID);
 
@@ -1822,6 +1883,13 @@ public class ArtManagerLocalTest {
 
         lenient().when(PackageStateModulesUtils.isDexoptable(pkgState)).thenReturn(isDexoptable);
 
+        return pkgState;
+    }
+
+    private PackageState createPackageState(String packageName, String primaryAbi) {
+        PackageState pkgState = mock(PackageState.class);
+        lenient().when(pkgState.getPackageName()).thenReturn(packageName);
+        lenient().when(pkgState.getPrimaryCpuAbi()).thenReturn(primaryAbi);
         return pkgState;
     }
 
