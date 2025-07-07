@@ -1587,7 +1587,8 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
     }
 
     case Instruction::RETURN:
-    case Instruction::RETURN_OBJECT: {
+    case Instruction::RETURN_OBJECT:
+    case Instruction::RETURN_WIDE: {
       int32_t register_index = instruction.VRegA_11x();
       InvokeDexCallingConventionVisitorARM64 convention;
       if (!MoveLocation(convention.GetReturnLocation(return_type_),
@@ -1598,18 +1599,18 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
       if (has_frame_) {
         // We may have used the "record last instruction before return in return
         // register" optimization (see `CreateNewRegisterLocation`),
-        // so set the returned register back to a callee save location in case the
-        // method has a frame and there are instructions after this return that
-        // may use this register.
-        uint32_t register_code = kAvailableCalleeSaveRegisters[register_index].GetCode();
-        vreg_locations_[register_index] = Location::RegisterLocation(register_code);
+        // so set the returned register back to what it should be by marking it
+        // with an invalid location and let the `CreateNewRegisterLocation` pick
+        // the right register again.
+        vreg_locations_[register_index] = Location();
+        CreateNewRegisterLocation(
+            register_index, return_type_, /* next= */ nullptr);
+        if (HitUnimplemented()) {
+          return false;
+        }
       }
       PopFrameAndReturn();
       return true;
-    }
-
-    case Instruction::RETURN_WIDE: {
-      break;
     }
 
     case Instruction::INVOKE_DIRECT:
@@ -2079,24 +2080,22 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
     case Instruction::MOVE_RESULT_OBJECT:
       is_object = true;
       FALLTHROUGH_INTENDED;
-    case Instruction::MOVE_RESULT: {
+    case Instruction::MOVE_RESULT:
+    case Instruction::MOVE_RESULT_WIDE: {
       int32_t register_index = instruction.VRegA_11x();
       InvokeDexCallingConventionVisitorARM64 convention;
-      if (!MoveLocation(
-              CreateNewRegisterLocation(register_index, previous_invoke_return_type_, next),
-              convention.GetReturnLocation(previous_invoke_return_type_),
-              previous_invoke_return_type_)) {
+      Location new_location =
+          CreateNewRegisterLocation(register_index, previous_invoke_return_type_, next);
+      if (HitUnimplemented()) {
         return false;
       }
-      if (HitUnimplemented()) {
+      if (!MoveLocation(new_location,
+                        convention.GetReturnLocation(previous_invoke_return_type_),
+                        previous_invoke_return_type_)) {
         return false;
       }
       UpdateLocal(register_index, is_object);
       return true;
-    }
-
-    case Instruction::MOVE_RESULT_WIDE: {
-      break;
     }
 
     case Instruction::CMP_LONG: {
