@@ -60,7 +60,6 @@
 #include "android-modules-utils/sdk_level.h"
 #include "com_android_art.h"
 #include "com_android_art_flags.h"
-#include "com_android_art_rw_flags.h"
 #endif
 
 // See aosp/2996596 for where these values came from.
@@ -323,7 +322,7 @@ bool ShouldUseGenerationalGC() {
 // Inter-Processor Interrupts (IPI), which are used for TLB flush, are very slow on
 // virtual devices, like cuttlefish. Therefore, we don't use MOVE ioctl on such devices.
 static const bool gMoveIoctlRequested =
-    com_android_art_rw_flags_use_uffd_move_ioctl() &&
+    com::android::art::flags::use_uffd_move_ioctl() &&
     android::base::GetProperty("ro.hardware.virtual_device", "") != "1" &&
     GetBoolProperty("persist.device_config.runtime_native_boot.use_uffd_move_ioctl", true);
 #else

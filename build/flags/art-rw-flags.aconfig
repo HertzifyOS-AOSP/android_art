@@ -27,19 +27,6 @@ flag {
   is_exported: false
 }
 
-# Flag for using userfaultfd move ioctl in CMC
-flag {
-  name: "use_uffd_move_ioctl"
-  namespace: "art_performance"
-  description: "Try to use userfaultfd's move ioctl in CMC GC. We may not be able to use it if"
-  "1. the kernel doesn't support it (<6.1), or"
-  "2. the necessary kernel bug-fixes aren't there, or"
-  "3. app's seccomp filter doesn't allow it."
-  bug: "343220989"
-  is_fixed_read_only: false
-  is_exported: false
-}
-
 flag {
   name: "post_ur_job"
   namespace: "art_cloud"
