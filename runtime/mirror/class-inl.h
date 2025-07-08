@@ -1346,15 +1346,13 @@ ALWAYS_INLINE FLATTEN inline ArtMethod* Class::FindDeclaredClassMethod(uint32_t 
     if (!method.IsCopied() && method.GetDexMethodIndex() == dex_method_idx) {
       return &method;
     }
+  } else {
+    index = size;
   }
   if (kOnlyLookAtIndex) {
     return nullptr;
   }
 
-  // Reset index to take a look at the whole array since we might have methods with the same dex
-  // method index e.g. [120, 121, 122, 122, 123]. In this example, if we don't reset the index to
-  // `size` we will start iterating from the second 122 and miss 123.
-  index = size;
   // If there is a method, it's down the array. The array is ordered by method
   // index, so we know we can stop the search if `dex_method_idx` is greater
   // than the current method's index.

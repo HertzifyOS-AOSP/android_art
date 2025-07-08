@@ -4258,6 +4258,7 @@ void ClassLinker::LoadClassHelper::Load(const ClassAccessor& accessor,
   size_t num_methods = accessor.NumMethods();
   ArrayRef<ArtFieldData> fields(allocator_.AllocArray<ArtFieldData>(num_fields), num_fields);
   ArrayRef<ArtMethodData> methods(allocator_.AllocArray<ArtMethodData>(num_methods), num_methods);
+  bool has_duplicates = false;
 
   size_t num_loaded_fields = 0u;
   size_t num_sfields = 0u;
@@ -4303,8 +4304,17 @@ void ClassLinker::LoadClassHelper::Load(const ClassAccessor& accessor,
         LinkCode(method_data, class_def_method_index, &occi);
         uint32_t it_method_index = method.GetIndex();
         if (last_dex_method_index == it_method_index) {
-          // duplicate case
-          method_data->method_index = last_class_def_method_index;
+          // Duplicate case: save the dex method index to restore it later, and
+          // set it to kDexNoIndex to ensure the duplicate method is sorted at
+          // the end.
+          // We need to keep duplicates in the array as we use the class def's
+          // number of direct and virtual methods in
+          // `ArtMethod::NumDeclaredMethods`.
+          method_data->method_index = method_data->dex_method_index;
+          method_data->dex_method_index = dex::kDexNoIndex;
+          // mark the method as copied so that on declared method lookup, we skip it.
+          method_data->access_flags |= kAccCopied;
+          has_duplicates = true;
         } else {
           method_data->method_index = class_def_method_index;
           last_dex_method_index = it_method_index;
@@ -4342,6 +4352,16 @@ void ClassLinker::LoadClassHelper::Load(const ClassAccessor& accessor,
             [](ArtMethodData& lhs, ArtMethodData& rhs) {
               return lhs.dex_method_index < rhs.dex_method_index;
             });
+
+  // Now that we've sorted the methods, restore the dex method index of
+  // duplicate methods.
+  if (has_duplicates) {
+    for (auto& method : methods) {
+      if (method.dex_method_index == dex::kDexNoIndex) {
+        method.dex_method_index = method.method_index;
+      }
+    }
+  }
 
   fields_ = fields;
   methods_ = methods;
