@@ -177,6 +177,25 @@ luci.gitiles_poller(
     refs = ["refs/heads/master-art"],
 )
 
+# Note this still uses "art-ci-builder@" service account (which has GoB access).
+# It would be more idiomatic to use separate "art-try-builder@" service account,
+# (but that would require more work and ongoing maintenance due to GoB access).
+luci.cq_group(
+    name = "manifest-presubmit",
+    watch = cq.refset(
+        repo = REPO_ROOT + "/platform/manifest",
+        refs = ["refs/heads/master-art"],
+    ),
+    acls = [
+        acl.entry(
+            roles = [
+                acl.CQ_COMMITTER,
+            ],
+            groups = "googlers",
+        ),
+    ],
+)
+
 def ci_builder(name, category, short_name, dimensions, properties={},
                experiments={}, hidden=False, presubmit=False):
     bucket = "try" if presubmit else "ci"
@@ -223,6 +242,11 @@ def ci_builder(name, category, short_name, dimensions, properties={},
             builder = name,
             category = category,
             short_name = short_name,
+        )
+    if presubmit:
+        luci.cq_tryjob_verifier(
+            cq_group = "manifest-presubmit",
+            builder = name,
         )
 
 def add_builder(mode,
