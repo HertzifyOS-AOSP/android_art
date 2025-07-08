@@ -23,12 +23,16 @@
 
 namespace art HIDDEN {
 
+// LINT.IfChange
 enum PinningReason {
   kNoReason = 0,
   kNativeMethod = 3,
   kMonitor = 4,
   kUnsupportedFrame = 5,
 };
+// Update Continuation.Pinned and Continuation.pinnedReason(int)
+// This lint check doesn't work across 2 git projects until b/154647410 is fixed.
+// LINT.ThenChange(../../libcore/ojluni/src/main/java/jdk/internal/vm/Continuation.java)
 
 /**
  * @return true if parking is successful. False if the thread is pinned, or fails to park.
@@ -36,6 +40,7 @@ enum PinningReason {
 bool VirtualThreadPark(ObjPtr<mirror::Object> v_context,
                        ObjPtr<mirror::Object> parked_states,
                        ObjPtr<mirror::Throwable> vm_error,
+                       bool is_continuation_api,
                        PinningReason& reason_) REQUIRES_SHARED(Locks::mutator_lock_);
 
 }  // namespace art

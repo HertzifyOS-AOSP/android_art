@@ -8772,6 +8772,8 @@ size_t ClassLinker::LinkMethodsHelper<kPointerSize>::AssignVTableIndexes(
                                 Allocator::GetNoopAllocator(),
                                 bit_vector_size,
                                 bit_vector_buffer_ptr);
+  // Clear the bit vector since bit_vector_buffer_ptr may not be zeroed.
+  initialized_methods.SetInitialBits(0);
 
   // Note: our sets hash on the method name, and therefore we pay a high
   // performance price when a class has many overloads.
