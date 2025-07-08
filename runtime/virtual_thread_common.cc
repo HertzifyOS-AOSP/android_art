@@ -41,12 +41,12 @@
 
 namespace art HIDDEN {
 
-inline static ArtMethod* get_enter_method(bool is_continuation_api) {
+inline static ArtMethod* GetEnterMethod(bool is_continuation_api) {
   return is_continuation_api ? WellKnownClasses::jdk_internal_vm_Continuation_enterSpecial
                              : nullptr;
 }
 
-inline static ArtMethod* get_park_method(bool is_continuation_api) {
+inline static ArtMethod* GetParkMethod(bool is_continuation_api) {
   if (is_continuation_api) {
     return WellKnownClasses::jdk_internal_vm_Continuation_doYieldNative;
   } else {
@@ -58,8 +58,8 @@ struct VirtualThreadParkingVisitor final : public StackVisitor {
   VirtualThreadParkingVisitor(Thread* thread, bool is_continuation_api)
       REQUIRES_SHARED(Locks::mutator_lock_)
       : StackVisitor(thread, nullptr, StackVisitor::StackWalkKind::kIncludeInlinedFrames, true),
-        enter_method_(get_enter_method(is_continuation_api)),
-        park_method_(get_park_method(is_continuation_api)),
+        enter_method_(GetEnterMethod(is_continuation_api)),
+        park_method_(GetParkMethod(is_continuation_api)),
         shadow_frame_count_(0),
         reason_(kNoReason) {}
   bool VisitFrame() override REQUIRES_SHARED(Locks::mutator_lock_) {
