@@ -27,6 +27,7 @@
 #include "dex/standard_dex_file.h"
 #include "handle_scope-inl.h"
 #include "interpreter/unstarted_runtime.h"
+#include "jit/debugger_interface.h"
 #include "jni/java_vm_ext.h"
 #include "noop_compiler_callbacks.h"
 #include "runtime.h"
@@ -230,7 +231,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     }
   }
 
-  skipped_gc_iterations++;
+  // Clear the arena pool to free RAM. The next iteration won't be referencing the pool we just
+  // used.
+  art::Runtime::Current()->ReclaimArenaPoolMemory();
 
   // Delete weak root to the DexCache before removing a DEX file from the cache. This is usually
   // handled by the GC, but since we are not calling it every iteration, we need to delete them
@@ -239,6 +242,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
       art::VerifyClassesFuzzerHelper::GetDexCacheData(runtime, dex_file);
   soa.Env()->GetVm()->DeleteWeakGlobalRef(soa.Self(), dex_cache_data->weak_root);
 
+  // Mimic DexFile_closeDexFile.
+  art::RemoveNativeDebugInfoForDex(soa.Self(), dex_file);
   class_linker->RemoveDexFromCaches(*dex_file);
 
   // Delete global ref and unload class loader to free RAM.
@@ -249,6 +254,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     skipped_gc_iterations = 0;
     data_to_delete.clear();
     dex_files_to_delete.clear();
+  } else {
+    skipped_gc_iterations++;
   }
 
   return 0;
