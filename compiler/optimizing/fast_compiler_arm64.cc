@@ -60,6 +60,9 @@ using helpers::WRegisterFrom;
 using helpers::DRegisterFrom;
 using helpers::SRegisterFrom;
 
+// The maximum (meaningful) distance (31) that can be used in an integer shift/rotate operation.
+static constexpr int32_t kMaxIntShiftDistance = 0x1f;
+
 static const vixl::aarch64::Register kAvailableCalleeSaveRegisters[] = {
   vixl::aarch64::x22,
   vixl::aarch64::x23,
@@ -1986,74 +1989,189 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
       break;
     }
 
+#define SETUP_BINOP_22(suffix) \
+  Register source = RegisterFrom( \
+      GetExistingRegisterLocation(instruction.VRegB_22 ## suffix(), DataType::Type::kInt32), \
+      DataType::Type::kInt32); \
+  Register result = RegisterFrom( \
+      CreateNewRegisterLocation(instruction.VRegA_22 ## suffix(), DataType::Type::kInt32, next), \
+      DataType::Type::kInt32); \
+  if (HitUnimplemented()) { \
+    return false; \
+  } \
+  int16_t constant = instruction.VRegC_22 ## suffix();
+
     case Instruction::ADD_INT_LIT16: {
-      break;
+      SETUP_BINOP_22(s)
+      __ Add(result, source, constant);
+      return true;
     }
 
     case Instruction::AND_INT_LIT16: {
-      break;
+      SETUP_BINOP_22(s)
+      __ And(result, source, constant);
+      return true;
     }
 
     case Instruction::OR_INT_LIT16: {
-      break;
+      SETUP_BINOP_22(s)
+      __ Orr(result, source, constant);
+      return true;
     }
 
     case Instruction::XOR_INT_LIT16: {
-      break;
-    }
-
-    case Instruction::RSUB_INT: {
-      break;
+      SETUP_BINOP_22(s)
+      __ Eor(result, source, constant);
+      return true;
     }
 
     case Instruction::MUL_INT_LIT16: {
-      break;
+      SETUP_BINOP_22(s)
+      UseScratchRegisterScope temps(GetVIXLAssembler());
+      Register second = temps.AcquireW();
+      __ Mov(second, constant);
+      __ Mul(result, source, second);
+      return true;
+    }
+
+    case Instruction::DIV_INT_LIT16: {
+      SETUP_BINOP_22(s)
+      if (constant == 0) {
+        if (!EnsureHasFrame()) {
+          return false;
+        }
+        InvokeRuntime(kQuickThrowDivZero, dex_pc);
+      } else {
+        UseScratchRegisterScope temps(GetVIXLAssembler());
+        Register second = temps.AcquireW();
+        __ Mov(second, constant);
+        __ Sdiv(result, source, second);
+      }
+      return true;
+    }
+
+    case Instruction::RSUB_INT: {
+      SETUP_BINOP_22(s)
+      UseScratchRegisterScope temps(GetVIXLAssembler());
+      Register second = temps.AcquireW();
+      __ Mov(second, constant);
+      __ Sub(result, second, source);
+      return true;
+    }
+
+    case Instruction::REM_INT_LIT16: {
+      SETUP_BINOP_22(s)
+      if (constant == 0) {
+        if (!EnsureHasFrame()) {
+          return false;
+        }
+        InvokeRuntime(kQuickThrowDivZero, dex_pc);
+      } else {
+        UseScratchRegisterScope temps(GetVIXLAssembler());
+        Register second = temps.AcquireW();
+        Register temp = temps.AcquireW();
+        __ Mov(second, constant);
+        __ Sdiv(temp, source, second);
+        __ Msub(result, temp, second, source);
+      }
+      return true;
     }
 
     case Instruction::ADD_INT_LIT8: {
-      break;
+      SETUP_BINOP_22(b)
+      __ Add(result, source, constant);
+      return true;
     }
 
     case Instruction::AND_INT_LIT8: {
-      break;
+      SETUP_BINOP_22(b)
+      __ And(result, source, constant);
+      return true;
     }
 
     case Instruction::OR_INT_LIT8: {
-      break;
+      SETUP_BINOP_22(b)
+      __ Orr(result, source, constant);
+      return true;
     }
 
     case Instruction::XOR_INT_LIT8: {
-      break;
+      SETUP_BINOP_22(b)
+      __ Eor(result, source, constant);
+      return true;
     }
 
     case Instruction::RSUB_INT_LIT8: {
-      break;
+      SETUP_BINOP_22(b)
+      UseScratchRegisterScope temps(GetVIXLAssembler());
+      Register second = temps.AcquireW();
+      __ Mov(second, constant);
+      __ Sub(result, second, source);
+      return true;
     }
 
     case Instruction::MUL_INT_LIT8: {
-      break;
+      SETUP_BINOP_22(b)
+      UseScratchRegisterScope temps(GetVIXLAssembler());
+      Register second = temps.AcquireW();
+      __ Mov(second, constant);
+      __ Mul(result, source, second);
+      return true;
     }
 
-    case Instruction::DIV_INT_LIT16:
     case Instruction::DIV_INT_LIT8: {
-      break;
+      SETUP_BINOP_22(b)
+      if (constant == 0) {
+        if (!EnsureHasFrame()) {
+          return false;
+        }
+        InvokeRuntime(kQuickThrowDivZero, dex_pc);
+      } else {
+        UseScratchRegisterScope temps(GetVIXLAssembler());
+        Register second = temps.AcquireW();
+        __ Mov(second, constant);
+        __ Sdiv(result, source, second);
+      }
+      return true;
     }
 
-    case Instruction::REM_INT_LIT16:
     case Instruction::REM_INT_LIT8: {
-      break;
+      SETUP_BINOP_22(b)
+      if (constant == 0) {
+        if (!EnsureHasFrame()) {
+          return false;
+        }
+        InvokeRuntime(kQuickThrowDivZero, dex_pc);
+      } else {
+        UseScratchRegisterScope temps(GetVIXLAssembler());
+        Register second = temps.AcquireW();
+        Register temp = temps.AcquireW();
+        __ Mov(second, constant);
+        __ Sdiv(temp, source, second);
+        __ Msub(result, temp, second, source);
+      }
+      return true;
     }
 
     case Instruction::SHL_INT_LIT8: {
-      break;
+      SETUP_BINOP_22(b)
+      constant &= kMaxIntShiftDistance;
+      __ Lsl(result, source, constant);
+      return true;
     }
 
     case Instruction::SHR_INT_LIT8: {
-      break;
+      SETUP_BINOP_22(b)
+      constant &= kMaxIntShiftDistance;
+      __ Asr(result, source, constant);
+      return true;
     }
 
     case Instruction::USHR_INT_LIT8: {
-      break;
+      SETUP_BINOP_22(b)
+      constant &= kMaxIntShiftDistance;
+      __ Lsr(result, source, constant);
+      return true;
     }
 
     case Instruction::NEW_INSTANCE: {
