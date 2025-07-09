@@ -163,27 +163,35 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   // and know that the checksum would probably be erroneous (i.e. random).
   constexpr bool kVerify = false;
 
-  // Copy data to keep it alive. Use unique_ptr so that we don't leak.
-  data_to_delete.emplace_back(new uint8_t[size]);
-  uint8_t* new_data = data_to_delete.back().get();
-  memcpy(new_data, data, size);
-
-  auto container = std::make_shared<art::MemoryDexFileContainer>(new_data, size);
-  dex_files_to_delete.emplace_back(new art::StandardDexFile(new_data,
-                                                            /*location=*/"fuzz.dex",
-                                                            /*location_checksum=*/0,
-                                                            /*oat_dex_file=*/nullptr,
-                                                            container));
-  art::StandardDexFile* dex_file = dex_files_to_delete.back().get();
+  // Create a DEX file for verification. If the DEX file is verified, we will keep the data into the
+  // heap to keep it alive. We skip copying the data here to keep the heap allocations low.
+  art::StandardDexFile verification(data,
+                                    /*location=*/"fuzz.dex",
+                                    /*location_checksum=*/0,
+                                    /*oat_dex_file=*/nullptr,
+                                    std::make_shared<art::MemoryDexFileContainer>(data, size));
 
   std::string error_msg;
   const bool verify_result =
-      art::dex::Verify(dex_file, dex_file->GetLocation().c_str(), kVerify, &error_msg);
+      art::dex::Verify(&verification, verification.GetLocation().c_str(), kVerify, &error_msg);
 
   if (!verify_result) {
     // DEX file couldn't be verified, don't save it in the corpus.
     return -1;
   }
+
+  // Copy data to keep it alive. Use unique_ptr so that we don't leak.
+  data_to_delete.emplace_back(new uint8_t[size]);
+  uint8_t* new_data = data_to_delete.back().get();
+  memcpy(new_data, data, size);
+
+  dex_files_to_delete.emplace_back(
+      new art::StandardDexFile(new_data,
+                               /*location=*/"fuzz.dex",
+                               /*location_checksum=*/0,
+                               /*oat_dex_file=*/nullptr,
+                               std::make_shared<art::MemoryDexFileContainer>(new_data, size)));
+  art::StandardDexFile* dex_file = dex_files_to_delete.back().get();
 
   art::Runtime* runtime = art::Runtime::Current();
   CHECK(runtime != nullptr);
