@@ -101,7 +101,6 @@ luci.binding(
 # Resources shared by all subprojects.
 
 luci.realm(name = "pools/ci")
-luci.realm(name = "pools/try")
 luci.bucket(name = "ci")
 luci.bucket(name = "try")
 
@@ -180,11 +179,8 @@ luci.gitiles_poller(
 
 def ci_builder(name, category, short_name, dimensions, properties={},
                experiments={}, hidden=False, presubmit=False):
-    bucket = "ci"
+    bucket = "try" if presubmit else "ci"
     service_account = "art-ci-builder@chops-service-accounts.iam.gserviceaccount.com"
-    if presubmit:
-      bucket = "try"
-      service_account = "art-try-builder@chops-service-accounts.iam.gserviceaccount.com"
     luci.builder(
         name = name,
         bucket = bucket,
