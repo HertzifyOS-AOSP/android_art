@@ -345,29 +345,30 @@ inline bool Object::IsPhantomReferenceInstance() {
   return GetClass<kVerifyFlags>()->IsPhantomReferenceClass();
 }
 
-// TODO: optimize this by using class_flags_ to determine type
-template<VerifyObjectFlags kVerifyFlags>
+template <VerifyObjectFlags kVerifyFlags>
 inline size_t Object::SizeOf() {
-  // Read barrier is never required for SizeOf since objects sizes are constant. Reading from-space
-  // values is OK because of that.
   size_t result;
   constexpr VerifyObjectFlags kNewFlags = RemoveThisFlags(kVerifyFlags);
-  if (IsArrayInstance<kVerifyFlags>()) {
-    result = AsArray<kNewFlags>()->template SizeOf<kNewFlags>();
-  } else if (IsClass<kNewFlags>()) {
+  // Read barrier is never required for SizeOf since objects sizes are constant. Reading from-space
+  // values is OK because of that.
+  mirror::Class* klass = GetClass<kNewFlags, kWithoutReadBarrier>();
+  uint32_t class_flags = klass->GetClassFlags<kNewFlags>();
+  if ((class_flags & kClassFlagArray) != 0) {
+    result = AsArray<kNewFlags>()->template SizeOf<kNewFlags>(class_flags >>
+                                                              kArrayComponentSizeShiftShift);
+  } else if ((class_flags & kClassFlagClass) != 0) {
     result = AsClass<kNewFlags>()->template SizeOf<kNewFlags>();
-  } else if (IsString<kNewFlags>()) {
+  } else if ((class_flags & kClassFlagString) != 0) {
     result = AsString<kNewFlags>()->template SizeOf<kNewFlags>();
   } else {
-    result = GetClass<kNewFlags, kWithoutReadBarrier>()->template GetObjectSize<kNewFlags>();
+    result = klass->GetObjectSize<kNewFlags>();
   }
-  DCHECK_GE(result, sizeof(Object)) << " class="
-      // Note: Class::PrettyClass() is reading constant reference fields to get to constant
-      // primitive fields and safely avoids read barriers, so it is safe to call on a Class
-      // reference read without read barrier from a constant reference field.
-      // See ReadBarrierOption. And, for correctness, we actually have to avoid the read
-      // barrier here if Object::SizeOf() is called on a from-space reference.
-      << GetClass<kNewFlags, kWithoutReadBarrier>()->PrettyClass();
+  // Note: Class::PrettyClass() is reading constant reference fields to get to constant
+  // primitive fields and safely avoids read barriers, so it is safe to call on a Class
+  // reference read without read barrier from a constant reference field.
+  // See ReadBarrierOption. And, for correctness, we actually have to avoid the read
+  // barrier here if Object::SizeOf() is called on a from-space reference.
+  DCHECK_GE(result, sizeof(Object)) << " class=" << klass->PrettyClass();
   return result;
 }
 

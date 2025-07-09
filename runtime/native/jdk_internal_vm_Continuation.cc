@@ -46,7 +46,7 @@ static jint Continuation_doYieldNative([[maybe_unused]] JNIEnv* env,
   bool success = VirtualThreadPark(soa.Decode<mirror::Object>(v_context),
                                    soa.Decode<mirror::Object>(parked_states),
                                    soa.Decode<mirror::Throwable>(vm_error),
-                                   true,
+                                   /* is_continuation_api= */ true,
                                    reason);
 
   if (!success && reason == kNoReason) {

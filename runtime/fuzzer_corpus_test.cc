@@ -26,6 +26,7 @@
 #include "dex/standard_dex_file.h"
 #include "gtest/gtest.h"
 #include "handle_scope-inl.h"
+#include "jit/debugger_interface.h"
 #include "jni/java_vm_ext.h"
 #include "verifier/class_verifier.h"
 #include "ziparchive/zip_archive.h"
@@ -158,7 +159,10 @@ class FuzzerCorpusTest : public CommonRuntimeTest {
         }
       }
     }
-    skipped_gc_iterations++;
+
+    // Clear the arena pool to free RAM. The next iteration won't be referencing the pool we just
+    // used.
+    art::Runtime::Current()->ReclaimArenaPoolMemory();
 
     // Delete weak root to the DexCache before removing a DEX file from the cache. This is usually
     // handled by the GC, but since we are not calling it every iteration, we need to delete them
@@ -167,6 +171,8 @@ class FuzzerCorpusTest : public CommonRuntimeTest {
         VerifyClassesFuzzerCorpusTestHelper::GetDexCacheData(runtime, &dex_file);
     soa.Env()->GetVm()->DeleteWeakGlobalRef(soa.Self(), dex_cache_data->weak_root);
 
+    // Mimic DexFile_closeDexFile.
+    art::RemoveNativeDebugInfoForDex(soa.Self(), &dex_file);
     class_linker->RemoveDexFromCaches(dex_file);
 
     // Delete global ref and unload class loader to free RAM.
@@ -175,6 +181,8 @@ class FuzzerCorpusTest : public CommonRuntimeTest {
     if (skipped_gc_iterations == kMaxSkipGCIterations) {
       runtime->GetHeap()->CollectGarbage(/* clear_soft_references */ true);
       skipped_gc_iterations = 0;
+    } else {
+      skipped_gc_iterations++;
     }
 
     ASSERT_EQ(passed_class_verification, expected_success) << " Failed for " << name;
