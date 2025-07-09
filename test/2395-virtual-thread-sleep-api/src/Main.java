@@ -16,6 +16,7 @@
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -50,12 +51,14 @@ public class Main {
      * @param numOfThreads number of concurrent virtual threads sleeping
      */
     private static void testNSleepingThreads(int numOfThreads) throws InterruptedException {
-        long sleepDurationMs = Math.max(numOfThreads * SLEEP_DURATION_MULTIPLIER, 100);
+        long sleepDurationMs = Math.max(numOfThreads * SLEEP_DURATION_MULTIPLIER, 1500);
         long timeoutThresholdNs = TimeUnit.MILLISECONDS.toNanos(
                 sleepDurationMs * 3);
         List<Thread> threads = new ArrayList<>(numOfThreads);
+        CountDownLatch latch = new CountDownLatch(numOfThreads);
         for (int i = 0; i < numOfThreads; i++) {
             Thread vt = Thread.ofVirtual().uncaughtExceptionHandler(HANDLER).start(() -> {
+                latch.countDown();
                 try {
                     Thread.sleep(sleepDurationMs);
                 } catch (InterruptedException e) {
@@ -67,21 +70,23 @@ public class Main {
 
         List<Thread> threadsToBeUnmounted = new ArrayList<>(threads);
         long startTime = System.nanoTime();
-        while (System.nanoTime() - startTime < timeoutThresholdNs) {
-            if (threadsToBeUnmounted.isEmpty()) {
-                break;
+        while (!threadsToBeUnmounted.isEmpty()) {
+            if (latch.getCount() > 0) {
+                // Reset the timer if some threads are not started.
+                startTime = System.nanoTime();
+            } else if (System.nanoTime() - startTime > timeoutThresholdNs) {
+                Thread vt = threadsToBeUnmounted.getFirst();
+                throw new AssertionError("Thread " + vt.threadId() + " wasn't "
+                        + "unmounted. Consider increasing SLEEP_DURATION_MULTIPLIER for slow test "
+                        + "configurations.");
             }
+
             // We can't assert that a virtual thread runs on different carrier thread before parking
             // and after un-parking because it is backed by carrier threads from a thread pool.
             // Instead, we verify that it's unmounted in a busy loop ,
             threadsToBeUnmounted.removeIf(vt -> vt.getVirtualThreadContext().isUnmounted());
-        }
 
-        if (!threadsToBeUnmounted.isEmpty()) {
-            Thread vt = threadsToBeUnmounted.getFirst();
-            throw new AssertionError("Thread " + vt.threadId() + " wasn't unmounted. "
-                    + "Consider increasing SLEEP_DURATION_MULTIPLIER for slow test "
-                    + "configurations.");
+
         }
 
         for (Thread vt : threads) {
