@@ -1618,7 +1618,8 @@
       "env_vars": {"ART_TEST_ON_VM": "true"}
     },
     {
-      "tests": ["2042-reference-processing"],
+      "tests": ["2042-reference-processing",
+                "2395-virtual-thread-sleep-api"],
       "description": ["Timeout on QEMU"],
       "env_vars": {"ART_TEST_ON_VM": "true"}
     },
@@ -1634,6 +1635,11 @@
                 "2395-virtual-thread-sleep-api"],
       "variant": "jvm",
       "description": ["Tests for ART-specific Virtual Thread APIs."]
+    },
+    {
+      "tests":["2395-virtual-thread-sleep-api"],
+      "variant": "gcstress",
+      "description": ["Timeout on gcstrees"]
     },
     {
         "tests": ["169-threadgroup-jni"],
