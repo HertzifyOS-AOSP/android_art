@@ -78,11 +78,7 @@ cc_defaults {
     },
 
     device_common_data: [
-        ":core-oj",
-        ":core-libart",
-        ":okhttp",
-        ":bouncycastle",
-        ":apache-xml",
+        ":bootclasspath_jars",
         ":core-icu4j-fuzzer",
         ":conscrypt-fuzzer",
     ],
@@ -148,6 +144,39 @@ cc_fuzz {
         ":art_runtest_corpus",
         "class-verifier-corpus/*",
     ],
+}
+
+// Build an ART apex and extract the .jar from them. In particular, the core-oj and
+// core-libart jars will have hiddenapi data, which is needed for the debug+target
+// version of the fuzzer.
+// TODO(solanes): Merge with art_release_zip. We have slightly different expected
+// folder structure, but there might be a way to make it work.
+java_genrule {
+    name: "bootclasspath_jars",
+    srcs: [
+        ":com.android.art",
+    ],
+    out: [
+        "core-oj.jar",
+        "core-libart.jar",
+        "okhttp.jar",
+        "bouncycastle.jar",
+        "apache-xml.jar",
+    ],
+    tools: [
+        "deapexer",
+        "debugfs",
+        "fsck.erofs",
+    ],
+    cmd: "$(location deapexer) " +
+        "--debugfs_path $(location debugfs) " +
+        "--fsckerofs_path $(location fsck.erofs) " +
+        "extract $(location :com.android.art) $(genDir)/extracted && " +
+        "mv $(genDir)/extracted/javalib/core-oj.jar $(genDir)/core-oj.jar && " +
+        "mv $(genDir)/extracted/javalib/core-libart.jar $(genDir)/core-libart.jar && " +
+        "mv $(genDir)/extracted/javalib/okhttp.jar $(genDir)/okhttp.jar && " +
+        "mv $(genDir)/extracted/javalib/bouncycastle.jar $(genDir)/bouncycastle.jar && " +
+        "mv $(genDir)/extracted/javalib/apache-xml.jar $(genDir)/apache-xml.jar ",
 }
 
 // Use run-test dex files to bootstrap the fuzzer.

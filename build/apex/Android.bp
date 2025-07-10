@@ -253,6 +253,7 @@ apex {
 
     visibility: [
         "//art/build/sdk",
+        "//art/tools/fuzzer",
         "//packages/modules/common/build",
     ],
 }
