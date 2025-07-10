@@ -23,7 +23,7 @@ import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -89,14 +89,13 @@ public class Main {
         private final int mNumOfThreads;
         private final long mSleepDurationMs;
         private final Set<Long> virtualThreadIds;
-        private final AtomicInteger mJoinedCounter = new AtomicInteger(0);
-        private final LinkedBlockingQueue<Object> mJoinedNotifier
-                = new LinkedBlockingQueue<Object>();
+        private final CountDownLatch mCountDownLatch;
 
         SleepingVirtualThreadTestCase(int numOfThreads, long sleepDurationMs) {
             mNumOfThreads = numOfThreads;
             mSleepDurationMs = sleepDurationMs;
             virtualThreadIds = new HashSet<>(mNumOfThreads);
+            mCountDownLatch = new CountDownLatch(numOfThreads);
         }
 
         void start() {
@@ -122,8 +121,7 @@ public class Main {
                 while (startedCounter.get() < mNumOfThreads &&
                         runningSize.get() < CARRIER_THREADS_LIMIT) {
                     runningSize.incrementAndGet();
-                    startSleepingThread(parkingThreads, mNumOfThreads, mSleepDurationMs,
-                            mJoinedCounter, mJoinedNotifier);
+                    startSleepingThread(parkingThreads, mSleepDurationMs, mCountDownLatch);
                     startedCounter.incrementAndGet();
                 }
                 while (!parkingThreads.isEmpty()) {
@@ -156,26 +154,27 @@ public class Main {
                 }
             }
             debugPrintln("Started " + mNumOfThreads + " threads!");
-            debugPrintln("Approx. " + (mNumOfThreads - mJoinedCounter.get()) + " threads are sleeping");
+            debugPrintln("Approx. " + mCountDownLatch.getCount() + " threads are sleeping");
         }
 
         void waitUntilAllThreadsWakeUp() {
             // The constant multiplier needs to be significantly larger than 2 because the timer
             // is single-threaded, and is slower in the interpreter mode.
             long timeoutThresholdMs = mSleepDurationMs * 5;
-            Object joined_signal;
+            final boolean isDone;
             try {
-                joined_signal = mJoinedNotifier.poll(timeoutThresholdMs, TimeUnit.MILLISECONDS);
+                isDone = mCountDownLatch.await(timeoutThresholdMs, TimeUnit.MILLISECONDS);
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }
 
+            int numThreadsJoined = mNumOfThreads - (int) mCountDownLatch.getCount();
             long endTime = System.currentTimeMillis();
-            debugPrintln("all " + mJoinedCounter.get() + " Threads joined at "
+            debugPrintln("all " + numThreadsJoined + " Threads joined at "
                     + df.format(new Date(endTime)));
-            if (joined_signal == null) {
+            if (!isDone) {
                 throw new AssertionError("Expected " + mNumOfThreads + " threads to "
-                        + "join, but only " + mJoinedCounter.get() + " threads joined within " +
+                        + "join, but only " + numThreadsJoined + " threads joined within " +
                         timeoutThresholdMs + " ms.");
             }
             if (virtualThreadIds.size() != mNumOfThreads) {
@@ -185,16 +184,13 @@ public class Main {
         }
 
         private static void startSleepingThread(
-                ConcurrentLinkedQueue<ParkedSleepingThreadHolder> queue,
-                long numOfThreads, long sleepDurationMs,
-                AtomicInteger joinedCounter, LinkedBlockingQueue<Object> allJoinedNotifier) {
-            Thread.startVirtual(() -> sleepingTask(queue, numOfThreads, sleepDurationMs,
-                    joinedCounter, allJoinedNotifier));
+                ConcurrentLinkedQueue<ParkedSleepingThreadHolder> queue, long sleepDurationMs,
+                CountDownLatch latch) {
+            Thread.startVirtual(() -> sleepingTask(queue, sleepDurationMs, latch));
         }
 
         private static void sleepingTask(ConcurrentLinkedQueue<ParkedSleepingThreadHolder> queue,
-                long numOfThreads, long sleepDurationMs,
-                AtomicInteger joinedCounter, LinkedBlockingQueue<Object> allJoinedNotifier) {
+                long sleepDurationMs, CountDownLatch latch) {
             long tid1 = getCarrierThreadId();
             parkVirtual(queue,  sleepDurationMs);
             long tid2 = getCarrierThreadId();
@@ -203,11 +199,7 @@ public class Main {
                         + tid1 + " != " + tid2);
             }
 
-            int c = joinedCounter.incrementAndGet();
-
-            if (c >= numOfThreads) {
-                allJoinedNotifier.add(new Object());
-            }
+            latch.countDown();
         }
 
         private static long getCarrierThreadId() {
