@@ -320,106 +320,6 @@ build-art-simulator-boot-image: $(HOST_OUT_EXECUTABLES)/generate-boot-image64 \
 .PHONY: build-art-simulator
 build-art-simulator: build-art-simulator-profile build-art-simulator-boot-image
 
-PRIVATE_ART_APEX_DEPENDENCY_FILES := \
-  bin/dalvikvm32 \
-  bin/dalvikvm64 \
-  bin/dalvikvm \
-  bin/dex2oat32 \
-  bin/dex2oat64 \
-  bin/dexdump \
-
-PRIVATE_ART_APEX_DEPENDENCY_LIBS := \
-  lib/libadbconnection.so \
-  lib/libandroidio.so \
-  lib/libartbase.so \
-  lib/libart-dexlayout.so \
-  lib/libart-disassembler.so \
-  lib/libartpalette.so \
-  lib/libart.so \
-  lib/libdexfile.so \
-  lib/libdt_fd_forward.so \
-  lib/libdt_socket.so \
-  lib/libexpat.so \
-  lib/libjavacore.so \
-  lib/libjdwp.so \
-  lib/liblzma.so \
-  lib/libmeminfo.so \
-  lib/libnativebridge.so \
-  lib/libnativehelper.so \
-  lib/libnativeloader.so \
-  lib/libnpt.so \
-  lib/libopenjdkjvm.so \
-  lib/libopenjdkjvmti.so \
-  lib/libopenjdk.so \
-  lib/libpac.so \
-  lib/libprocinfo.so \
-  lib/libprofile.so \
-  lib/libsigchain.so \
-  lib/libunwindstack.so \
-  lib64/libadbconnection.so \
-  lib64/libandroidio.so \
-  lib64/libartbase.so \
-  lib64/libart-dexlayout.so \
-  lib64/libart-disassembler.so \
-  lib64/libartpalette.so \
-  lib64/libart.so \
-  lib64/libdexfile.so \
-  lib64/libdt_fd_forward.so \
-  lib64/libdt_socket.so \
-  lib64/libexpat.so \
-  lib64/libjavacore.so \
-  lib64/libjdwp.so \
-  lib64/liblzma.so \
-  lib64/libmeminfo.so \
-  lib64/libnativebridge.so \
-  lib64/libnativehelper.so \
-  lib64/libnativeloader.so \
-  lib64/libnpt.so \
-  lib64/libopenjdkjvm.so \
-  lib64/libopenjdkjvmti.so \
-  lib64/libopenjdk.so \
-  lib64/libpac.so \
-  lib64/libprocinfo.so \
-  lib64/libprofile.so \
-  lib64/libsigchain.so \
-  lib64/libunwindstack.so \
-
-PRIVATE_RUNTIME_APEX_DEPENDENCY_FILES := \
-  bin/linker \
-  bin/linker64 \
-  lib/bionic/libc.so \
-  lib/bionic/libdl.so \
-  lib/bionic/libdl_android.so \
-  lib/bionic/libm.so \
-  lib64/bionic/libc.so \
-  lib64/bionic/libdl.so \
-  lib64/bionic/libdl_android.so \
-  lib64/bionic/libm.so \
-
-PRIVATE_CONSCRYPT_APEX_DEPENDENCY_LIBS := \
-  lib/libcrypto.so \
-  lib/libjavacrypto.so \
-  lib/libssl.so \
-  lib64/libcrypto.so \
-  lib64/libjavacrypto.so \
-  lib64/libssl.so \
-
-PRIVATE_I18N_APEX_DEPENDENCY_LIBS := \
-  lib/libicu.so \
-  lib/libicui18n.so \
-  lib/libicu_jni.so \
-  lib/libicuuc.so \
-  lib64/libicu.so \
-  lib64/libicui18n.so \
-  lib64/libicu_jni.so \
-  lib64/libicuuc.so \
-
-PRIVATE_STATSD_APEX_DEPENDENCY_LIBS := \
-  lib/libstatspull.so \
-  lib/libstatssocket.so \
-  lib64/libstatspull.so \
-  lib64/libstatssocket.so \
-
 # Extracts files from an APEX into a location. The APEX can be either a .apex or
 # .capex file in $(TARGET_OUT)/apex, or a directory in the same location. Files
 # are extracted to $(TARGET_OUT) with the same relative paths as under the APEX
@@ -427,8 +327,8 @@ PRIVATE_STATSD_APEX_DEPENDENCY_LIBS := \
 # $(1): APEX base name
 # $(2): List of files to extract, with paths relative to the APEX root
 #
-# "cp -d" below doesn't work on Darwin, but this is only used for Golem builds
-# and won't run on mac anyway.
+# "cp -d" below doesn't work on Darwin, but this is only used for tests and
+# won't run on mac anyway.
 define extract-from-apex
   apex_root=$(TARGET_OUT)/apex && \
   apex_file=$$apex_root/$(1).apex && \
@@ -454,69 +354,8 @@ define extract-from-apex
   done
 endef
 
-# Copy or extract some required files from APEXes to the `system` (TARGET_OUT)
-# directory. This is dangerous as these files could inadvertently stay in this
-# directory and be included in a system image.
-#
-# This target is only used by Golem now.
-#
-# NB Android build does not use cp from:
-#  $ANDROID_BUILD_TOP/prebuilts/build-tools/path/{linux-x86,darwin-x86}
-# which has a non-standard set of command-line flags.
-#
-# TODO(b/129332183): Remove this when Golem has full support for the
-# ART APEX.
-#
-# TODO(b/129332183): This approach is flawed: We mix DSOs from prebuilt APEXes
-# with source built ones, and some of them don't have stable ABIs. libbase.so in
-# particular is such a problematic dependency. When those dependencies
-# eventually don't work anymore we don't have much choice but to update all
-# prebuilts.
-.PHONY: standalone-apex-files
-standalone-apex-files: deapexer \
-                       $(RELEASE_ART_APEX) \
-                       $(RUNTIME_APEX) \
-                       $(CONSCRYPT_APEX) \
-                       $(I18N_APEX) \
-                       $(STATSD_APEX) \
-                       $(TZDATA_APEX) \
-                       $(HOST_OUT)/bin/generate-boot-image64 \
-                       $(HOST_OUT)/bin/dex2oat64 \
-                       libartpalette_fake \
-                       art_fake_heapprofd_client_api
-	$(call extract-from-apex,$(RELEASE_ART_APEX),\
-	  $(PRIVATE_ART_APEX_DEPENDENCY_LIBS) $(PRIVATE_ART_APEX_DEPENDENCY_FILES))
-	# The Runtime APEX has the Bionic libs in ${LIB}/bionic subdirectories,
-	# so we need to move them up a level after extraction.
-	# Also, copy fake platform libraries.
-	$(call extract-from-apex,$(RUNTIME_APEX),\
-	  $(PRIVATE_RUNTIME_APEX_DEPENDENCY_FILES)) && \
-	  libdir=$(TARGET_OUT)/lib$$(expr $(TARGET_ARCH) : '.*\(64\)' || :) && \
-	  if [ -d $$libdir/bionic ]; then \
-	    mv -f $$libdir/bionic/*.so $$libdir; \
-	  fi && \
-	  cp $$libdir/art_fake/*.so $$libdir
-	$(call extract-from-apex,$(CONSCRYPT_APEX),\
-	  $(PRIVATE_CONSCRYPT_APEX_DEPENDENCY_LIBS))
-	$(call extract-from-apex,$(I18N_APEX),\
-	  $(PRIVATE_I18N_APEX_DEPENDENCY_LIBS))
-	$(call extract-from-apex,$(STATSD_APEX),\
-	  $(PRIVATE_STATSD_APEX_DEPENDENCY_LIBS))
-	$(call extract-from-apex,$(TZDATA_APEX),)
-	rm -rf $(PRODUCT_OUT)/apex/art_boot_images && \
-	  mkdir -p $(PRODUCT_OUT)/apex/art_boot_images/javalib && \
-	  $(HOST_OUT)/bin/generate-boot-image64 \
-	    --output-dir=$(PRODUCT_OUT)/apex/art_boot_images/javalib \
-	    --compiler-filter=speed \
-	    --use-profile=false \
-	    --dex2oat-bin=$(HOST_OUT)/bin/dex2oat64 \
-	    --android-root=$(TARGET_OUT) \
-	    --instruction-set=$(TARGET_ARCH)
-
 ########################################################################
-# Phony target for only building what go/lem requires for pushing ART on /data.
-
-.PHONY: build-art-target-golem
+# Rules for building all dependencies for tests.
 
 ART_TARGET_PLATFORM_LIBS := \
   libcutils \
@@ -533,43 +372,6 @@ ifdef TARGET_2ND_ARCH
 ART_TARGET_PLATFORM_DEPENDENCIES += \
   $(foreach lib,$(ART_TARGET_PLATFORM_LIBS), $(2ND_TARGET_OUT_SHARED_LIBRARIES)/$(lib).so)
 endif
-
-# Despite `liblz4` being included in the ART apex, Golem benchmarks need another one in /system/ .
-ART_TARGET_PLATFORM_DEPENDENCIES_GOLEM= \
-  $(TARGET_OUT_SHARED_LIBRARIES)/liblz4.so
-
-# Also include libartbenchmark, we always include it when running golem.
-# libstdc++ is needed when building for ART_TARGET_LINUX.
-ART_TARGET_SHARED_LIBRARY_BENCHMARK := $(TARGET_OUT_SHARED_LIBRARIES)/libartbenchmark.so
-
-build-art-target-golem: $(RELEASE_ART_APEX) com.android.runtime $(CONSCRYPT_APEX) \
-                        $(TARGET_OUT_EXECUTABLES)/art \
-                        $(TARGET_OUT_EXECUTABLES)/dex2oat_wrapper \
-                        $(ART_TARGET_PLATFORM_DEPENDENCIES) \
-                        $(ART_TARGET_PLATFORM_DEPENDENCIES_GOLEM) \
-                        $(ART_TARGET_SHARED_LIBRARY_BENCHMARK) \
-                        $(TARGET_OUT_SHARED_LIBRARIES)/libgolemtiagent.so \
-                        standalone-apex-files
-	# remove debug libraries from public.libraries.txt because golem builds
-	# won't have it.
-	sed -i '/libartd.so/d' $(TARGET_OUT)/etc/public.libraries.txt
-	sed -i '/libdexfiled.so/d' $(TARGET_OUT)/etc/public.libraries.txt
-	sed -i '/libprofiled.so/d' $(TARGET_OUT)/etc/public.libraries.txt
-	sed -i '/libartbased.so/d' $(TARGET_OUT)/etc/public.libraries.txt
-
-########################################################################
-# Phony target for building what go/lem requires on host.
-
-.PHONY: build-art-host-golem
-# Also include libartbenchmark, we always include it when running golem.
-ART_HOST_SHARED_LIBRARY_BENCHMARK := $(ART_HOST_OUT_SHARED_LIBRARIES)/libartbenchmark.so
-build-art-host-golem: build-art-host \
-                      $(ART_HOST_SHARED_LIBRARY_BENCHMARK) \
-		      $(ART_HOST_OUT_SHARED_LIBRARIES)/libgolemtiagent.so \
-                      $(HOST_OUT_EXECUTABLES)/dex2oat_wrapper
-
-########################################################################
-# Rules for building all dependencies for tests.
 
 .PHONY: build-art-host-gtests build-art-host-run-tests build-art-host-tests
 
