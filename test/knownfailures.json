@@ -1637,6 +1637,11 @@
       "description": ["Tests for ART-specific Virtual Thread APIs."]
     },
     {
+      "tests":["2395-virtual-thread-sleep-api"],
+      "variant": "gcstress",
+      "description": ["Timeout on gcstrees"]
+    },
+    {
         "tests": ["169-threadgroup-jni"],
         "variant": "jvm",
         "description": ["ThreadGroup.isDestroyed() has been deprecated since Java 16: ",
