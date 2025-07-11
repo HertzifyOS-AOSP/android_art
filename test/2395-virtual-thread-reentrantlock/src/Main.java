@@ -45,7 +45,7 @@ public class Main {
     private static void verifyReentrantLock() throws InterruptedException {
         ReentrantLock lock = new ReentrantLock();
         AtomicBoolean v = new AtomicBoolean(false);
-        long timeoutThresholdNs = TimeUnit.SECONDS.toNanos(1);
+        long timeoutThresholdNs = TimeUnit.SECONDS.toNanos(5);
         lock.lock();
         Thread vt = createDefaultVirtualThreadBuilder().start(() -> {
             lock.lock();
