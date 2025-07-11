@@ -36,6 +36,7 @@
 #include "gc_root.h"
 #include "immune_spaces.h"
 #include "offsets.h"
+#include "scoped_thread_priority_change.h"
 
 namespace art HIDDEN {
 
@@ -493,8 +494,9 @@ class MarkCompact final : public GarbageCollector {
       REQUIRES_SHARED(Locks::mutator_lock_, Locks::heap_bitmap_lock_);
 
   // Perform reference-processing and the likes before sweeping the non-movable
-  // spaces.
-  void ReclaimPhase() REQUIRES_SHARED(Locks::mutator_lock_) REQUIRES(!Locks::heap_bitmap_lock_);
+  // spaces. Priority is reset once we no longer block reference operations.
+  void ReclaimPhase(ScopedPriorityChange* spc) REQUIRES_SHARED(Locks::mutator_lock_)
+      REQUIRES(!Locks::heap_bitmap_lock_);
 
   // Mark GC-roots (except from immune spaces and thread-stacks) during a STW pause.
   void ReMarkRoots(Runtime* runtime) REQUIRES(Locks::mutator_lock_, Locks::heap_bitmap_lock_);

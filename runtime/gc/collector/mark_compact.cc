@@ -52,6 +52,7 @@
 #include "mark_compact-inl.h"
 #include "mirror/object-refvisitor-inl.h"
 #include "read_barrier_config.h"
+#include "scoped_thread_priority_change.h"
 #include "scoped_thread_state_change-inl.h"
 #include "sigchain.h"
 #include "thread_list.h"
@@ -874,10 +875,14 @@ void MarkCompact::RunPhases() {
   Runtime* runtime = Runtime::Current();
   GetHeap()->PreGcVerification(this);
   InitializePhase();
+  ScopedPriorityChange spc(self);
   {
     ReaderMutexLock mu(self, *Locks::mutator_lock_);
     TraceFaults();
     MarkingPhase();
+    // From here, until we re-enable full weak-reference access, we are potentially blocking high
+    // priority threads.
+    spc.SetToNormalOrBetter();
   }
   {
     // Marking pause
@@ -891,8 +896,14 @@ void MarkCompact::RunPhases() {
   bool perform_compaction;
   {
     ReaderMutexLock mu(self, *Locks::mutator_lock_);
-    ReclaimPhase();
+    ReclaimPhase(&spc);  // Resets priority.
+    // It may be better to remain at the higher priority, and raise it only once. But given
+    // that both PrepareForCompaction() and Sweep() may take some time and do not block other
+    // threads, we start out with the conservative option.
     perform_compaction = PrepareForCompaction();
+    if (perform_compaction) {
+      spc.SetToNormalOrBetter();  // With mutator_lock_ still held.
+    }
   }
   if (perform_compaction) {
     // Compaction pause
@@ -901,9 +912,12 @@ void MarkCompact::RunPhases() {
     runtime->GetThreadList()->FlipThreadRoots(
         &visitor, &callback, this, GetHeap()->GetGcPauseListener());
 
-    if (IsValidFd(uffd_)) {
+    {
       ReaderMutexLock mu(self, *Locks::mutator_lock_);
-      CompactionPhase();
+      spc.Reset();
+      if (IsValidFd(uffd_)) {
+        CompactionPhase();
+      }
     }
   } else {
     if (use_generational_) {
@@ -1653,7 +1667,7 @@ void MarkCompact::SweepLargeObjects(bool swap_bitmaps) {
   }
 }
 
-void MarkCompact::ReclaimPhase() {
+void MarkCompact::ReclaimPhase(ScopedPriorityChange* spc) {
   TimingLogger::ScopedTiming t(__FUNCTION__, GetTimings());
   DCHECK(thread_running_gc_ == Thread::Current());
   Runtime* const runtime = Runtime::Current();
@@ -1663,6 +1677,7 @@ void MarkCompact::ReclaimPhase() {
   // references during the compaction pause.
   SweepSystemWeaks(thread_running_gc_, runtime, /*paused*/ false);
   runtime->AllowNewSystemWeaks();
+  spc->Reset();
   // Clean up class loaders after system weaks are swept since that is how we know if class
   // unloading occurred.
   runtime->GetClassLinker()->CleanupClassLoaders();

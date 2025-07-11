@@ -97,9 +97,10 @@
 #ifdef ART_TARGET_ANDROID
 #include "perfetto/heap_profile.h"
 #endif
+#include "javaheapprof/javaheapsampler.h"
 #include "reflection.h"
 #include "runtime.h"
-#include "javaheapprof/javaheapsampler.h"
+#include "scoped_thread_priority_change.h"
 #include "scoped_thread_state_change-inl.h"
 #include "thread-inl.h"
 #include "thread_list.h"
@@ -2029,11 +2030,18 @@ mirror::Object* Heap::AllocateInternalWithGc(Thread* self,
     return free_heap_ratio >= kMinFreeHeapAfterGcForAlloc ||
            newly_freed_ratio >= kMinFreedHeapAfterGcForAlloc;
   };
-  // We perform one GC as per the next_gc_type_ (chosen in GrowForUtilization),
-  // if it's not already tried. If that doesn't succeed then go for the most
-  // exhaustive option. Perform a full-heap collection including clearing
-  // SoftReferences. In case of ConcurrentCopying, it will also ensure that
-  // all regions are evacuated. If allocation doesn't succeed even after that
+
+  // We are about to run GC(s) in the allocating thread. Whenever we do so, it is likely that
+  // other threads, including high priority ones, will be in the same boat, and will end up
+  // waiting for us. Make sure we run at a reasonable priority, so as not to make them wait
+  // unnecessarily.
+  ScopedPriorityChange spc(self);
+  spc.SetToNormalOrBetter();
+
+  // We perform one GC as per the next_gc_type_ (chosen in GrowForUtilization), if it's not
+  // already tried. If that doesn't succeed then go for the most exhaustive option. Perform a
+  // full-heap collection including clearing SoftReferences. In case of ConcurrentCopying, it will
+  // also ensure that all regions are evacuated. If allocation doesn't succeed even after that
   // then there is no hope, so we throw OOME.
   collector::GcType tried_type = next_gc_type_;
   if (last_gc < tried_type) {
