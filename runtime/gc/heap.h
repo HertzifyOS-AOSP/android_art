@@ -149,6 +149,7 @@ class Heap {
   static constexpr size_t kDefaultLongGCLogThresholdGcStress = MsToNs(1000);
   static constexpr size_t kDefaultTLABSize = 32 * KB;
   static constexpr double kDefaultTargetUtilization = 0.6;
+  static constexpr size_t kDefaultMemoryGcCostFactor = 0 * MB;  // disabled by default
   static constexpr double kDefaultHeapGrowthMultiplier = 2.0;
   // Primitive arrays larger than this size are put in the large object space.
   // TODO: Preliminary experiments suggest this value might be not optimal.
@@ -205,6 +206,7 @@ class Heap {
        size_t min_free,
        size_t max_free,
        double target_utilization,
+       size_t memory_gc_cost_factor,
        double foreground_heap_growth_multiplier,
        size_t stop_for_native_allocs,
        size_t capacity,
@@ -1475,6 +1477,7 @@ class Heap {
   // foreground we set target_footprint_ and concurrent_start_bytes_ to the corresponding value.
   size_t min_foreground_target_footprint_ GUARDED_BY(process_state_update_lock_);
   size_t min_foreground_concurrent_start_bytes_ GUARDED_BY(process_state_update_lock_);
+  size_t min_foreground_time_based_gc_threshold_ GUARDED_BY(process_state_update_lock_);
 
   // When num_bytes_allocated_ exceeds this amount then a concurrent GC should be requested so that
   // it completes ahead of an allocation failing.
@@ -1602,6 +1605,21 @@ class Heap {
 
   // Target ideal heap utilization ratio.
   double target_utilization_;
+
+  // How many bytes of memory we are willing to spend 1% GC cost per second on.
+  // Used for the time based concurrent GC trigger. Set to 0 to disable time
+  // based GC triggering.
+  const size_t memory_gc_cost_factor_ = 0;
+
+  // The time*alloc threshold for when to trigger the next concurrent GC when
+  // using time based GC triggering.
+  // In units of ms * KB, which should give enough space for a worst case
+  // 1 year * 512MB value. When set to 0, falls back to non-time-based GC
+  // triggering.
+  uint64_t time_based_gc_threshold_ = 0;
+
+  // The NanoTime when we started the most recent GC.
+  uint64_t last_gc_start_time_ = 0;
 
   // How much more we grow the heap when we are a foreground app instead of background.
   double foreground_heap_growth_multiplier_;
