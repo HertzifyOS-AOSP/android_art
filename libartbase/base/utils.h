@@ -132,6 +132,9 @@ WARN_UNUSED bool CacheOperationsMaySegFault();
 // Is the execution environment on a virtual machine? See ART_TEST_ON_VM.
 WARN_UNUSED bool RunningOnVM();
 
+// Is the execution environment on a single-board computer? See ART_TEST_ON_SBC.
+WARN_UNUSED bool RunningOnSBC();
+
 template <typename Func, typename... Args>
 static inline void CheckedCall(const Func& function, const char* what, Args... args) {
   int rc = function(args...);

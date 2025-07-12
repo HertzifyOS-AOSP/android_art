@@ -321,7 +321,7 @@ static bool MaybeAppendBootImageMainlineExtension(const std::string& android_roo
                                                   bool deny_art_apex_data_files,
                                                   /*inout*/ std::string* location,
                                                   /*out*/ std::string* error_msg) {
-  if (!kIsTargetAndroid || RunningOnVM()) {
+  if (!kIsTargetAndroid || RunningOnVM() || RunningOnSBC()) {
     return true;
   }
   // Due to how the runtime determines the mapping between boot images and bootclasspath jars, the

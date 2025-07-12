@@ -193,6 +193,11 @@ bool RunningOnVM() {
   return on_vm != nullptr && std::strcmp("true", on_vm) == 0;
 }
 
+bool RunningOnSBC() {
+  const char* on_sbc = getenv("ART_TEST_ON_SBC");
+  return on_sbc != nullptr && std::strcmp("true", on_sbc) == 0;
+}
+
 uint32_t GetTid() {
 #if defined(__APPLE__)
   uint64_t owner;

@@ -125,6 +125,12 @@ static std::ostream& PrintSignalInfo(std::ostream& os, siginfo_t* info) {
   return os;
 }
 
+#if defined(__riscv) && defined(ART_TEST_ON_SBC_RISCV64_V_ADRALN_WORKAROUND)
+namespace riscv64 {
+EXPORT void SigBusAdrAlnWorkaround(int signo, siginfo_t* siginfo, void* ucontext_raw);
+}  // namespace riscv64
+#endif  // defined(__riscv) && defined(ART_TEST_ON_SBC_RISCV64_V_ADRALN_WORKAROUND)
+
 void FaultManager::Init(bool use_sig_chain) {
   CHECK(!initialized_);
   if (gUseUserfaultfd) {
@@ -181,6 +187,12 @@ void FaultManager::Init(bool use_sig_chain) {
     std::memset(&act, '\0', sizeof(act));
     act.sa_flags = SA_SIGINFO | SA_RESTART;
     act.sa_sigaction = [](int sig, siginfo_t* info, void* context) {
+#if defined(__riscv) && defined(ART_TEST_ON_SBC_RISCV64_V_ADRALN_WORKAROUND)
+      if (info->si_code == BUS_ADRALN) {
+        art::riscv64::SigBusAdrAlnWorkaround(sig, info, context);
+        return;
+      }
+#endif  // defined(__riscv) && defined(ART_TEST_ON_SBC_RISCV64_V_ADRALN_WORKAROUND)
       if (!art_sigbus_handler(sig, info, context)) {
         std::ostringstream oss;
         PrintSignalInfo(oss, info);
