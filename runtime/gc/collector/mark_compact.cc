@@ -2964,7 +2964,6 @@ size_t MarkCompact::MoveIoctl(void* dst, void* src, size_t len, bool tolerate_ei
                                .len = len,
                                .mode = 0,
                                .move = 0};
-  uint32_t ebusy_iters = 0;
   while (ioctl(uffd_, UFFDIO_MOVE, &uffd_move) != 0) {
     if (errno == EEXIST) {
       DCHECK_EQ(uffd_move.move, -EEXIST);
@@ -3001,18 +3000,15 @@ size_t MarkCompact::MoveIoctl(void* dst, void* src, size_t len, bool tolerate_ei
       // as they are jank sensitive as well as maybe runnable and hence waiting
       // may delay responding to suspension requests. With COPY ioctl we can be
       // sure that it will succeed.
-      // GC-thread, on the other hand, can wait. The exception being when it
-      // causes SIGBUS during thread-flips. Also, waiting for really long is
-      // undesirable.
-      Thread* self = Thread::Current();
-      if (self == thread_running_gc_ && conc_compaction_started_ && ebusy_iters < 10) {
-        DCHECK_NE(self->GetState(), ThreadState::kRunnable);
-        BackOff</*kYieldMax=*/5, /*kSleepUs=*/1000>(ebusy_iters++);
-        uffd_move.move = 0;
-      } else {
-        uffd_move.move = CopyIoctl(dst, src, gPageSize, true, tolerate_einval);
-        break;
+      uffd_move.move =
+          CopyIoctl(dst, src, gPageSize, /*return_on_contention=*/true, tolerate_einval);
+      if (Thread::Current() == thread_running_gc_ && conc_compaction_started_) {
+        // Release the page in case of gc-thread after jank-critical thread-flip
+        // has finished to avoid RSS increase.
+        int ret = madvise(src, gPageSize, MADV_DONTNEED);
+        DCHECK(ret == 0) << "MoveIoctl: madvise of from-space page failed: " << strerror(errno);
       }
+      break;
     } else {
       CHECK_EQ(uffd_move.move, -errno);
       LOG(FATAL) << "ioctl_userfaultfd: move failed: " << strerror(errno) << ". src:" << src
