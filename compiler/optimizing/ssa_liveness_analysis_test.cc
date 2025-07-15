@@ -166,4 +166,25 @@ TEST_F(SsaLivenessAnalysisTest, TestDeoptimize) {
   }
 }
 
+// When splitting a `LiveRange`, the original object should retain its start and have only its
+// end adjusted. Otherwise we risk invalidating cached search start positions that the register
+// allocator may keep. See also `RegisterAllocatorTest.SplitSpillSlotLiveRangeHint`. Bug: 426785078
+TEST_F(SsaLivenessAnalysisTest, SplitRange) {
+  LiveInterval* interval = LiveInterval::MakeInterval(GetScopedAllocator(), DataType::Type::kInt32);
+  interval->AddRange(0u, 10u * kLivenessPositionsPerInstruction);
+  LiveRange* first_range = interval->GetFirstRange();
+  ASSERT_TRUE(first_range != nullptr);
+  LiveInterval* split = interval->SplitAt(5u * kLivenessPositionsPerInstruction);
+  ASSERT_TRUE(split != interval);
+  EXPECT_TRUE(first_range == interval->GetFirstRange());
+  EXPECT_TRUE(first_range == interval->GetLastRange());
+  EXPECT_EQ(0u, first_range->GetStart());
+  EXPECT_EQ(5u * kLivenessPositionsPerInstruction, first_range->GetEnd());
+  LiveRange* second_range = split->GetFirstRange();
+  ASSERT_TRUE(second_range != nullptr);
+  EXPECT_TRUE(second_range == split->GetLastRange());
+  EXPECT_EQ(5u * kLivenessPositionsPerInstruction, second_range->GetStart());
+  EXPECT_EQ(10u * kLivenessPositionsPerInstruction, second_range->GetEnd());
+}
+
 }  // namespace art
