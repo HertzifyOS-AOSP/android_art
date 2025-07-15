@@ -16,8 +16,7 @@
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Verify that {@link Thread#sleep(long)} API parks virtual threads.
@@ -35,6 +34,7 @@ public class Main {
         testNSleepingThreads(10);
         testNSleepingThreads(100);
         testNSleepingThreads(300);
+        testSleepingThreadPinning();
     }
 
     private static final Thread.UncaughtExceptionHandler HANDLER = (t, e) -> {
@@ -43,54 +43,91 @@ public class Main {
         System.exit(1);
     };
 
-    private static final int SLEEP_DURATION_MULTIPLIER = 10;
-
     /**
      * Start {@code numOfThreads} virtual threads sleeping for the given duration and wait until
      * all threads join or time out.
      * @param numOfThreads number of concurrent virtual threads sleeping
      */
     private static void testNSleepingThreads(int numOfThreads) throws InterruptedException {
-        long sleepDurationMs = Math.max(numOfThreads * SLEEP_DURATION_MULTIPLIER, 1500);
-        long timeoutThresholdNs = TimeUnit.MILLISECONDS.toNanos(
-                sleepDurationMs * 3);
-        List<Thread> threads = new ArrayList<>(numOfThreads);
-        CountDownLatch latch = new CountDownLatch(numOfThreads);
+        long sleepDurationMs = 10;
+        List<VirtualThread> threads = new ArrayList<>(numOfThreads);
         for (int i = 0; i < numOfThreads; i++) {
-            Thread vt = Thread.ofVirtual().uncaughtExceptionHandler(HANDLER).start(() -> {
-                latch.countDown();
-                try {
-                    Thread.sleep(sleepDurationMs);
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
-            });
+            VirtualThread vt = (VirtualThread) Thread.ofVirtual()
+                    .uncaughtExceptionHandler(HANDLER)
+                    .unstarted(() -> {
+                        try {
+                            Thread.sleep(sleepDurationMs);
+                        } catch (InterruptedException e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
+            vt.setJvmtiEventListener(new UnmountListener(vt));
             threads.add(vt);
+            vt.start();
         }
 
-        List<Thread> threadsToBeUnmounted = new ArrayList<>(threads);
-        long startTime = System.nanoTime();
-        while (!threadsToBeUnmounted.isEmpty()) {
-            if (latch.getCount() > 0) {
-                // Reset the timer if some threads are not started.
-                startTime = System.nanoTime();
-            } else if (System.nanoTime() - startTime > timeoutThresholdNs) {
-                Thread vt = threadsToBeUnmounted.getFirst();
-                throw new AssertionError("Thread " + vt.threadId() + " wasn't "
-                        + "unmounted. Consider increasing SLEEP_DURATION_MULTIPLIER for slow test "
-                        + "configurations.");
-            }
-
-            // We can't assert that a virtual thread runs on different carrier thread before parking
-            // and after un-parking because it is backed by carrier threads from a thread pool.
-            // Instead, we verify that it's unmounted in a busy loop ,
-            threadsToBeUnmounted.removeIf(vt -> vt.getVirtualThreadContext().isUnmounted());
-
-
-        }
-
-        for (Thread vt : threads) {
+        for (VirtualThread vt : threads) {
             vt.join();
+        }
+
+        for (VirtualThread vt : threads) {
+            UnmountListener listener = (UnmountListener) vt.getJvmtiEventListener();
+            int state = listener.state.get();
+            if (listener.state.get() != UnmountListener.STATE_PARKED_AND_UNMOUNTED) {
+                throw new AssertionError("Thread " + vt.threadId() + " wasn't parked. "
+                        + "The state code was " + state);
+            }
+        }
+    }
+
+    private static void testSleepingThreadPinning() throws InterruptedException {
+        VirtualThread vt = (VirtualThread) Thread.ofVirtual()
+                .uncaughtExceptionHandler(HANDLER)
+                .unstarted(() -> {
+                    try {
+                        Thread t = Thread.currentThread();
+                        synchronized (t) {
+                            Thread.sleep(10);
+                        }
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+        UnmountListener listener = new UnmountListener(vt);
+        vt.setJvmtiEventListener(listener);
+        vt.start();
+        vt.join();
+
+        int state = listener.state.get();
+        // When the virtual thread terminates, it's unmounted from the carrier thread.
+        if (listener.state.get() != UnmountListener.STATE_UNMOUNTED) {
+            throw new AssertionError("Thread " + vt.threadId() + " wasn't pinned. "
+                    + "The state code was " + state);
+        }
+    }
+
+    private static class UnmountListener implements VirtualThread.JvmtiEventsListener {
+
+        private static final int STATE_NOT_UNMOUNTED = 0;
+        private static final int STATE_UNMOUNTED = 1;
+        private static final int STATE_PARKED_AND_UNMOUNTED = 2;
+        private final VirtualThread vt;
+        // Indicate if the virtual thread is ever parked and unmounted.
+        private final AtomicInteger state = new AtomicInteger(STATE_NOT_UNMOUNTED);
+
+        public UnmountListener(VirtualThread vt) {
+            this.vt = vt;
+        }
+
+        @Override
+        public void onJvmtiUnmount(boolean hide) {
+            if (!hide && state.get() != STATE_PARKED_AND_UNMOUNTED) {
+                if (vt.getVirtualThreadContext().isUnmounted()) {
+                    state.set(STATE_PARKED_AND_UNMOUNTED);
+                } else {
+                    state.set(STATE_UNMOUNTED);
+                }
+            }
         }
     }
 }
