@@ -2064,24 +2064,36 @@ void Thread::DumpState(std::ostream& os, const Thread* thread, pid_t tid) {
   std::string group_name;
   int priority;
   bool is_daemon = false;
+  bool is_flipping = false;
   Thread* self = Thread::Current();
+
+  mirror::Object* peer = nullptr;
 
   // Don't do this if we are aborting since the GC may have all the threads suspended. This will
   // cause ScopedObjectAccessUnchecked to deadlock.
-  if (gAborting == 0 && self != nullptr && thread != nullptr && thread->tlsPtr_.opeer != nullptr) {
+  if (gAborting == 0 && self != nullptr && thread != nullptr) {
     ScopedObjectAccessUnchecked soa(self);
-    priority = NicenessToPriority(thread->GetCachedNiceness());
-    is_daemon = WellKnownClasses::java_lang_Thread_daemon->GetBoolean(thread->tlsPtr_.opeer);
+    if (thread->GetStateAndFlags(std::memory_order_relaxed).IsAnyOfFlagsSet(FlipFunctionFlags())) {
+      is_flipping = true;
+      priority = thread->GetNativePriority();  // See below for disclaimer.
+    } else if ((peer = thread->tlsPtr_.opeer) != nullptr) {
+      // Flip is initiated with all threads suspended, and we're not suspended.
+      // So no flip can be requested while we hold the mutator lock.
+      priority = NicenessToPriority(WellKnownClasses::java_lang_Thread_niceness->GetInt(peer));
+      is_daemon = WellKnownClasses::java_lang_Thread_daemon->GetBoolean(peer);
 
-    ObjPtr<mirror::Object> thread_group =
-        WellKnownClasses::java_lang_Thread_group->GetObject(thread->tlsPtr_.opeer);
+      ObjPtr<mirror::Object> thread_group =
+          WellKnownClasses::java_lang_Thread_group->GetObject(peer);
 
-    if (thread_group != nullptr) {
-      ObjPtr<mirror::Object> group_name_object =
-          WellKnownClasses::java_lang_ThreadGroup_name->GetObject(thread_group);
-      group_name = (group_name_object != nullptr)
-          ? group_name_object->AsString()->ToModifiedUtf8()
-          : "<null>";
+      if (thread_group != nullptr) {
+        ObjPtr<mirror::Object> group_name_object =
+            WellKnownClasses::java_lang_ThreadGroup_name->GetObject(thread_group);
+        group_name = (group_name_object != nullptr)
+                         ? group_name_object->AsString()->ToModifiedUtf8()
+                         : "<null>";
+      }
+    } else {
+      priority = thread->GetNativePriority();  // See below for disclaimer.
     }
   } else if (thread != nullptr) {
     // This produces niceness translated to a Java priority, which may not match the cached Java
@@ -2111,6 +2123,9 @@ void Thread::DumpState(std::ostream& os, const Thread* thread, pid_t tid) {
     if (is_daemon) {
       os << " daemon";
     }
+    if (is_flipping) {
+      os << " in thread flip";
+    }
     os << " prio=" << priority
        << " tid=" << thread->GetThreadId()
        << " " << thread->GetState();
@@ -2137,7 +2152,7 @@ void Thread::DumpState(std::ostream& os, const Thread* thread, pid_t tid) {
          << " sCount=" << thread->tls32_.suspend_count
          << " ucsCount=" << thread->tls32_.user_code_suspend_count
          << " flags=" << state_and_flags.GetValue()
-         << " obj=" << reinterpret_cast<void*>(thread->tlsPtr_.opeer)
+         << " obj=" << reinterpret_cast<void*>(peer)
          << " self=" << reinterpret_cast<const void*>(thread) << "\n";
     };
     if (Locks::thread_suspend_count_lock_->IsExclusiveHeld(self)) {
@@ -5161,6 +5176,18 @@ std::string Thread::StateAndFlagsAsHexString() const {
   std::stringstream result_stream;
   result_stream << std::hex << GetStateAndFlags(std::memory_order_relaxed).GetValue();
   return result_stream.str();
+}
+
+int Thread::GetCachedNiceness() const {
+  // TODO: Possibly consider inlining again. A straightforward move to thread-inl.h requires
+  // additional includes there to get GetInt() defined, which then result in build failures for
+  // other uses of that file.
+  mirror::Object* peer = GetPeer();
+  if (peer == nullptr) {
+    return 0;
+  }
+  // Respects the fact that the `niceness` field is volatile.
+  return WellKnownClasses::java_lang_Thread_niceness->GetInt(peer);
 }
 
 ScopedExceptionStorage::ScopedExceptionStorage(art::Thread* self)

@@ -17,6 +17,10 @@
 #ifndef ART_RUNTIME_SCOPED_THREAD_PRIORITY_CHANGE_H_
 #define ART_RUNTIME_SCOPED_THREAD_PRIORITY_CHANGE_H_
 
+#include "base/locks.h"
+#include "base/macros.h"
+#include "thread.h"
+
 namespace art HIDDEN {
 
 // Supports temporary increases of priority to NORMAL priority in critical code.  In order to
@@ -41,16 +45,34 @@ namespace art HIDDEN {
 class ScopedPriorityChange {
  public:
   // Constructor by itself does nothing, allowing the actual priority change to be inside a
-  // conditional.
+  // conditional or nested scope.
   explicit ScopedPriorityChange(Thread* self) : self_(self), priority_changed_(false) {}
 
-  ~ScopedPriorityChange() REQUIRES_SHARED(Locks::mutator_lock_);
+  // Effectively calls reset(). We must hold the mutator lock unless this is immediately preceded
+  // by a reset().
+  ~ScopedPriorityChange() {
+    if (priority_changed_) {
+      ResetInternal();
+    }
+  }
 
   // Set niceness of current thread to zero if it is currently positive, and it is safe to do so.
-  // Should be called at most once during the lifetime of the ScopedPriorityChange.
+  // May be called repeatedly only with an intervening reset() call.
   void SetToNormalOrBetter() REQUIRES_SHARED(Locks::mutator_lock_);
 
+  // If we changed niceness then reset it.
+  void Reset() REQUIRES_SHARED(Locks::mutator_lock_) {
+    if (priority_changed_) {
+      ResetInternal();
+      priority_changed_ = false;
+    }
+  }
+
  private:
+  // We changed niceness; reset it.
+  // Requires the mutator_lock_, but clang can't verify that statically, so we check dynamically.
+  void ResetInternal();
+
   Thread* self_;
   bool priority_changed_;
 };

@@ -30,7 +30,6 @@
 #include "nativehelper/scoped_local_ref.h"
 #include "object_callbacks.h"
 #include "reflection.h"
-#include "scoped_thread_priority_change-inl.h"
 #include "scoped_thread_state_change-inl.h"
 #include "task_processor.h"
 #include "thread-inl.h"
@@ -204,7 +203,6 @@ void ReferenceProcessor::Setup(Thread* self,
 // We advance rp_state_ to signal partial completion for the benefit of GetReferent.
 void ReferenceProcessor::ProcessReferences(Thread* self, TimingLogger* timings) {
   TimingLogger::ScopedTiming t(concurrent_ ? __FUNCTION__ : "(Paused)ProcessReferences", timings);
-  ScopedPriorityChange spc(self);
   if (!clear_soft_references_) {
     // Forward any additional SoftReferences we discovered late, now that reference access has been
     // inhibited.
@@ -214,12 +212,6 @@ void ReferenceProcessor::ProcessReferences(Thread* self, TimingLogger* timings) 
   }
   {
     MutexLock mu(self, *Locks::reference_processor_lock_);
-    if (concurrent_) {
-      // We are blocking some weak reference dereferences, including those from high priority
-      // threads.
-      // TODO: Reconsider placement of this call after other pending reference processing changes.
-      spc.SetToNormalOrBetter();
-    }
     if (!gUseReadBarrier) {
       CHECK_EQ(SlowPathEnabled(), concurrent_) << "Slow path must be enabled iff concurrent";
     } else {

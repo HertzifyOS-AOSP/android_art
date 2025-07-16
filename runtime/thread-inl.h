@@ -31,7 +31,7 @@
 #include "thread.h"
 #include "thread_list.h"
 #include "thread_pool.h"
-#include "well_known_classes.h"
+#include "well_known_classes.h"  // -inl.h doesn't work
 
 namespace art HIDDEN {
 
@@ -732,14 +732,6 @@ inline void Thread::AllowPreMonitorMutexes() {
     CHECK_EQ(GetHeldMutex(kMonitorLock), cp_placeholder_mutex_.load(std::memory_order_relaxed));
     SetHeldMutex(kMonitorLock, nullptr);
   }
-}
-
-inline int Thread::GetCachedNiceness() const {
-  if (tlsPtr_.opeer == nullptr) {
-    return 0;
-  }
-  // Respects the fact that the `niceness` field is volatile.
-  return WellKnownClasses::java_lang_Thread_niceness->GetInt(tlsPtr_.opeer);
 }
 
 }  // namespace art

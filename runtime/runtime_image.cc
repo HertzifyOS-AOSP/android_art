@@ -815,8 +815,10 @@ class RuntimeImageHelper {
   }
 
   void RelocateNativePointers() {
+    // Fake the mutator lock as we are dealing with pointers in a buffer, not
+    // the heap.
+    FakeMutexLock mu(*Locks::mutator_lock_);
     ScopedTrace relocate_native_pointers("Relocate native pointers");
-    ScopedObjectAccess soa(Thread::Current());
     NativePointerVisitor visitor(this);
     for (auto&& entry : classes_) {
       mirror::Class* cls = reinterpret_cast<mirror::Class*>(&objects_[entry.second]);

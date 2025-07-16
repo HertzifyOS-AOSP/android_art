@@ -673,7 +673,7 @@ class EXPORT Thread {
 
   /*
    * Return the niceness value for this thread, as cached by the Java layer, or zero if there is
-   * no Java peer.
+   * no Java peer. Assumes self == this.
    */
   int GetCachedNiceness() const REQUIRES_SHARED(Locks::mutator_lock_);
 
