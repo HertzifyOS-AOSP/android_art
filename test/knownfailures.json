@@ -1618,8 +1618,7 @@
       "env_vars": {"ART_TEST_ON_VM": "true"}
     },
     {
-      "tests": ["2042-reference-processing",
-                "2395-virtual-thread-sleep-api"],
+      "tests": ["2042-reference-processing"],
       "description": ["Timeout on QEMU"],
       "env_vars": {"ART_TEST_ON_VM": "true"}
     },
