@@ -18,6 +18,12 @@
 
 #define MEMCMP  __memcmp16
 
+/*
+ * Half of Silvermont L1 Data Cache size
+ *(see original file cache.h in bionic/libc/arch-x86_64/).
+ * This value is used for specific optimization on big lengths.
+ */
+#define DATA_CACHE_SIZE_HALF    (12*1024)
 
 #ifndef L
 # define L(label)    .L##label
@@ -295,7 +301,14 @@ L(less32bytesin256):
 
     ALIGN (4)
 L(512bytesormore):
-    mov       __x86_data_cache_size_half(%rip), %r8
+#ifdef DATA_CACHE_SIZE_HALF
+    mov       $DATA_CACHE_SIZE_HALF, %r8
+#else
+    mov       __x86_64_data_cache_size_half(%rip), %r8
+#endif
+    mov       %r8, %r9
+    shr       $1, %r8
+    add       %r9, %r8
     cmp       %r8, %rdx
     ja        L(L2_L3_cache_unaglined)
     sub       $64, %rdx
@@ -604,7 +617,14 @@ L(less32bytesin256in2alinged):
 
     ALIGN (4)
 L(512bytesormorein2aligned):
-    mov       __x86_data_cache_size_half(%rip), %r8
+#ifdef DATA_CACHE_SIZE_HALF
+    mov       $DATA_CACHE_SIZE_HALF, %r8
+#else
+    mov       __x86_64_data_cache_size_half(%rip), %r8
+#endif
+    mov       %r8, %r9
+    shr       $1, %r8
+    add       %r9, %r8
     cmp       %r8, %rdx
     ja        L(L2_L3_cache_aglined)
 

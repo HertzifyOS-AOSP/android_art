@@ -545,7 +545,6 @@ cc_defaults {
                 "arch/x86_64/memcmp16_x86_64.S",
                 "arch/x86_64/native_entrypoints_x86_64.S",
                 "arch/x86_64/thread_x86_64.cc",
-                "arch/x86_64/x86_cache.cc",
                 "monitor_pool.cc",
                 "arch/x86/fault_handler_x86.cc",
             ] + select(soong_config_variable("art_module", "art_use_simulator"), {
