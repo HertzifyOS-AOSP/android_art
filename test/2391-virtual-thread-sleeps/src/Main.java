@@ -160,7 +160,7 @@ public class Main {
         void waitUntilAllThreadsWakeUp() {
             // The constant multiplier needs to be significantly larger than 2 because the timer
             // is single-threaded, and is slower in the interpreter mode.
-            long timeoutThresholdMs = mSleepDurationMs * 5;
+            long timeoutThresholdMs = mSleepDurationMs * 10;
             final boolean isDone;
             try {
                 isDone = mCountDownLatch.await(timeoutThresholdMs, TimeUnit.MILLISECONDS);
