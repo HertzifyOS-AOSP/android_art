@@ -29,6 +29,7 @@ var (
 	// The original prebuilts directory is not accessible when running tests remotely.
 	prebuiltToolsForTests = []string{
 		"bin/clang",
+		"bin/clang-real",
 		"bin/clang.real",
 		"bin/llvm-addr2line",
 		"bin/llvm-dwarfdump",
