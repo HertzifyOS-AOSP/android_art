@@ -86,10 +86,15 @@ public class ChildClass {
     DexDomain parentDomain = DexDomain.values()[parentDomainOrdinal];
     DexDomain childDomain = DexDomain.values()[childDomainOrdinal];
 
+    boolean skipJniTests = false;
     if (childDomain == DexDomain.Application) {
       registerAppJniApiCallers(JNI.class);
-    } else {
+    } else if (childDomain == DexDomain.CorePlatform) {
       registerCorePlatformJniApiCallers(JNI.class);
+    } else {
+      // It's difficult to put a .so in a location that identifies it as the platform domain, so
+      // skip those JNI tests.
+      skipJniTests = true;
     }
 
     configMessage = "parentDomain=" + parentDomain.name() + ", childDomain=" + childDomain.name()
@@ -153,19 +158,19 @@ public class ChildClass {
           for (Class klass : new Class<?>[] { ParentClass.class, ParentInterface.class }) {
             String baseName = visibility.name() + suffix;
             checkField(klass, "field" + baseName, isStatic, visibility, expected,
-                invokesMemberCallback, testHiddenApiCheckHardeningDisabled);
+                invokesMemberCallback, testHiddenApiCheckHardeningDisabled, skipJniTests);
             checkMethod(klass, "method" + baseName, isStatic, visibility, expected,
-                invokesMemberCallback, testHiddenApiCheckHardeningDisabled);
+                invokesMemberCallback, testHiddenApiCheckHardeningDisabled, skipJniTests);
           }
 
           // Check whether one can use a class constructor.
           checkConstructor(ParentClass.class, visibility, hiddenness, expected,
-                testHiddenApiCheckHardeningDisabled);
+              testHiddenApiCheckHardeningDisabled, skipJniTests);
 
           // Check whether one can use an interface default method.
           String name = "method" + visibility.name() + "Default" + hiddenness.name();
           checkMethod(ParentInterface.class, name, /*isStatic*/ false, visibility, expected,
-              invokesMemberCallback, testHiddenApiCheckHardeningDisabled);
+              invokesMemberCallback, testHiddenApiCheckHardeningDisabled, skipJniTests);
         }
 
         // Test whether static linking succeeds.
@@ -229,8 +234,7 @@ public class ChildClass {
 
   private static void checkField(Class<?> klass, String name, boolean isStatic,
       Visibility visibility, Behaviour behaviour, boolean invokesMemberCallback,
-      boolean testHiddenApiCheckHardeningDisabled) throws Exception {
-
+      boolean testHiddenApiCheckHardeningDisabled, boolean skipJniTests) throws Exception {
     boolean isPublic = (visibility == Visibility.Public);
     boolean canDiscover = (behaviour != Behaviour.Denied);
 
@@ -259,7 +263,7 @@ public class ChildClass {
 
     // Test discovery with JNI.
 
-    if (JNI.canDiscoverField(klass, name, isStatic) != canDiscover) {
+    if (!skipJniTests && JNI.canDiscoverField(klass, name, isStatic) != canDiscover) {
       throwDiscoveryException(klass, name, true, "JNI", canDiscover);
     }
 
@@ -326,11 +330,13 @@ public class ChildClass {
       if (!isUnmodifiable(klass, name) && !Reflection.canSetField(klass, name)) {
         throwAccessException(klass, name, true, "Field.setInt()");
       }
-      if (!JNI.canGetField(klass, name, isStatic)) {
-        throwAccessException(klass, name, true, "getIntField");
-      }
-      if (!isUnmodifiable(klass, name) && !JNI.canSetField(klass, name, isStatic)) {
-        throwAccessException(klass, name, true, "setIntField");
+      if (!skipJniTests) {
+        if (!JNI.canGetField(klass, name, isStatic)) {
+          throwAccessException(klass, name, true, "getIntField");
+        }
+        if (!isUnmodifiable(klass, name) && !JNI.canSetField(klass, name, isStatic)) {
+          throwAccessException(klass, name, true, "setIntField");
+        }
       }
     }
 
@@ -346,8 +352,7 @@ public class ChildClass {
 
   private static void checkMethod(Class<?> klass, String name, boolean isStatic,
       Visibility visibility, Behaviour behaviour, boolean invokesMemberCallback,
-      boolean testHiddenApiCheckHardeningDisabled) throws Exception {
-
+      boolean testHiddenApiCheckHardeningDisabled, boolean skipJniTests) throws Exception {
     boolean isPublic = (visibility == Visibility.Public);
     if (klass.isInterface() && !isPublic) {
       // All interface members are public.
@@ -376,7 +381,7 @@ public class ChildClass {
 
     // Test discovery with JNI.
 
-    if (JNI.canDiscoverMethod(klass, name, isStatic) != canDiscover) {
+    if (!skipJniTests && JNI.canDiscoverMethod(klass, name, isStatic) != canDiscover) {
       throwDiscoveryException(klass, name, false, "JNI", canDiscover);
     }
 
@@ -425,11 +430,13 @@ public class ChildClass {
         if (!Reflection.canInvokeMethod(klass, name)) {
           throwAccessException(klass, name, false, "invoke()");
         }
-        if (!JNI.canInvokeMethodA(klass, name, isStatic)) {
-          throwAccessException(klass, name, false, "CallMethodA");
-        }
-        if (!JNI.canInvokeMethodV(klass, name, isStatic)) {
-          throwAccessException(klass, name, false, "CallMethodV");
+        if (!skipJniTests) {
+          if (!JNI.canInvokeMethodA(klass, name, isStatic)) {
+            throwAccessException(klass, name, false, "CallMethodA");
+          }
+          if (!JNI.canInvokeMethodV(klass, name, isStatic)) {
+            throwAccessException(klass, name, false, "CallMethodV");
+          }
         }
       }
     }
@@ -439,8 +446,8 @@ public class ChildClass {
   }
 
   private static void checkConstructor(Class<?> klass, Visibility visibility, Hiddenness hiddenness,
-      Behaviour behaviour, boolean testHiddenApiCheckHardeningDisabled) throws Exception {
-
+      Behaviour behaviour, boolean testHiddenApiCheckHardeningDisabled, boolean skipJniTests)
+      throws Exception {
     boolean isPublic = (visibility == Visibility.Public);
     String signature = "(" + visibility.mAssociatedType.mShorty +
                              hiddenness.mAssociatedType.mShorty + ")V";
@@ -475,7 +482,7 @@ public class ChildClass {
 
     // Test discovery with JNI.
 
-    if (JNI.canDiscoverConstructor(klass, signature) != canDiscover) {
+    if (!skipJniTests && JNI.canDiscoverConstructor(klass, signature) != canDiscover) {
       throwDiscoveryException(klass, fullName, false, "JNI", canDiscover);
     }
 
@@ -517,11 +524,13 @@ public class ChildClass {
       if (!Reflection.canInvokeConstructor(klass, args, initargs)) {
         throwAccessException(klass, fullName, false, "invoke()");
       }
-      if (!JNI.canInvokeConstructorA(klass, signature)) {
-        throwAccessException(klass, fullName, false, "NewObjectA");
-      }
-      if (!JNI.canInvokeConstructorV(klass, signature)) {
-        throwAccessException(klass, fullName, false, "NewObjectV");
+      if (!skipJniTests) {
+        if (!JNI.canInvokeConstructorA(klass, signature)) {
+          throwAccessException(klass, fullName, false, "NewObjectA");
+        }
+        if (!JNI.canInvokeConstructorV(klass, signature)) {
+          throwAccessException(klass, fullName, false, "NewObjectV");
+        }
       }
     }
   }
