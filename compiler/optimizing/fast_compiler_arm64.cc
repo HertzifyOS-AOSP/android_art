@@ -258,6 +258,8 @@ class FastCompilerARM64 : public FastCompiler {
                        dex::TypeIndex type_index,
                        uint32_t dex_pc,
                        const Instruction* next);
+  void SetIntConstant(uint32_t register_index, int32_t constant, const Instruction* next);
+  void SetLongConstant(uint32_t register_index, int64_t constant, const Instruction* next);
   bool BuildMove(
       uint32_t dest_reg, uint32_t src_reg, DataType::Type type, const Instruction* next);
   bool LoadMethod(Register reg, ArtMethod* method);
@@ -478,9 +480,12 @@ void FastCompilerARM64::MoveConstantsToRegisters() {
   for (uint32_t i = 0; i < vreg_locations_.size(); ++i) {
     Location location  = vreg_locations_[i];
     if (location.IsConstant()) {
-      vreg_locations_[i] =
-          CreateNewRegisterLocation(i, DataType::Type::kInt32, /* next= */ nullptr);
-      MoveLocation(vreg_locations_[i], location, DataType::Type::kInt32);
+      DCHECK(location.GetConstant()->IsIntConstant() || location.GetConstant()->IsLongConstant());
+      DataType::Type type = location.GetConstant()->IsIntConstant()
+          ? DataType::Type::kInt32
+          : DataType::Type::kInt64;
+      vreg_locations_[i] = CreateNewRegisterLocation(i, type, /* next= */ nullptr);
+      MoveLocation(vreg_locations_[i], location, type);
       DCHECK(!HitUnimplemented());
       if (location.GetConstant()->IsArithmeticZero()) {
         // In case we branch, we need to make sure a null value can be merged
@@ -559,8 +564,14 @@ bool FastCompilerARM64::MoveLocation(Location destination,
   }
   if (source.IsConstant() && destination.IsRegister()) {
     if (source.GetConstant()->IsIntConstant()) {
+      DCHECK_NE(dst_type, DataType::Type::kInt64);
       __ Mov(RegisterFrom(destination, DataType::Type::kInt32),
              source.GetConstant()->AsIntConstant()->GetValue());
+      return true;
+    } else if (source.GetConstant()->IsLongConstant()) {
+      DCHECK_EQ(dst_type, DataType::Type::kInt64);
+      __ Mov(RegisterFrom(destination, DataType::Type::kInt64),
+             source.GetConstant()->AsLongConstant()->GetValue());
       return true;
     }
   }
@@ -1445,7 +1456,7 @@ bool FastCompilerARM64::DoGet(const MemOperand& mem,
       break;
     }
     default:
-      unimplemented_reason_ = "UnimplementedGet";
+      unimplemented_reason_ = Instruction::Name(opcode);
       return false;
   }
   UpdateLocal(dest_reg, is_object);
@@ -1472,6 +1483,40 @@ bool FastCompilerARM64::BuildMove(uint32_t dest_reg,
   return true;
 }
 
+void FastCompilerARM64::SetIntConstant(uint32_t register_index,
+                                       int32_t constant,
+                                       const Instruction* next) {
+  if (GetCodeItemAccessor().TriesSize() == 0) {
+    vreg_locations_[register_index] =
+        Location::ConstantLocation(new (allocator_) HIntConstant(constant));
+  } else {
+    // In the presence of try/catch, we put the constant in a register directly.
+    // This avoids having to dump dex register maps for stack maps, saving
+    // compilation time.
+    MoveLocation(CreateNewRegisterLocation(register_index, DataType::Type::kInt32, next),
+                 Location::ConstantLocation(new (allocator_) HIntConstant(constant)),
+                 DataType::Type::kInt32);
+  }
+  UpdateLocal(register_index, /* is_object= */ false);
+}
+
+void FastCompilerARM64::SetLongConstant(uint32_t register_index,
+                                        int64_t constant,
+                                        const Instruction* next) {
+  if (GetCodeItemAccessor().TriesSize() == 0) {
+    vreg_locations_[register_index] =
+        Location::ConstantLocation(new (allocator_) HLongConstant(constant));
+  } else {
+    // In the presence of try/catch, we put the constant in a register directly.
+    // This avoids having to dump dex register maps for stack maps, saving
+    // compilation time.
+    MoveLocation(CreateNewRegisterLocation(register_index, DataType::Type::kInt64, next),
+                 Location::ConstantLocation(new (allocator_) HLongConstant(constant)),
+                 DataType::Type::kInt64);
+  }
+  UpdateLocal(register_index, /* is_object= */ false);
+}
+
 bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
                                               uint32_t dex_pc,
                                               const Instruction* next) {
@@ -1480,43 +1525,63 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
     case Instruction::CONST_4: {
       int32_t register_index = instruction.VRegA_11n();
       int32_t constant = instruction.VRegB_11n();
-      vreg_locations_[register_index] =
-          Location::ConstantLocation(new (allocator_) HIntConstant(constant));
-      UpdateLocal(register_index, /* is_object= */ false);
+      SetIntConstant(register_index, constant, next);
       return true;
     }
 
     case Instruction::CONST_16: {
       int32_t register_index = instruction.VRegA_21s();
       int32_t constant = instruction.VRegB_21s();
-      vreg_locations_[register_index] =
-          Location::ConstantLocation(new (allocator_) HIntConstant(constant));
-      UpdateLocal(register_index, /* is_object= */ false);
+      SetIntConstant(register_index, constant, next);
       return true;
     }
 
     case Instruction::CONST: {
-      break;
+      int32_t register_index = instruction.VRegA_31i();
+      int32_t constant = instruction.VRegB_31i();
+      SetIntConstant(register_index, constant, next);
+      return true;
     }
 
     case Instruction::CONST_HIGH16: {
-      break;
+      int32_t register_index = instruction.VRegA_21h();
+      int32_t constant = instruction.VRegB_21h() << 16;
+      SetIntConstant(register_index, constant, next);
+      return true;
     }
 
     case Instruction::CONST_WIDE_16: {
-      break;
+      int32_t register_index = instruction.VRegA_21s();
+      // Get 16 bits of constant value, sign extended to 64 bits.
+      int64_t value = instruction.VRegB_21s();
+      value <<= 48;
+      value >>= 48;
+      SetLongConstant(register_index, value, next);
+      return true;
     }
 
     case Instruction::CONST_WIDE_32: {
-      break;
+      int32_t register_index = instruction.VRegA_31i();
+      // Get 32 bits of constant value, sign extended to 64 bits.
+      int64_t value = instruction.VRegB_31i();
+      value <<= 32;
+      value >>= 32;
+      SetLongConstant(register_index, value, next);
+      return true;
     }
 
     case Instruction::CONST_WIDE: {
-      break;
+      int32_t register_index = instruction.VRegA_51l();
+      int64_t value = instruction.VRegB_51l();
+      SetLongConstant(register_index, value, next);
+      return true;
     }
 
     case Instruction::CONST_WIDE_HIGH16: {
-      break;
+      int32_t register_index = instruction.VRegA_21h();
+      int64_t value = static_cast<int64_t>(instruction.VRegB_21h()) << 48;
+      SetLongConstant(register_index, value, next);
+      return true;
     }
 
     case Instruction::MOVE: {
@@ -2343,12 +2408,17 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
       bool assigning_constant = false;
       if (src.IsConstant()) {
         assigning_constant = true;
-        if (src.GetConstant()->IsIntConstant() &&
-            src.GetConstant()->AsIntConstant()->GetValue() == 0) {
+        if (src.GetConstant()->IsArithmeticZero()) {
           src = Location::RegisterLocation(XZR);
-        } else {
+        } else if (src.GetConstant()->IsIntConstant()) {
           src = Location::RegisterLocation(temps.AcquireW().GetCode());
           if (!MoveLocation(src, vreg_locations_[source_reg], DataType::Type::kInt32)) {
+            return false;
+          }
+        } else {
+          DCHECK(src.GetConstant()->IsLongConstant());
+          src = Location::RegisterLocation(temps.AcquireX().GetCode());
+          if (!MoveLocation(src, vreg_locations_[source_reg], DataType::Type::kInt64)) {
             return false;
           }
         }
@@ -2402,7 +2472,7 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
           break;
         }
         default:
-          unimplemented_reason_ = "UnimplementedIPut";
+          unimplemented_reason_ = instruction.Name();
           return false;
       }
       if (can_receiver_be_null) {
