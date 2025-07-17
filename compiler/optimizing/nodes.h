@@ -2490,17 +2490,17 @@ class HLongConstant final : public HConstant {
   bool IsZeroBitPattern() const override { return GetValue() == 0; }
   bool IsOne() const override { return GetValue() == 1; }
 
+  explicit HLongConstant(int64_t value)
+      : HConstant(kLongConstant, DataType::Type::kInt64),
+        value_(value) {
+  }
+
   DECLARE_INSTRUCTION(LongConstant);
 
  protected:
   DEFAULT_COPY_CONSTRUCTOR(LongConstant);
 
  private:
-  explicit HLongConstant(int64_t value)
-      : HConstant(kLongConstant, DataType::Type::kInt64),
-        value_(value) {
-  }
-
   const int64_t value_;
 
   friend class HGraph;
