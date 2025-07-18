@@ -530,6 +530,25 @@ bool FastCompilerARM64::ProcessInstructions() {
 
     if (catch_pcs_.IsBitSet(pair.DexPc())) {
       catch_stack_maps_.push_back(std::make_pair(pair.DexPc(), GetAssembler()->CodePosition()));
+      // Emulate a branch to this pc.
+      PrepareToBranch(pair.DexPc());
+      // Set new masks based on all throwing instructions.
+      is_non_null_mask_ = is_non_null_masks_[pair.DexPc()];
+      object_register_mask_ = object_register_masks_[pair.DexPc()];
+    }
+
+    // If the instruction can throw, emulate a branch to the catch handler by
+    // updating dex register masks.
+    if (GetCodeItemAccessor().TriesSize() != 0 &&
+        (Instruction::FlagsOf(pair.Inst().Opcode()) & Instruction::kThrow) != 0) {
+      const dex::TryItem* try_item = GetCodeItemAccessor().FindTryItem(pair.DexPc());
+      if (try_item != nullptr) {
+        for (CatchHandlerIterator iterator(GetCodeItemAccessor(), *try_item);
+             iterator.HasNext();
+             iterator.Next()) {
+          UpdateMasks(iterator.GetHandlerAddress());
+        }
+      }
     }
 
     if (!ProcessDexInstruction(pair.Inst(), pair.DexPc(), next)) {
@@ -1232,6 +1251,7 @@ bool FastCompilerARM64::BuildInstanceOf(uint32_t vreg,
     return false;
   }
   __ Bind(&exit);
+  UpdateLocal(vreg_result, /* is_object= */ false);
   return true;
 }
 
