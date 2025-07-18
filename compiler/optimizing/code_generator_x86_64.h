@@ -567,12 +567,14 @@ class CodeGeneratorX86_64 : public CodeGenerator {
 
   void EmitLinkerPatches(ArenaVector<linker::LinkerPatch>* linker_patches) override;
 
-  void PatchJitRootUse(uint8_t* code,
+  void PatchJitRootUse(uint8_t* buffer,
+                       const uint8_t* code_address,
                        const uint8_t* roots_data,
                        const PatchInfo<Label>& info,
                        uint64_t index_in_table) const;
 
-  void EmitJitRootPatches(uint8_t* code, const uint8_t* roots_data) override;
+  void EmitJitRootPatches(
+      uint8_t* buffer, const uint8_t* code_address, const uint8_t* roots_data) override;
 
   // Fast path implementation of ReadBarrier::Barrier for a heap
   // reference field load when Baker's read barriers are used.

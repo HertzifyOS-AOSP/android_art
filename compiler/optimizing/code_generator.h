@@ -406,7 +406,8 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
 
   // Fills the `literals` array with literals collected during code generation.
   // Also emits literal patches.
-  void EmitJitRoots(uint8_t* code,
+  void EmitJitRoots(uint8_t* buffer,
+                    const uint8_t* code_address,
                     const uint8_t* roots_data,
                     /*out*/std::vector<Handle<mirror::Object>>* roots)
       REQUIRES_SHARED(Locks::mutator_lock_);
@@ -835,7 +836,8 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
   uint64_t GetJitMethodTypeRootIndex(ProtoReference proto_reference);
 
   // Emit the patches assocatied with JIT roots. Only applies to JIT compiled code.
-  virtual void EmitJitRootPatches(uint8_t* code, const uint8_t* roots_data);
+  virtual void EmitJitRootPatches(
+      uint8_t* buffer, const uint8_t* code_address, const uint8_t* roots_data);
 
   // Frame size required for this method.
   uint32_t frame_size_;

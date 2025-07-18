@@ -221,7 +221,8 @@ uint64_t CodeGenerator::GetJitMethodTypeRootIndex(ProtoReference proto_reference
   return code_generation_data_->GetJitMethodTypeRootIndex(proto_reference);
 }
 
-void CodeGenerator::EmitJitRootPatches([[maybe_unused]] uint8_t* code,
+void CodeGenerator::EmitJitRootPatches([[maybe_unused]] uint8_t* buffer,
+                                       [[maybe_unused]] const uint8_t* code_address,
                                        [[maybe_unused]] const uint8_t* roots_data) {
   DCHECK(code_generation_data_ != nullptr);
   DCHECK_EQ(code_generation_data_->GetNumberOfJitStringRoots(), 0u);
@@ -1806,11 +1807,12 @@ LocationSummary* CodeGenerator::CreateSystemArrayCopyLocationSummary(
   return locations;
 }
 
-void CodeGenerator::EmitJitRoots(uint8_t* code,
+void CodeGenerator::EmitJitRoots(uint8_t* buffer,
+                                 const uint8_t* code_address,
                                  const uint8_t* roots_data,
                                  /*out*/std::vector<Handle<mirror::Object>>* roots) {
   code_generation_data_->EmitJitRoots(roots);
-  EmitJitRootPatches(code, roots_data);
+  EmitJitRootPatches(buffer, code_address, roots_data);
 }
 
 QuickEntrypointEnum CodeGenerator::GetArrayAllocationEntrypoint(HNewArray* new_array) {
