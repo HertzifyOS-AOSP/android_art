@@ -2055,13 +2055,15 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
   Register source = RegisterFrom( \
       GetExistingRegisterLocation(instruction.VRegB_22 ## suffix(), DataType::Type::kInt32), \
       DataType::Type::kInt32); \
+  int32_t register_index = instruction.VRegA_22 ## suffix(); \
   Register result = RegisterFrom( \
-      CreateNewRegisterLocation(instruction.VRegA_22 ## suffix(), DataType::Type::kInt32, next), \
+      CreateNewRegisterLocation(register_index, DataType::Type::kInt32, next), \
       DataType::Type::kInt32); \
   if (HitUnimplemented()) { \
     return false; \
   } \
-  int16_t constant = instruction.VRegC_22 ## suffix();
+  int16_t constant = instruction.VRegC_22 ## suffix(); \
+  UpdateLocal(register_index, /* is_object= */ false);
 
     case Instruction::ADD_INT_LIT16: {
       SETUP_BINOP_22(s)
