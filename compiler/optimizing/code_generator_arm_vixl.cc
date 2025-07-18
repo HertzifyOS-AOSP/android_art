@@ -3604,6 +3604,7 @@ void LocationsBuilderARMVIXL::VisitInvokeStaticOrDirect(HInvokeStaticOrDirect* i
     CriticalNativeCallingConventionVisitorARMVIXL calling_convention_visitor(
         /*for_register_allocation=*/ true);
     CodeGenerator::CreateCommonInvokeLocationSummary(invoke, &calling_convention_visitor);
+    invoke->GetLocations()->AddTemp(Location::RequiresRegister());  // For target method.
   } else {
     HandleInvoke(invoke);
   }
