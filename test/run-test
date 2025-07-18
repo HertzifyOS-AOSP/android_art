@@ -825,7 +825,7 @@ if True:
   unzip()
 
   def clean_up(passed: bool):
-    if always_clean or (passed and not never_clean):
+    if not never_clean and (always_clean or passed):
       os.chdir(oldwd)
       shutil.rmtree(tmp_dir)
       if target_mode:
