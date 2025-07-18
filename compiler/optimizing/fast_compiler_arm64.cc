@@ -136,9 +136,9 @@ class FastCompilerARM64 : public FastCompiler {
         catch_pcs_(ArenaBitVector::CreateFixedSize(
                        allocator,
                        dex_compilation_unit.GetCodeItemAccessor().InsnsSizeInCodeUnits())),
-        catch_stack_maps_(dex_compilation_unit.GetCodeItemAccessor().TriesSize(),
-                          allocator->Adapter()),
+        catch_stack_maps_(allocator->Adapter()),
         has_frame_(false),
+        needs_vreg_info_(false),
         core_spill_mask_(0u),
         fpu_spill_mask_(0u),
         object_register_mask_(0u),
@@ -249,6 +249,8 @@ class FastCompilerARM64 : public FastCompiler {
 
   // Generate code for doing a runtime invoke.
   void InvokeRuntime(QuickEntrypointEnum entrypoint, uint32_t dex_pc);
+  bool BuildInvokeRuntime11x(
+      QuickEntrypointEnum entrypoint, const Instruction& isntruction, uint32_t dex_pc);
 
   bool BuildLoadString(uint32_t vreg, dex::StringIndex string_index, const Instruction* next);
   bool BuildNewInstance(
@@ -396,6 +398,9 @@ class FastCompilerARM64 : public FastCompiler {
 
   // Whether we've created a frame for this compiled method.
   bool has_frame_;
+
+  // Whether we need dex register info in stack maps.
+  bool needs_vreg_info_;
 
   // CPU registers that have been spilled in the frame.
   uint32_t core_spill_mask_;
@@ -669,7 +674,74 @@ void FastCompilerARM64::RecordPcInfo(uint32_t dex_pc) {
   uint32_t native_pc = GetAssembler()->CodePosition();
   StackMapStream* stack_map_stream = code_generation_data_->GetStackMapStream();
   CHECK_EQ(object_register_mask_ & callee_saved_core_registers.GetList(), object_register_mask_);
-  stack_map_stream->BeginStackMapEntry(dex_pc, native_pc, object_register_mask_);
+  stack_map_stream->BeginStackMapEntry(dex_pc,
+                                       native_pc,
+                                       object_register_mask_,
+                                       /* sp_mask= */ nullptr,
+                                       StackMap::Kind::Default,
+                                       needs_vreg_info_);
+  if (needs_vreg_info_) {
+    using Kind = DexRegisterLocation::Kind;
+    uint32_t size = vreg_locations_.size();
+    for (uint32_t i = 0; i < size; ++i) {
+      Location location = vreg_locations_[i];
+      switch (location.GetKind()) {
+        case Location::kConstant: {
+          if (location.GetConstant()->IsLongConstant()) {
+            int64_t value = location.GetConstant()->AsLongConstant()->GetValue();
+            stack_map_stream->AddDexRegisterEntry(Kind::kConstant, Low32Bits(value));
+            stack_map_stream->AddDexRegisterEntry(Kind::kConstant, High32Bits(value));
+            ++i;
+            DCHECK_LT(i, size);
+          } else {
+            DCHECK(location.GetConstant()->IsIntConstant());
+            int32_t value = location.GetConstant()->AsIntConstant()->GetValue();
+            stack_map_stream->AddDexRegisterEntry(Kind::kConstant, value);
+          }
+          break;
+        }
+
+        case Location::kStackSlot: {
+          stack_map_stream->AddDexRegisterEntry(Kind::kInStack, location.GetStackIndex());
+          break;
+        }
+
+        case Location::kDoubleStackSlot: {
+          stack_map_stream->AddDexRegisterEntry(Kind::kInStack, location.GetStackIndex());
+          stack_map_stream->AddDexRegisterEntry(
+              Kind::kInStack, location.GetHighStackIndex(kVRegSize));
+          ++i;
+          DCHECK_LT(i, size);
+          break;
+        }
+
+        case Location::kRegister: {
+          int id = location.reg();
+          stack_map_stream->AddDexRegisterEntry(Kind::kInRegister, location.reg());
+          DCHECK(!compiler_options_.GetDebuggable());
+          // Note: if we were using the fast compiler for debuggable, we would
+          // need to emit a `kInRegisterHi` here for long values. This would
+          // require knowing if the current entry is a long.
+          break;
+        }
+
+        case Location::kFpuRegister: {
+          stack_map_stream->AddDexRegisterEntry(Kind::kInFpuRegister, location.reg());
+          // Note: same as above and `kInFpuRegisterHi` for double values.
+          DCHECK(!compiler_options_.GetDebuggable());
+          break;
+        }
+
+        case Location::kInvalid: {
+          stack_map_stream->AddDexRegisterEntry(Kind::kNone, 0);
+          break;
+        }
+
+        default:
+          LOG(FATAL) << "Unexpected kind " << location.GetKind();
+      }
+    }
+  }
   stack_map_stream->EndStackMapEntry();
 }
 
@@ -1520,6 +1592,23 @@ void FastCompilerARM64::SetIntConstant(uint32_t register_index,
   // In case we branch, we need to make sure a null value can be merged
   // with an object value, so treat the 0 value as an object.
   UpdateLocal(register_index, /* is_object= */ (constant == 0));
+}
+
+bool FastCompilerARM64::BuildInvokeRuntime11x(QuickEntrypointEnum entrypoint,
+                                              const Instruction& instruction,
+                                              uint32_t dex_pc) {
+    if (!EnsureHasFrame()) {
+      return false;
+    }
+    int32_t reg = instruction.VRegA_11x();
+    InvokeRuntimeCallingConvention calling_convention;
+    if (!MoveLocation(LocationFrom(calling_convention.GetRegisterAt(0)),
+                      vreg_locations_[reg],
+                      DataType::Type::kReference)) {
+      return false;
+    }
+    InvokeRuntime(entrypoint, dex_pc);
+    return true;
 }
 
 void FastCompilerARM64::SetLongConstant(uint32_t register_index,
@@ -2623,22 +2712,19 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
     }
 
     case Instruction::MOVE_EXCEPTION: {
-      break;
+      int32_t register_index = instruction.VRegA_11x();
+      Location new_location =
+          CreateNewRegisterLocation(register_index, DataType::Type::kReference, next);
+      MemOperand exception =
+          MemOperand(tr, Thread::ExceptionOffset<kArm64PointerSize>().Int32Value());
+      __ Ldr(WRegisterFrom(new_location), exception);
+      __ Str(wzr, exception);
+      UpdateLocal(register_index, /* is_object= */ true, /* can_be_null= */ false);
+      return true;
     }
 
     case Instruction::THROW: {
-      if (!EnsureHasFrame()) {
-        return false;
-      }
-      int32_t reg = instruction.VRegA_11x();
-      InvokeRuntimeCallingConvention calling_convention;
-      if (!MoveLocation(LocationFrom(calling_convention.GetRegisterAt(0)),
-                        vreg_locations_[reg],
-                        DataType::Type::kReference)) {
-        return false;
-      }
-      InvokeRuntime(kQuickDeliverException, dex_pc);
-      return true;
+      return BuildInvokeRuntime11x(kQuickDeliverException, instruction, dex_pc);
     }
 
     case Instruction::INSTANCE_OF: {
@@ -2655,11 +2741,21 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
     }
 
     case Instruction::MONITOR_ENTER: {
-      break;
+      // We can start collecting vreg info per stack map at this point, as the
+      // runtime will only start expecting them after getting a report of an
+      // Object in a dex register being locked. For any stack maps before that
+      // monitor-enter, we know the runtime won't expect it.
+      // Note: once we support backwards branching, we'll need to know
+      // beforehand if a method has monitor operations.
+      needs_vreg_info_ = true;
+      return BuildInvokeRuntime11x(kQuickLockObject, instruction, dex_pc);
     }
 
     case Instruction::MONITOR_EXIT: {
-      break;
+      // We don't support backwards branch yet, so we must have seen the
+      // monitor-enter before this instruction.
+      DCHECK(needs_vreg_info_);
+      return BuildInvokeRuntime11x(kQuickUnlockObject, instruction, dex_pc);
     }
 
     case Instruction::SPARSE_SWITCH:
