@@ -6790,7 +6790,7 @@ void InstructionCodeGeneratorX86_64::VisitLoadClass(HLoadClass* cls) NO_THREAD_S
     }
     case HLoadClass::LoadKind::kJitTableAddress: {
       Address address = Address::Absolute(CodeGeneratorX86_64::kPlaceholder32BitOffset,
-                                          /* no_rip= */ true);
+                                          /* no_rip= */ false);
       Label* fixup_label =
           codegen_->NewJitRootClassPatch(cls->GetDexFile(), cls->GetTypeIndex(), cls->GetClass());
       // /* GcRoot<mirror::Class> */ out = *address
@@ -6893,7 +6893,7 @@ void InstructionCodeGeneratorX86_64::VisitLoadMethodType(HLoadMethodType* load) 
     }
     case HLoadMethodType::LoadKind::kJitTableAddress: {
       Address address = Address::Absolute(CodeGeneratorX86_64::kPlaceholder32BitOffset,
-                                          /* no_rip= */ true);
+                                          /* no_rip= */ false);
       Handle<mirror::MethodType> method_type = load->GetMethodType();
       DCHECK(method_type != nullptr);
       Label* fixup_label = codegen_->NewJitRootMethodTypePatch(
@@ -7010,7 +7010,7 @@ void InstructionCodeGeneratorX86_64::VisitLoadString(HLoadString* load) NO_THREA
     }
     case HLoadString::LoadKind::kJitTableAddress: {
       Address address = Address::Absolute(CodeGeneratorX86_64::kPlaceholder32BitOffset,
-                                          /* no_rip= */ true);
+                                          /* no_rip= */ false);
       Label* fixup_label = codegen_->NewJitRootStringPatch(
           load->GetDexFile(), load->GetStringIndex(), load->GetString());
       // /* GcRoot<mirror::String> */ out = *address
@@ -8548,35 +8548,39 @@ void CodeGeneratorX86_64::MoveInt64ToAddress(const Address& addr_low,
   }
 }
 
-void CodeGeneratorX86_64::PatchJitRootUse(uint8_t* code,
+void CodeGeneratorX86_64::PatchJitRootUse(uint8_t* buffer,
+                                          const uint8_t* code_address,
                                           const uint8_t* roots_data,
                                           const PatchInfo<Label>& info,
                                           uint64_t index_in_table) const {
   uint32_t code_offset = info.label.Position() - kLabelPositionToLiteralOffsetAdjustment;
-  uintptr_t address =
-      reinterpret_cast<uintptr_t>(roots_data) + index_in_table * sizeof(GcRoot<mirror::Object>);
-  using unaligned_uint32_t __attribute__((__aligned__(1))) = uint32_t;
-  reinterpret_cast<unaligned_uint32_t*>(code + code_offset)[0] =
-      dchecked_integral_cast<uint32_t>(address);
+  intptr_t address =
+      reinterpret_cast<intptr_t>(roots_data) + index_in_table * sizeof(GcRoot<mirror::Object>);
+  using unaligned_int32_t __attribute__((__aligned__(1))) = int32_t;
+  intptr_t code = reinterpret_cast<intptr_t>(code_address) + info.label.Position();
+  reinterpret_cast<unaligned_int32_t*>(buffer + code_offset)[0] =
+      dchecked_integral_cast<int32_t>(address - code);
 }
 
-void CodeGeneratorX86_64::EmitJitRootPatches(uint8_t* code, const uint8_t* roots_data) {
+void CodeGeneratorX86_64::EmitJitRootPatches(uint8_t* buffer,
+                                             const uint8_t* code_address,
+                                             const uint8_t* roots_data) {
   for (const PatchInfo<Label>& info : jit_string_patches_) {
     StringReference string_reference(info.target_dex_file, dex::StringIndex(info.offset_or_index));
     uint64_t index_in_table = GetJitStringRootIndex(string_reference);
-    PatchJitRootUse(code, roots_data, info, index_in_table);
+    PatchJitRootUse(buffer, code_address, roots_data, info, index_in_table);
   }
 
   for (const PatchInfo<Label>& info : jit_class_patches_) {
     TypeReference type_reference(info.target_dex_file, dex::TypeIndex(info.offset_or_index));
     uint64_t index_in_table = GetJitClassRootIndex(type_reference);
-    PatchJitRootUse(code, roots_data, info, index_in_table);
+    PatchJitRootUse(buffer, code_address, roots_data, info, index_in_table);
   }
 
   for (const PatchInfo<Label>& info : jit_method_type_patches_) {
     ProtoReference proto_reference(info.target_dex_file, dex::ProtoIndex(info.offset_or_index));
     uint64_t index_in_table = GetJitMethodTypeRootIndex(proto_reference);
-    PatchJitRootUse(code, roots_data, info, index_in_table);
+    PatchJitRootUse(buffer, code_address, roots_data, info, index_in_table);
   }
 }
 

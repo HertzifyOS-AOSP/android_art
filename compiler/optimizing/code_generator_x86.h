@@ -578,7 +578,8 @@ class CodeGeneratorX86 : public CodeGenerator {
                        const uint8_t* roots_data,
                        const PatchInfo<Label>& info,
                        uint64_t index_in_table) const;
-  void EmitJitRootPatches(uint8_t* code, const uint8_t* roots_data) override;
+  void EmitJitRootPatches(
+      uint8_t* buffer, const uint8_t* code_address, const uint8_t* roots_data) override;
 
   // Emit a write barrier if:
   // A) emit_null_check is false

@@ -525,10 +525,6 @@ static const OatFile::OatMethod FindOatMethodFor(ArtMethod* method,
     DCHECK_EQ(pointer_size, kRuntimePointerSize) << "Obsolete method in compiler!";
     return FindOatMethodFromDexFileFor(method, found);
   }
-  if (UNLIKELY(method->IsCopied())) {
-    // Duplicate method, just return.
-    return OatFile::OatMethod::Invalid();
-  }
   // Although we overwrite the trampoline of non-static methods, we may get here via the resolution
   // method for direct methods (or virtual methods made direct).
   ObjPtr<mirror::Class> declaring_class = method->GetDeclaringClass();

@@ -1555,8 +1555,9 @@ bool OptimizingCompiler::JitCompile(Thread* self,
 
     std::vector<Handle<mirror::Object>> roots;
     codegen->EmitJitRoots(const_cast<uint8_t*>(codegen->GetAssembler()->CodeBufferBaseAddress()),
-                        roots_data,
-                        &roots);
+                          code,
+                          roots_data,
+                          &roots);
     // The root Handle<>s filled by the codegen reference entries in the VariableSizedHandleScope.
     DCHECK(std::all_of(roots.begin(),
                        roots.end(),

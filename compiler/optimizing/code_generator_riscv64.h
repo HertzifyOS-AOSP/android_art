@@ -618,7 +618,8 @@ class CodeGeneratorRISCV64 : public CodeGenerator {
   Literal* DeduplicateJitClassLiteral(const DexFile& dex_file,
                                       dex::TypeIndex type_index,
                                       Handle<mirror::Class> handle);
-  void EmitJitRootPatches(uint8_t* code, const uint8_t* roots_data) override;
+  void EmitJitRootPatches(
+      uint8_t* buffer, const uint8_t* code_address, const uint8_t* roots_data) override;
 
   void LoadTypeForBootImageIntrinsic(XRegister dest, TypeReference target_type);
   void LoadBootImageRelRoEntry(XRegister dest, uint32_t boot_image_offset);

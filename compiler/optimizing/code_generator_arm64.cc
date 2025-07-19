@@ -5396,8 +5396,10 @@ vixl::aarch64::Label* CodeGeneratorARM64::NewPcRelativePatch(
   return label;
 }
 
-void CodeGeneratorARM64::EmitJitRootPatches(uint8_t* code, const uint8_t* roots_data) {
-  jit_patches_.EmitJitRootPatches(code, roots_data, *GetCodeGenerationData());
+void CodeGeneratorARM64::EmitJitRootPatches(uint8_t* buffer,
+                                            [[maybe_unused]] const uint8_t* code_address,
+                                            const uint8_t* roots_data) {
+  jit_patches_.EmitJitRootPatches(buffer, roots_data, *GetCodeGenerationData());
 }
 
 void CodeGeneratorARM64::EmitAdrpPlaceholder(vixl::aarch64::Label* fixup_label,
