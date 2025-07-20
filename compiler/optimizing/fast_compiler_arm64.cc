@@ -487,11 +487,6 @@ void FastCompilerARM64::MoveConstantsToRegisters() {
       vreg_locations_[i] = CreateNewRegisterLocation(i, type, /* next= */ nullptr);
       MoveLocation(vreg_locations_[i], location, type);
       DCHECK(!HitUnimplemented());
-      if (location.GetConstant()->IsArithmeticZero()) {
-        // In case we branch, we need to make sure a null value can be merged
-        // with an object value, so treat the 0 value as an object.
-        UpdateRegisterMask(i, /* is_object= */ true);
-      }
     }
   }
 }
@@ -1497,7 +1492,9 @@ void FastCompilerARM64::SetIntConstant(uint32_t register_index,
                  Location::ConstantLocation(new (allocator_) HIntConstant(constant)),
                  DataType::Type::kInt32);
   }
-  UpdateLocal(register_index, /* is_object= */ false);
+  // In case we branch, we need to make sure a null value can be merged
+  // with an object value, so treat the 0 value as an object.
+  UpdateLocal(register_index, /* is_object= */ (constant == 0));
 }
 
 void FastCompilerARM64::SetLongConstant(uint32_t register_index,
