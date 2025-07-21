@@ -935,7 +935,7 @@ cc_defaults {
         "661-oat-writer-layout/oat_writer_layout.cc",
         "664-aget-verifier/aget-verifier.cc",
         "667-jit-jni-stub/jit_jni_stub_test.cc",
-        "674-hiddenapi/hiddenapi.cc",
+        "674-hiddenapi/core.cc",
         "692-vdex-inmem-loader/vdex_inmem_loader.cc",
         "720-thread-priority/thread_priority.cc",
         "800-smali/jni.cc",
@@ -1012,6 +1012,7 @@ cc_defaults {
     name: "libarttest_external-defaults",
     defaults: ["art_test_defaults"],
     srcs: [
+        "674-hiddenapi/app.cc",
         "817-hiddenapi/test_native.cc",
         "common/libarttest_external.cc",
     ],
