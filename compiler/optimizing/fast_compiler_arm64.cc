@@ -1539,6 +1539,22 @@ void FastCompilerARM64::SetLongConstant(uint32_t register_index,
   UpdateLocal(register_index, /* is_object= */ false);
 }
 
+#define SETUP_BINOP_12x(type) \
+  int32_t vreg_a = instruction.VRegA_12x(); \
+  Register first = RegisterFrom(GetExistingRegisterLocation(vreg_a, type), type); \
+  Register second = RegisterFrom( \
+      GetExistingRegisterLocation(instruction.VRegB_12x(), type), type); \
+  Register dst = RegisterFrom(CreateNewRegisterLocation(vreg_a, type, next), type); \
+  if (HitUnimplemented()) { \
+    return false; \
+  } \
+  UpdateLocal(vreg_a, /* is_object= */ false);
+
+#define SIMPLE_BINOP_12x(type, instruction) \
+    SETUP_BINOP_12x(type) \
+    __ instruction(dst, first, second); \
+    return true;
+
 bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
                                               uint32_t dex_pc,
                                               const Instruction* next) {
@@ -1852,10 +1868,6 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
       break;
     }
 
-    case Instruction::ADD_INT_2ADDR: {
-      break;
-    }
-
     case Instruction::MUL_INT: {
       break;
     }
@@ -1952,8 +1964,81 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
       break;
     }
 
-    case Instruction::ADD_LONG_2ADDR: {
-      break;
+#define SIMPLE_2ADDR_CASE(opcode, instruction) \
+    case Instruction::opcode ##_INT_2ADDR: { \
+      SIMPLE_BINOP_12x(DataType::Type::kInt32, instruction) \
+    } \
+    case Instruction::opcode ##_LONG_2ADDR: { \
+      SIMPLE_BINOP_12x(DataType::Type::kInt64, instruction) \
+    }
+
+    SIMPLE_2ADDR_CASE(ADD, Add)
+    SIMPLE_2ADDR_CASE(SUB, Sub)
+    SIMPLE_2ADDR_CASE(MUL, Mul)
+    SIMPLE_2ADDR_CASE(SHL, Lsl)
+    SIMPLE_2ADDR_CASE(SHR, Asr)
+    SIMPLE_2ADDR_CASE(USHR, Lsr)
+    SIMPLE_2ADDR_CASE(AND, And)
+    SIMPLE_2ADDR_CASE(OR, Orr)
+    SIMPLE_2ADDR_CASE(XOR, Eor)
+#undef SIMPLE_2ADDR_CASE
+
+    case Instruction::DIV_INT_2ADDR: {
+      SETUP_BINOP_12x(DataType::Type::kInt32)
+      if (!EnsureHasFrame()) {
+        return false;
+      }
+      vixl::aarch64::Label cont;
+      __ Cbnz(second, &cont);
+      InvokeRuntime(kQuickThrowDivZero, dex_pc);
+      __ Bind(&cont);
+      __ Sdiv(dst, first, second);
+      return true;
+    }
+
+    case Instruction::DIV_LONG_2ADDR: {
+      SETUP_BINOP_12x(DataType::Type::kInt64)
+      if (!EnsureHasFrame()) {
+        return false;
+      }
+      vixl::aarch64::Label cont;
+      __ Cbnz(second, &cont);
+      InvokeRuntime(kQuickThrowDivZero, dex_pc);
+      __ Bind(&cont);
+      __ Sdiv(dst, first, second);
+      return true;
+    }
+
+    case Instruction::REM_INT_2ADDR: {
+      SETUP_BINOP_12x(DataType::Type::kInt32)
+      if (!EnsureHasFrame()) {
+        return false;
+      }
+      vixl::aarch64::Label cont;
+      __ Cbnz(second, &cont);
+      InvokeRuntime(kQuickThrowDivZero, dex_pc);
+      __ Bind(&cont);
+      UseScratchRegisterScope temps(GetVIXLAssembler());
+      Register temp = temps.AcquireSameSizeAs(dst);
+      __ Sdiv(temp, first, second);
+      __ Msub(dst, temp, second, first);
+      return true;
+    }
+
+    case Instruction::REM_LONG_2ADDR: {
+      SETUP_BINOP_12x(DataType::Type::kInt64)
+      if (!EnsureHasFrame()) {
+        return false;
+      }
+      vixl::aarch64::Label cont;
+      __ Cbnz(second, &cont);
+      InvokeRuntime(kQuickThrowDivZero, dex_pc);
+      __ Bind(&cont);
+      UseScratchRegisterScope temps(GetVIXLAssembler());
+      Register temp = temps.AcquireSameSizeAs(dst);
+      __ Sdiv(temp, first, second);
+      __ Msub(dst, temp, second, first);
+      return true;
     }
 
     case Instruction::ADD_DOUBLE_2ADDR: {
@@ -1961,14 +2046,6 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
     }
 
     case Instruction::ADD_FLOAT_2ADDR: {
-      break;
-    }
-
-    case Instruction::SUB_INT_2ADDR: {
-      break;
-    }
-
-    case Instruction::SUB_LONG_2ADDR: {
       break;
     }
 
@@ -1980,35 +2057,11 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
       break;
     }
 
-    case Instruction::MUL_INT_2ADDR: {
-      break;
-    }
-
-    case Instruction::MUL_LONG_2ADDR: {
-      break;
-    }
-
     case Instruction::MUL_FLOAT_2ADDR: {
       break;
     }
 
     case Instruction::MUL_DOUBLE_2ADDR: {
-      break;
-    }
-
-    case Instruction::DIV_INT_2ADDR: {
-      break;
-    }
-
-    case Instruction::DIV_LONG_2ADDR: {
-      break;
-    }
-
-    case Instruction::REM_INT_2ADDR: {
-      break;
-    }
-
-    case Instruction::REM_LONG_2ADDR: {
       break;
     }
 
@@ -2020,59 +2073,11 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
       break;
     }
 
-    case Instruction::SHL_INT_2ADDR: {
-      break;
-    }
-
-    case Instruction::SHL_LONG_2ADDR: {
-      break;
-    }
-
-    case Instruction::SHR_INT_2ADDR: {
-      break;
-    }
-
-    case Instruction::SHR_LONG_2ADDR: {
-      break;
-    }
-
-    case Instruction::USHR_INT_2ADDR: {
-      break;
-    }
-
-    case Instruction::USHR_LONG_2ADDR: {
-      break;
-    }
-
     case Instruction::DIV_FLOAT_2ADDR: {
       break;
     }
 
     case Instruction::DIV_DOUBLE_2ADDR: {
-      break;
-    }
-
-    case Instruction::AND_INT_2ADDR: {
-      break;
-    }
-
-    case Instruction::AND_LONG_2ADDR: {
-      break;
-    }
-
-    case Instruction::OR_INT_2ADDR: {
-      break;
-    }
-
-    case Instruction::OR_LONG_2ADDR: {
-      break;
-    }
-
-    case Instruction::XOR_INT_2ADDR: {
-      break;
-    }
-
-    case Instruction::XOR_LONG_2ADDR: {
       break;
     }
 
