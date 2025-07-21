@@ -95,12 +95,29 @@ static const std::vector<std::string> kCorePlatformApiExemptions = {
     "Ldalvik/system/VMDebug;->setWaitingForDebugger",
 };
 
-static inline std::ostream& operator<<(std::ostream& os, AccessMethod value) {
+std::ostream& operator<<(std::ostream& os, EnforcementPolicy policy) {
+  switch (policy) {
+    case EnforcementPolicy::kDisabled:
+      os << "disabled";
+      break;
+    case EnforcementPolicy::kJustWarn:
+      os << "just-warn";
+      break;
+    case EnforcementPolicy::kEnabled:
+      os << "enabled";
+      break;
+  }
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os, AccessMethod value) {
   switch (value) {
     case AccessMethod::kCheck:
+      os << "<check>";
+      break;
     case AccessMethod::kCheckWithPolicy:
-      LOG(FATAL) << "Internal access to hidden API should not be logged";
-      UNREACHABLE();
+      os << "<check-with-policy>";
+      break;
     case AccessMethod::kReflection:
       os << "reflection";
       break;
@@ -114,7 +131,7 @@ static inline std::ostream& operator<<(std::ostream& os, AccessMethod value) {
   return os;
 }
 
-static inline std::ostream& operator<<(std::ostream& os, Domain domain) {
+std::ostream& operator<<(std::ostream& os, Domain domain) {
   switch (domain) {
     case Domain::kCorePlatform:
       os << "core-platform";
@@ -129,7 +146,7 @@ static inline std::ostream& operator<<(std::ostream& os, Domain domain) {
   return os;
 }
 
-static inline std::ostream& operator<<(std::ostream& os, const AccessContext& value)
+std::ostream& operator<<(std::ostream& os, const AccessContext& value)
     REQUIRES_SHARED(Locks::mutator_lock_) {
   if (!value.GetClass().IsNull()) {
     std::string tmp;
@@ -220,8 +237,7 @@ void InitializeCorePlatformApiPrivateFields() {
   }
 }
 
-hiddenapi::AccessContext GetReflectionCallerAccessContext(Thread* self)
-    REQUIRES_SHARED(Locks::mutator_lock_) {
+AccessContext GetReflectionCallerAccessContext(Thread* self) REQUIRES_SHARED(Locks::mutator_lock_) {
   // Walk the stack and find the first frame not from java.lang.Class,
   // java.lang.invoke or java.lang.reflect. This is very expensive.
   // Save this till the last.
@@ -234,22 +250,27 @@ hiddenapi::AccessContext GetReflectionCallerAccessContext(Thread* self)
       ArtMethod* m = GetMethod();
       if (m == nullptr) {
         // Attached native thread. Assume this is *not* boot class path.
+        VLOG(hiddenapi) << "hiddenapi: Stack walk: " << "no method - giving up";
         caller = nullptr;
         return false;
       } else if (m->IsRuntimeMethod()) {
         // Internal runtime method, continue walking the stack.
+        VLOG(hiddenapi) << "hiddenapi: Stack walk: " << "internal method: " << m->PrettyMethod();
         return true;
       }
 
       ObjPtr<mirror::Class> declaring_class = m->GetDeclaringClass();
       if (declaring_class->IsBootStrapClassLoaded()) {
         if (declaring_class->IsClassClass()) {
+          VLOG(hiddenapi) << "hiddenapi: Stack walk: " << "java.lang.Class method: "
+                          << m->PrettyMethod();
           return true;
         }
 
         // MethodHandles.makeIdentity is doing findStatic to find hidden methods,
         // where reflection is used.
         if (m == WellKnownClasses::java_lang_invoke_MethodHandles_makeIdentity) {
+          VLOG(hiddenapi) << "hiddenapi: Stack walk: " << m->PrettyMethod() << " - end";
           return false;
         }
 
@@ -261,6 +282,8 @@ hiddenapi::AccessContext GetReflectionCallerAccessContext(Thread* self)
         ObjPtr<mirror::Class> lookup_class = GetClassRoot<mirror::MethodHandlesLookup>();
         if ((declaring_class == lookup_class || declaring_class->IsInSamePackage(lookup_class)) &&
             !m->IsClassInitializer()) {
+          VLOG(hiddenapi) << "hiddenapi: Stack walk: " << "java.lang.invoke package: "
+                          << m->PrettyMethod();
           return true;
         }
         // Check for classes in the java.lang.reflect package, except for java.lang.reflect.Proxy.
@@ -271,11 +294,14 @@ hiddenapi::AccessContext GetReflectionCallerAccessContext(Thread* self)
         CompatFramework& compat_framework = Runtime::Current()->GetCompatFramework();
         if (declaring_class->IsInSamePackage(proxy_class) && declaring_class != proxy_class) {
           if (compat_framework.IsChangeEnabled(kPreventMetaReflectionBlocklistAccess)) {
+            VLOG(hiddenapi) << "hiddenapi: Stack walk: " << "java.lang.reflect package: "
+                            << m->PrettyMethod();
             return true;
           }
         }
       }
 
+      VLOG(hiddenapi) << "hiddenapi: Stack walk: " << "found caller: " << m->PrettyMethod();
       caller = m;
       return false;
     }
@@ -291,7 +317,10 @@ hiddenapi::AccessContext GetReflectionCallerAccessContext(Thread* self)
   // we conservatively assume the caller is trusted.
   ObjPtr<mirror::Class> caller =
       (visitor.caller == nullptr) ? nullptr : visitor.caller->GetDeclaringClass();
-  return caller.IsNull() ? AccessContext(/* is_trusted= */ true) : AccessContext(caller);
+  AccessContext context =
+      caller.IsNull() ? AccessContext(/* is_trusted= */ true) : AccessContext(caller);
+  VLOG(hiddenapi) << "hiddenapi: Reflection caller " << context << " from " << context.GetDomain();
+  return context;
 }
 
 namespace detail {
@@ -386,8 +415,11 @@ void MemberSignature::LogAccessToLogcat(AccessMethod access_method,
                                         const AccessContext& caller_context,
                                         const AccessContext& callee_context,
                                         EnforcementPolicy policy) {
+  CHECK(access_method == AccessMethod::kReflection || access_method == AccessMethod::kJNI ||
+        access_method == AccessMethod::kLinking)
+      << access_method;
   static std::atomic<uint64_t> logged_access_count_ = 0;
-  if (logged_access_count_ > kMaxLogAccessesToLogcat) {
+  if (!gLogVerbosity.hiddenapi && logged_access_count_ > kMaxLogAccessesToLogcat) {
     return;
   }
   LOG(access_denied ? (policy == EnforcementPolicy::kEnabled ? ERROR : WARNING) : INFO)
@@ -402,7 +434,7 @@ void MemberSignature::LogAccessToLogcat(AccessMethod access_method,
     LOG(WARNING) << "hiddenapi: If this is a platform test consider enabling "
                  << "VMRuntime.ALLOW_TEST_API_ACCESS change id for this package.";
   }
-  if (logged_access_count_ >= kMaxLogAccessesToLogcat) {
+  if (!gLogVerbosity.hiddenapi && logged_access_count_ >= kMaxLogAccessesToLogcat) {
     LOG(WARNING) << "hiddenapi: Reached maximum number of hidden api access messages.";
   }
   ++logged_access_count_;
@@ -421,8 +453,7 @@ void MemberSignature::LogAccessToEventLog(uint32_t sampled_value,
                                           AccessMethod access_method,
                                           bool access_denied) {
 #ifdef ART_TARGET_ANDROID
-  if (access_method == AccessMethod::kCheck || access_method == AccessMethod::kCheckWithPolicy ||
-      access_method == AccessMethod::kLinking) {
+  if (IsCheckOnlyMethod(access_method) || access_method == AccessMethod::kLinking) {
     // Checks do not correspond to actual accesses, so should be ignored.
     // Linking warnings come from static analysis/compilation of the bytecode
     // and can contain false positives (i.e. code that is never run). Hence we
@@ -698,7 +729,7 @@ bool ShouldDenyAccessToMemberImpl(T* member,
     }
   }
 
-  if (access_method != AccessMethod::kCheck && access_method != AccessMethod::kCheckWithPolicy) {
+  if (!IsCheckOnlyMethod(access_method)) {
     // Warn if blocked signature is being accessed or it is not exempted.
     if (deny_access || !member_signature.DoesPrefixMatchAny(kWarningExemptions)) {
       // Print a log message with information about this class member access.
@@ -856,7 +887,7 @@ bool ShouldDenyAccessToMember(T* member,
       }
 
       // Allow access if access checks are disabled.
-      EnforcementPolicy policy = Runtime::Current()->GetCorePlatformApiEnforcementPolicy();
+      EnforcementPolicy policy = runtime->GetCorePlatformApiEnforcementPolicy();
       if (policy == EnforcementPolicy::kDisabled) {
         return false;
       }
@@ -876,7 +907,7 @@ bool ShouldDenyAccessToMember(T* member,
       if (api_list.GetMaxAllowedSdkVersion() == SdkVersion::kMax) {
         // Allow access and attempt to update the access flags to avoid
         // re-examining the dex flags next time.
-        detail::MaybeUpdateAccessFlags(Runtime::Current(), member, kAccCorePlatformApi);
+        detail::MaybeUpdateAccessFlags(runtime, member, kAccCorePlatformApi);
         return false;
       }
 
@@ -885,7 +916,7 @@ bool ShouldDenyAccessToMember(T* member,
       detail::MemberSignature member_signature(member);
       if (member_signature.DoesPrefixMatchAny(kCorePlatformApiExemptions)) {
         // Avoid re-examining the exemption list next time.
-        detail::MaybeUpdateAccessFlags(Runtime::Current(), member, kAccCorePlatformApi);
+        detail::MaybeUpdateAccessFlags(runtime, member, kAccCorePlatformApi);
         return false;
       }
 

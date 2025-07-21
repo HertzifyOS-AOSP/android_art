@@ -326,6 +326,13 @@ TEST_F(CmdlineParserTest, TestLogVerbosity) {
     log_verbosity.dex = true;
     EXPECT_SINGLE_PARSE_VALUE(log_verbosity, log_args, M::Verbose);
   }
+
+  {
+    const char* log_args = "-verbose:hiddenapi";
+    LogVerbosity log_verbosity = LogVerbosity();
+    log_verbosity.hiddenapi = true;
+    EXPECT_SINGLE_PARSE_VALUE(log_verbosity, log_args, M::Verbose);
+  }
 }  // TEST_F
 
 TEST_F(CmdlineParserTest, TestXGcOption) {

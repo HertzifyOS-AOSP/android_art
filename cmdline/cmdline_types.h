@@ -738,6 +738,8 @@ struct CmdlineType<LogVerbosity> : CmdlineTypeParser<LogVerbosity> {
         log_verbosity.agents = true;
       } else if (verbose_options[j] == "dex") {
         log_verbosity.dex = true;
+      } else if (verbose_options[j] == "hiddenapi") {
+        log_verbosity.hiddenapi = true;
       } else {
         return Result::Invalid(std::string("Unknown -verbose option ") + verbose_options[j]);
       }
@@ -750,7 +752,7 @@ struct CmdlineType<LogVerbosity> : CmdlineTypeParser<LogVerbosity> {
   static const char* DescribeType() {
     return "class|collector|compiler|deopt|gc|heap|interpreter|jdwp|jit|jni|monitor|oat|profiler|"
            "signals|simulator|startup|third-party-jni|threads|verifier|verifier-debug|image|"
-           "systrace-locks|plugin|agents|dex";
+           "systrace-locks|plugin|agents|dex|hiddenapi";
   }
 };
 
