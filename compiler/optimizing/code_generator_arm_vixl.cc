@@ -3604,7 +3604,12 @@ void LocationsBuilderARMVIXL::VisitInvokeStaticOrDirect(HInvokeStaticOrDirect* i
     CriticalNativeCallingConventionVisitorARMVIXL calling_convention_visitor(
         /*for_register_allocation=*/ true);
     CodeGenerator::CreateCommonInvokeLocationSummary(invoke, &calling_convention_visitor);
-    invoke->GetLocations()->AddTemp(Location::RequiresRegister());  // For target method.
+    // Use the next argument register, if any, as the target method temp. Otherwise, we'll use LR.
+    // We prefer the low register temp that allows shorter encoding than LR.
+    Location maybe_temp = calling_convention_visitor.GetNextLocation(DataType::Type::kInt32);
+    if (maybe_temp.IsRegister()) {
+      invoke->GetLocations()->AddTemp(maybe_temp);
+    }
   } else {
     HandleInvoke(invoke);
   }
@@ -9569,7 +9574,13 @@ void CodeGeneratorARMVIXL::GenerateStaticOrDirectCall(
       // offset instructions MOVW+MOVT from the entrypoint load, so they cannot be fused.
       FALLTHROUGH_INTENDED;
     default: {
-      LoadMethod(invoke->GetMethodLoadKind(), temp, invoke);
+      if (callee_method.IsInvalid()) {
+        DCHECK_EQ(invoke->GetCodePtrLocation(), CodePtrLocation::kCallCriticalNative);
+        // Use LR for both the target method and then the code pointer. The code shall be two
+        // bytes longer because we'll have to use 32-bit instead of 16-bit encoding for one LDR.
+        callee_method = Location::RegisterLocation(lr.GetCode());
+      }
+      LoadMethod(invoke->GetMethodLoadKind(), callee_method, invoke);
       break;
     }
   }

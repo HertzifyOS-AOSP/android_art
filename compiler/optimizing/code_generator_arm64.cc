@@ -4965,9 +4965,6 @@ void LocationsBuilderARM64::VisitInvokeStaticOrDirect(HInvokeStaticOrDirect* inv
     CriticalNativeCallingConventionVisitorARM64 calling_convention_visitor(
         /*for_register_allocation=*/ true);
     CodeGenerator::CreateCommonInvokeLocationSummary(invoke, &calling_convention_visitor);
-    if (invoke->GetMethodLoadKind() != MethodLoadKind::kBootImageLinkTimePcRelative) {
-      invoke->GetLocations()->AddTemp(Location::RequiresRegister());  // For target method.
-    }
   } else {
     HandleInvoke(invoke);
   }
@@ -5086,7 +5083,12 @@ void CodeGeneratorARM64::GenerateStaticOrDirectCall(
       }
       FALLTHROUGH_INTENDED;
     default:
-      LoadMethod(invoke->GetMethodLoadKind(), temp, invoke);
+      if (invoke->GetCodePtrLocation() == CodePtrLocation::kCallCriticalNative) {
+        // Use LR for both the target method and then the code pointer.
+        DCHECK(callee_method.IsInvalid());
+        callee_method = Location::RegisterLocation(lr.GetCode());
+      }
+      LoadMethod(invoke->GetMethodLoadKind(), callee_method, invoke);
       break;
   }
 
