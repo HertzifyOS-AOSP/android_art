@@ -43,7 +43,7 @@ int skipped_gc_iterations = 0;
 // Global variable to call the GC once every maximum number of iterations.
 // TODO: These values were obtained from local experimenting. They can be changed after
 // further investigation.
-static constexpr int kMaxSkipGCIterations = 4000;
+static constexpr int kMaxSkipGCIterations = 3000;
 // Global variable to signal LSAN that we are not leaking memory.
 uint8_t* allocated_signal_stack = nullptr;
 

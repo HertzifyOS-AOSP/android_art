@@ -1179,6 +1179,7 @@ void CodeGeneratorX86_64::GenerateStaticOrDirectCall(
     case MethodLoadKind::kBootImageLinkTimePcRelative:
       // For kCallCriticalNative we skip loading the method and do the call directly.
       if (invoke->GetCodePtrLocation() == CodePtrLocation::kCallCriticalNative) {
+        DCHECK(!callee_method.IsRegister());  // There are FP temps requested to block xmm12-15.
         break;
       }
       FALLTHROUGH_INTENDED;
@@ -3098,6 +3099,9 @@ void LocationsBuilderX86_64::VisitInvokeStaticOrDirect(HInvokeStaticOrDirect* in
     CriticalNativeCallingConventionVisitorX86_64 calling_convention_visitor(
         /*for_register_allocation=*/ true);
     CodeGenerator::CreateCommonInvokeLocationSummary(invoke, &calling_convention_visitor);
+    if (invoke->GetMethodLoadKind() != MethodLoadKind::kBootImageLinkTimePcRelative) {
+      invoke->GetLocations()->AddTemp(Location::RequiresRegister());  // For target method.
+    }
     CodeGeneratorX86_64::BlockNonVolatileXmmRegisters(invoke->GetLocations());
   } else {
     HandleInvoke(invoke);

@@ -56,9 +56,10 @@ using helpers::CPURegisterFrom;
 using helpers::HeapOperand;
 using helpers::LocationFrom;
 using helpers::RegisterFrom;
-using helpers::WRegisterFrom;
 using helpers::DRegisterFrom;
 using helpers::SRegisterFrom;
+using helpers::WRegisterFrom;
+using helpers::XRegisterFrom;
 
 // The maximum (meaningful) distance (31) that can be used in an integer shift/rotate operation.
 static constexpr int32_t kMaxIntShiftDistance = 0x1f;
@@ -487,11 +488,6 @@ void FastCompilerARM64::MoveConstantsToRegisters() {
       vreg_locations_[i] = CreateNewRegisterLocation(i, type, /* next= */ nullptr);
       MoveLocation(vreg_locations_[i], location, type);
       DCHECK(!HitUnimplemented());
-      if (location.GetConstant()->IsArithmeticZero()) {
-        // In case we branch, we need to make sure a null value can be merged
-        // with an object value, so treat the 0 value as an object.
-        UpdateRegisterMask(i, /* is_object= */ true);
-      }
     }
   }
 }
@@ -535,6 +531,25 @@ bool FastCompilerARM64::ProcessInstructions() {
 
     if (catch_pcs_.IsBitSet(pair.DexPc())) {
       catch_stack_maps_.push_back(std::make_pair(pair.DexPc(), GetAssembler()->CodePosition()));
+      // Emulate a branch to this pc.
+      PrepareToBranch(pair.DexPc());
+      // Set new masks based on all throwing instructions.
+      is_non_null_mask_ = is_non_null_masks_[pair.DexPc()];
+      object_register_mask_ = object_register_masks_[pair.DexPc()];
+    }
+
+    // If the instruction can throw, emulate a branch to the catch handler by
+    // updating dex register masks.
+    if (GetCodeItemAccessor().TriesSize() != 0 &&
+        (Instruction::FlagsOf(pair.Inst().Opcode()) & Instruction::kThrow) != 0) {
+      const dex::TryItem* try_item = GetCodeItemAccessor().FindTryItem(pair.DexPc());
+      if (try_item != nullptr) {
+        for (CatchHandlerIterator iterator(GetCodeItemAccessor(), *try_item);
+             iterator.HasNext();
+             iterator.Next()) {
+          UpdateMasks(iterator.GetHandlerAddress());
+        }
+      }
     }
 
     if (!ProcessDexInstruction(pair.Inst(), pair.DexPc(), next)) {
@@ -1237,6 +1252,7 @@ bool FastCompilerARM64::BuildInstanceOf(uint32_t vreg,
     return false;
   }
   __ Bind(&exit);
+  UpdateLocal(vreg_result, /* is_object= */ false);
   return true;
 }
 
@@ -1407,6 +1423,7 @@ bool FastCompilerARM64::DoGet(const MemOperand& mem,
 
   // Ensure the pc position is recorded immediately after the load instruction.
   EmissionCheckScope guard(GetVIXLAssembler(), kMaxMacroInstructionSizeInBytes);
+  bool is_wide = false;
   switch (opcode) {
     case Instruction::SGET_BOOLEAN:
     case Instruction::IGET_BOOLEAN: {
@@ -1436,18 +1453,21 @@ bool FastCompilerARM64::DoGet(const MemOperand& mem,
       __ Ldrsh(Register(dst), mem);
       break;
     }
+    case Instruction::SGET_WIDE:
+    case Instruction::IGET_WIDE:
+      is_wide = true;
+      FALLTHROUGH_INTENDED;
     case Instruction::SGET:
     case Instruction::IGET: {
       const dex::FieldId& field_id = GetDexFile().GetFieldId(field_index);
       const char* type = GetDexFile().GetFieldTypeDescriptor(field_id);
       DataType::Type field_type = DataType::FromShorty(type[0]);
+      Location location = CreateNewRegisterLocation(dest_reg, field_type, next);
       if (DataType::IsFloatingPointType(field_type)) {
-        VRegister dst = SRegisterFrom(
-            CreateNewRegisterLocation(dest_reg, field_type, next));
+        VRegister dst = is_wide ? DRegisterFrom(location) : SRegisterFrom(location);
         __ Ldr(dst, mem);
       } else {
-        Register dst = WRegisterFrom(
-            CreateNewRegisterLocation(dest_reg, DataType::Type::kInt32, next));
+        Register dst = is_wide ? XRegisterFrom(location) : WRegisterFrom(location);
         __ Ldr(dst, mem);
       }
       if (HitUnimplemented()) {
@@ -1497,7 +1517,9 @@ void FastCompilerARM64::SetIntConstant(uint32_t register_index,
                  Location::ConstantLocation(new (allocator_) HIntConstant(constant)),
                  DataType::Type::kInt32);
   }
-  UpdateLocal(register_index, /* is_object= */ false);
+  // In case we branch, we need to make sure a null value can be merged
+  // with an object value, so treat the 0 value as an object.
+  UpdateLocal(register_index, /* is_object= */ (constant == 0));
 }
 
 void FastCompilerARM64::SetLongConstant(uint32_t register_index,
@@ -2058,13 +2080,15 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
   Register source = RegisterFrom( \
       GetExistingRegisterLocation(instruction.VRegB_22 ## suffix(), DataType::Type::kInt32), \
       DataType::Type::kInt32); \
+  int32_t register_index = instruction.VRegA_22 ## suffix(); \
   Register result = RegisterFrom( \
-      CreateNewRegisterLocation(instruction.VRegA_22 ## suffix(), DataType::Type::kInt32, next), \
+      CreateNewRegisterLocation(register_index, DataType::Type::kInt32, next), \
       DataType::Type::kInt32); \
   if (HitUnimplemented()) { \
     return false; \
   } \
-  int16_t constant = instruction.VRegC_22 ## suffix();
+  int16_t constant = instruction.VRegC_22 ## suffix(); \
+  UpdateLocal(register_index, /* is_object= */ false);
 
     case Instruction::ADD_INT_LIT16: {
       SETUP_BINOP_22(s)

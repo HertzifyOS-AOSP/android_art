@@ -459,9 +459,6 @@ void CodeGenerator::CreateCommonInvokeLocationSummary(
     HInvokeStaticOrDirect* call = invoke->AsInvokeStaticOrDirect();
     MethodLoadKind method_load_kind = call->GetMethodLoadKind();
     CodePtrLocation code_ptr_location = call->GetCodePtrLocation();
-    if (code_ptr_location == CodePtrLocation::kCallCriticalNative) {
-      locations->AddTemp(Location::RequiresRegister());  // For target method.
-    }
     if (code_ptr_location == CodePtrLocation::kCallCriticalNative ||
         method_load_kind == MethodLoadKind::kRecursive) {
       // For `kCallCriticalNative` we need the current method as the hidden argument

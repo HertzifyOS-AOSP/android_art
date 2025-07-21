@@ -2752,6 +2752,9 @@ void LocationsBuilderX86::VisitInvokeStaticOrDirect(HInvokeStaticOrDirect* invok
     CriticalNativeCallingConventionVisitorX86 calling_convention_visitor(
         /*for_register_allocation=*/ true);
     CodeGenerator::CreateCommonInvokeLocationSummary(invoke, &calling_convention_visitor);
+    if (invoke->GetMethodLoadKind() != MethodLoadKind::kBootImageLinkTimePcRelative) {
+      invoke->GetLocations()->AddTemp(Location::RequiresRegister());  // For target method.
+    }
   } else {
     HandleInvoke(invoke);
   }
@@ -5567,6 +5570,7 @@ void CodeGeneratorX86::GenerateStaticOrDirectCall(
     case MethodLoadKind::kBootImageLinkTimePcRelative:
       // For kCallCriticalNative we skip loading the method and do the call directly.
       if (invoke->GetCodePtrLocation() == CodePtrLocation::kCallCriticalNative) {
+        DCHECK(callee_method.IsInvalid());
         break;
       }
       FALLTHROUGH_INTENDED;
@@ -5588,7 +5592,9 @@ void CodeGeneratorX86::GenerateStaticOrDirectCall(
                                     GetCriticalNativeDirectCallFrameSize>(invoke);
       if (invoke->GetMethodLoadKind() == MethodLoadKind::kBootImageLinkTimePcRelative) {
         DCHECK(GetCompilerOptions().IsBootImage() || GetCompilerOptions().IsBootImageExtension());
-        Register base_reg = GetInvokeExtraParameter(invoke, temp.AsRegister<Register>());
+        DCHECK(temp.IsInvalid());
+        Register base_reg =
+            invoke->GetLocations()->InAt(invoke->GetSpecialInputIndex()).AsRegister<Register>();
         __ call(Address(base_reg, CodeGeneratorX86::kPlaceholder32BitOffset));
         RecordBootImageJniEntrypointPatch(invoke);
       } else {

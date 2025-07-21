@@ -4208,6 +4208,9 @@ void LocationsBuilderRISCV64::VisitInvokeStaticOrDirect(HInvokeStaticOrDirect* i
     CriticalNativeCallingConventionVisitorRiscv64 calling_convention_visitor(
         /*for_register_allocation=*/ true);
     CodeGenerator::CreateCommonInvokeLocationSummary(instruction, &calling_convention_visitor);
+    if (instruction->GetMethodLoadKind() != MethodLoadKind::kBootImageLinkTimePcRelative) {
+      instruction->GetLocations()->AddTemp(Location::RequiresRegister());  // For target method.
+    }
   } else {
     HandleInvoke(instruction);
   }
@@ -6990,6 +6993,7 @@ void CodeGeneratorRISCV64::GenerateStaticOrDirectCall(HInvokeStaticOrDirect* inv
       DCHECK(GetCompilerOptions().IsBootImage() || GetCompilerOptions().IsBootImageExtension());
       if (invoke->GetCodePtrLocation() == CodePtrLocation::kCallCriticalNative) {
         // Do not materialize the method pointer, load directly the entrypoint.
+        DCHECK(callee_method.IsInvalid());
         CodeGeneratorRISCV64::PcRelativePatchInfo* info_high =
             NewBootImageJniEntrypointPatch(invoke->GetResolvedMethodReference());
         EmitPcRelativeAuipcPlaceholder(info_high, RA);

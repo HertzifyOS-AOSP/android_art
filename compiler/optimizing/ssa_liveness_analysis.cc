@@ -579,25 +579,26 @@ LiveInterval* LiveInterval::SplitAt(size_t position) {
       new_interval->range_search_start_ = new_interval->first_range_;
       return new_interval;
     } else {
-      // This range covers position. We create a new last_range_ for this interval
-      // that covers last_range_->Start() and position. We also shorten the current
-      // range and make it the first range of the new interval.
+      // This range covers position. We create a new `first_range_` for the `new_interval`
+      // that covers the range from the `position`. We also shorten the current
+      // range and make it the last range of this interval.
+      // Note: We must not do it the other way around as the `current` range may be cached
+      // as the search start position by the register allocator and updating its start
+      // position can break certain invariants.
       DCHECK(position < current->GetEnd() && position > current->GetStart());
-      new_interval->last_range_ = last_range_;
-      last_range_ = new (allocator_) LiveRange(current->start_, position, nullptr);
-      if (previous != nullptr) {
-        previous->next_ = last_range_;
-      } else {
-        first_range_ = last_range_;
-      }
-      new_interval->first_range_ = current;
-      current->start_ = position;
-      if (range_search_start_ != nullptr && range_search_start_->GetEnd() >= current->GetEnd()) {
+      new_interval->first_range_ =
+          new (allocator_) LiveRange(position, current->end_, current->next_);
+      new_interval->range_search_start_ = new_interval->first_range_;
+      new_interval->last_range_ =
+          (last_range_ != current) ? last_range_ : new_interval->first_range_;
+      current->next_ = nullptr;
+      current->end_ = position;
+      last_range_ = current;
+      if (range_search_start_ != nullptr && range_search_start_->GetEnd() >= position) {
         // Search start point is inside `new_interval`. Change it to `last_range`
         // in the original interval. This is conservative but always correct.
         range_search_start_ = last_range_;
       }
-      new_interval->range_search_start_ = new_interval->first_range_;
       return new_interval;
     }
   } while (current != nullptr);

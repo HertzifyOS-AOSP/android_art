@@ -4965,6 +4965,9 @@ void LocationsBuilderARM64::VisitInvokeStaticOrDirect(HInvokeStaticOrDirect* inv
     CriticalNativeCallingConventionVisitorARM64 calling_convention_visitor(
         /*for_register_allocation=*/ true);
     CodeGenerator::CreateCommonInvokeLocationSummary(invoke, &calling_convention_visitor);
+    if (invoke->GetMethodLoadKind() != MethodLoadKind::kBootImageLinkTimePcRelative) {
+      invoke->GetLocations()->AddTemp(Location::RequiresRegister());  // For target method.
+    }
   } else {
     HandleInvoke(invoke);
   }
@@ -5070,6 +5073,7 @@ void CodeGeneratorARM64::GenerateStaticOrDirectCall(
       DCHECK(GetCompilerOptions().IsBootImage() || GetCompilerOptions().IsBootImageExtension());
       if (invoke->GetCodePtrLocation() == CodePtrLocation::kCallCriticalNative) {
         // Do not materialize the method pointer, load directly the entrypoint.
+        DCHECK(callee_method.IsInvalid());
         // Add ADRP with its PC-relative JNI entrypoint patch.
         vixl::aarch64::Label* adrp_label =
             NewBootImageJniEntrypointPatch(invoke->GetResolvedMethodReference());

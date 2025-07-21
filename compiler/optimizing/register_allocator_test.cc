@@ -1001,4 +1001,109 @@ TEST_F(RegisterAllocatorTest, ReuseSpillSlotsUnavailableWithSplitPhiInterval) {
             get_phi->GetLiveInterval()->GetSpillSlot());
 }
 
+// Regression test for splitting a live range that's recorded as a search hint in the
+// `SpillSlotData`. Previously, a new range was created for the first part of the live
+// range and the original `LiveRange` object had its start adjusted but that means the
+// search hint was pointing to the second part of the split live range and we missed
+// overlaps when trying to reuse a spill slot. Bug: 426785078
+TEST_F(RegisterAllocatorTest, SplitSpillSlotLiveRangeHint) {
+  if (!com::android::art::flags::reg_alloc_spill_slot_reuse()) {
+    GTEST_SKIP() << "Improved spill slot reuse disabled.";
+  }
+  // Create a graph with a three-way switch to blocks `left`, `mid` and `right`,
+  // and a diamond pattern in the `left` block with branch blocks `left_left`
+  // and `left_right` and merging to `left_end`. The linear order shall have
+  // the block `right` followed by `mid` and `mid` followed by `left`.
+  HBasicBlock* return_block = InitEntryMainExitGraph();
+  auto [start, left_end, mid] = CreateDiamondPattern(return_block);
+  HBasicBlock* right = AddNewBlock();
+  start->AddSuccessor(right);
+  right->AddSuccessor(return_block);
+  auto [left, left_left, left_right] = CreateDiamondPattern(left_end);
+
+  // Create `iget_*` instructions in `start`, `right`, `mid` and `left_right`
+  // (listed in linear order). Merge `iget_start` and `iget_left_right` with
+  // a `phi_left_end` in `left_end` and merge `phi_left_end`, `iget_mid` and
+  // `iget_right` with the final `phi` in `return_block`. Use invokes to force
+  // spilling `iget_*`s; in `left_right` use `HMin` instead to avoid blocking
+  // registers too early. When the `iget_start` is spilled, the spill slot is
+  // propagated to the Phis as a hint that's seen by all the other `iget_*`s.
+  //
+  // For `iget_start`, add a register use in `left`, an `HDeoptimize` in
+  // `left_end` to extend the `iget_start` lifetime across `left_right` and
+  // most of `left_end` and an invoke in `left_end` before the `HDeoptimize`
+  // which blocks registers and forces the splitting of the `iget_start`
+  // interval when allocating a register for the use in `left`.
+
+  HInstruction* obj = MakeParam(DataType::Type::kReference);
+  HInstruction* const1 = graph_->GetIntConstant(1);
+
+  HInstruction* iget_start = MakeIFieldGet(start, obj, DataType::Type::kInt32, MemberOffset(40));
+  HInstruction* switch_input = MakeIFieldGet(start, obj, DataType::Type::kInt32, MemberOffset(32));
+  MakeInvokeStatic(start, DataType::Type::kVoid, {});  // Spill all.
+  start->AddInstruction(
+      new (GetAllocator()) HPackedSwitch(/*start_value=*/ 0, /*num_entries=*/ 2, switch_input));
+
+  HInstruction* iget_right = MakeIFieldGet(right, obj, DataType::Type::kInt32, MemberOffset(44));
+  MakeInvokeStatic(right, DataType::Type::kVoid, {});  // Spill all.
+  MakeGoto(right);  // This block was constructed with `AddNewBlock()` without `HGoto`.
+
+  HInstruction* iget_mid = MakeIFieldGet(mid, obj, DataType::Type::kInt32, MemberOffset(48));
+  MakeInvokeStatic(mid, DataType::Type::kVoid, {});  // Spill all.
+
+  HSub* sub = MakeBinOp<HSub>(left, DataType::Type::kInt32, iget_start, const1);
+  HInstruction* left_cond = MakeIFieldGet(left, obj, DataType::Type::kBool, MemberOffset(36));
+  MakeIf(left, left_cond);
+
+  HInstruction* iget_left_right =
+      MakeIFieldGet(left_right, obj, DataType::Type::kInt32, MemberOffset(40));
+  // Force spilling `iget_left_right` without using an invoke.
+  HMin* min = MakeBinOp<HMin>(left_right, DataType::Type::kInt32, sub, const1);
+
+  HPhi* phi_left_end = MakePhi(left_end, {iget_start, iget_left_right});
+  HPhi* phi_min = MakePhi(left_end, {sub, min});
+  // Block registers to cause splitting of the `iget_start` interval when allocating
+  // a register at the start of the `left` block.
+  MakeInvokeStatic(left_end, DataType::Type::kVoid, {phi_min});  // Use `phi_min`, spill all.
+  HInstruction* deopt_cond = MakeIFieldGet(left_end, obj, DataType::Type::kBool, MemberOffset(37));
+  HDeoptimize* deopt = new (GetAllocator()) HDeoptimize(
+      GetAllocator(), deopt_cond, DeoptimizationKind::kFullFrame, kNoDexPc);
+  AddOrInsertInstruction(left_end, deopt);
+  ManuallyBuildEnvFor(deopt, {iget_start});  // Keep `iget_start` alive up to this point.
+
+  HPhi* phi = MakePhi(return_block, {phi_left_end, iget_mid, iget_right});
+  MakeReturn(return_block, phi);
+
+  graph_->ComputeDominanceInformation();
+  x86::CodeGeneratorX86 codegen(graph_, *compiler_options_);
+  SsaLivenessAnalysis liveness(graph_, &codegen, GetScopedAllocator());
+  liveness.Analyze();
+
+  ASSERT_LT(right->GetLifetimeStart(), mid->GetLifetimeStart());
+  ASSERT_LT(mid->GetLifetimeStart(), left->GetLifetimeStart());
+
+  // Set just two register available, including the `obj` input register ECX.
+  bool* blocked_registers = codegen.GetBlockedCoreRegisters();
+  std::fill_n(blocked_registers, codegen.GetNumberOfCoreRegisters(), true);
+  blocked_registers[x86::EAX] = blocked_registers[x86::ECX] = false;
+
+  // Before the bug was fixed, the interval validation at the end of `AllocateRegisters()`
+  // would report a spill slot conflict for the `iget_left_right` because it was allocated
+  // the same spill slot as `iget_start` despite overlapping lifetime. This would cause
+  // clobbering of `iget_start` for its use in the `HDeoptimize` environment.
+  std::unique_ptr<RegisterAllocator> register_allocator =
+      RegisterAllocator::Create(GetScopedAllocator(), &codegen, liveness);
+  register_allocator->AllocateRegisters();
+
+  // While `iget_right` and `iget_mid` use the same spill slot as `iget_start` thanks to the
+  // hint, the `iget_left_right` must use a different spill slot due to lifetime overlap.
+  for (HInstruction* iget : {iget_start, iget_right, iget_mid, iget_left_right}) {
+    ASSERT_TRUE(iget->GetLiveInterval()->HasSpillSlot());
+  }
+  int iget_start_spill_slot = iget_start->GetLiveInterval()->GetSpillSlot();
+  EXPECT_EQ(iget_start_spill_slot, iget_right->GetLiveInterval()->GetSpillSlot());
+  EXPECT_EQ(iget_start_spill_slot, iget_mid->GetLiveInterval()->GetSpillSlot());
+  EXPECT_NE(iget_start_spill_slot, iget_left_right->GetLiveInterval()->GetSpillSlot());
+}
+
 }  // namespace art
