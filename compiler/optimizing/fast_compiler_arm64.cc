@@ -56,9 +56,10 @@ using helpers::CPURegisterFrom;
 using helpers::HeapOperand;
 using helpers::LocationFrom;
 using helpers::RegisterFrom;
-using helpers::WRegisterFrom;
 using helpers::DRegisterFrom;
 using helpers::SRegisterFrom;
+using helpers::WRegisterFrom;
+using helpers::XRegisterFrom;
 
 // The maximum (meaningful) distance (31) that can be used in an integer shift/rotate operation.
 static constexpr int32_t kMaxIntShiftDistance = 0x1f;
@@ -1422,6 +1423,7 @@ bool FastCompilerARM64::DoGet(const MemOperand& mem,
 
   // Ensure the pc position is recorded immediately after the load instruction.
   EmissionCheckScope guard(GetVIXLAssembler(), kMaxMacroInstructionSizeInBytes);
+  bool is_wide = false;
   switch (opcode) {
     case Instruction::SGET_BOOLEAN:
     case Instruction::IGET_BOOLEAN: {
@@ -1451,18 +1453,21 @@ bool FastCompilerARM64::DoGet(const MemOperand& mem,
       __ Ldrsh(Register(dst), mem);
       break;
     }
+    case Instruction::SGET_WIDE:
+    case Instruction::IGET_WIDE:
+      is_wide = true;
+      FALLTHROUGH_INTENDED;
     case Instruction::SGET:
     case Instruction::IGET: {
       const dex::FieldId& field_id = GetDexFile().GetFieldId(field_index);
       const char* type = GetDexFile().GetFieldTypeDescriptor(field_id);
       DataType::Type field_type = DataType::FromShorty(type[0]);
+      Location location = CreateNewRegisterLocation(dest_reg, field_type, next);
       if (DataType::IsFloatingPointType(field_type)) {
-        VRegister dst = SRegisterFrom(
-            CreateNewRegisterLocation(dest_reg, field_type, next));
+        VRegister dst = is_wide ? DRegisterFrom(location) : SRegisterFrom(location);
         __ Ldr(dst, mem);
       } else {
-        Register dst = WRegisterFrom(
-            CreateNewRegisterLocation(dest_reg, DataType::Type::kInt32, next));
+        Register dst = is_wide ? XRegisterFrom(location) : WRegisterFrom(location);
         __ Ldr(dst, mem);
       }
       if (HitUnimplemented()) {
