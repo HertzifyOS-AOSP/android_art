@@ -129,11 +129,9 @@ public final class Utils {
         List<Abi> abis = new ArrayList<>();
         abis.add(getPrimaryAbi(pkgState));
         String pkgSecondaryCpuAbi = pkgState.getSecondaryCpuAbi();
-        if (pkgSecondaryCpuAbi != null) {
-            String isa = getTranslatedIsa(VMRuntime.getInstructionSet(pkgSecondaryCpuAbi));
-            if (isa != null) {
-                abis.add(Abi.create(nativeIsaToAbi(isa), isa, false /* isPrimaryAbi */));
-            }
+        Abi secondaryAbi = mapAbiNameToNativeAbi(pkgSecondaryCpuAbi, false /* isPrimaryAbi */);
+        if (secondaryAbi != null) {
+            abis.add(secondaryAbi);
         }
         // Primary and secondary ABIs should be guaranteed to have different ISAs.
         if (abis.size() == 2 && abis.get(0).isa().equals(abis.get(1).isa())) {
@@ -149,7 +147,15 @@ public final class Utils {
     public static List<Abi> getUsedPrimaryDexAbis(@NonNull DexUseManagerLocal dexUseManager,
             @NonNull FilteredSnapshot snapshot, @NonNull PackageState pkgState,
             @NonNull String dexPath) {
+        // We always include all primary ABIs. For secondary ABIs, we only include them if they are
+        // actually used, except for the special case below.
         List<Abi> abis = getAllPrimaryDexAbis(pkgState);
+        if (Constants.getWebviewPackageNames().contains(pkgState.getPackageName())) {
+            // Webview has arm as primary and arm64 as secondary ABIs, and if arm64 is preferred by
+            // the device and other apps are using Webview, then arm64 will be used, so both ABIs
+            // are needed, even if arm64 is not yet used.
+            return abis;
+        }
         Set<String> primaryDexUsedAbis =
                 dexUseManager.getPrimaryDexLoaders(pkgState.getPackageName(), dexPath)
                         .stream()
@@ -183,13 +189,10 @@ public final class Utils {
 
     @NonNull
     public static Abi getPrimaryAbi(@NonNull PackageState pkgState) {
-        String primaryCpuAbi = pkgState.getPrimaryCpuAbi();
+        Abi primaryCpuAbi =
+                mapAbiNameToNativeAbi(pkgState.getPrimaryCpuAbi(), true /* isPrimaryAbi */);
         if (primaryCpuAbi != null) {
-            String isa = getTranslatedIsa(VMRuntime.getInstructionSet(primaryCpuAbi));
-            // Fall through if there is no native bridge support.
-            if (isa != null) {
-                return Abi.create(nativeIsaToAbi(isa), isa, true /* isPrimaryAbi */);
-            }
+            return primaryCpuAbi;
         }
         // This is the most common case. Either the package manager can't infer the ABIs, probably
         // because the package doesn't contain any native library, or the primary ABI is a foreign
@@ -199,6 +202,18 @@ public final class Utils {
         Utils.check(isNativeAbi(preferredAbi));
         return Abi.create(
                 preferredAbi, VMRuntime.getInstructionSet(preferredAbi), true /* isPrimaryAbi */);
+    }
+
+    private static Abi mapAbiNameToNativeAbi(
+            @NonNull String abiName, @NonNull boolean isPrimaryAbi) {
+        if (abiName != null) {
+            String isa = getTranslatedIsa(VMRuntime.getInstructionSet(abiName));
+            // Fall through if there is no native bridge support.
+            if (isa != null) {
+                return Abi.create(nativeIsaToAbi(isa), isa, isPrimaryAbi);
+            }
+        }
+        return null;
     }
 
     /**

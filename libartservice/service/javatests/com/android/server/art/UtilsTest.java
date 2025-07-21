@@ -73,6 +73,7 @@ public class UtilsTest {
     @Mock private DexUseManagerLocal mDexUseManager;
 
     private static final String PKG_NAME = "com.example.foo";
+    private static final String WEBVIEW_PKG_NAME = "com.android.webview";
 
     @Before
     public void setUp() throws Exception {
@@ -82,6 +83,7 @@ public class UtilsTest {
         lenient().when(Constants.getPreferredAbi()).thenReturn("arm64-v8a");
         lenient().when(Constants.getNative64BitAbi()).thenReturn("arm64-v8a");
         lenient().when(Constants.getNative32BitAbi()).thenReturn("armeabi-v7a");
+        lenient().when(Constants.getWebviewPackageNames()).thenReturn(Set.of(WEBVIEW_PKG_NAME));
     }
 
     @Test
@@ -214,6 +216,20 @@ public class UtilsTest {
                 .containsExactly(Utils.Abi.create("arm64-v8a", "arm64", true /* isPrimaryAbi */),
                         Utils.Abi.create("armeabi-v7a", "arm", false /* isPrimaryAbi */))
                 .inOrder();
+    }
+
+    @Test
+    @RequiresFlagsEnabled(FLAGS_PREFIX + Flags.FLAG_DEXOPT_SECONDARY_ISA_ONLY_WHEN_NEEDED)
+    public void testGetUsedPrimaryDexAbisKeepSecondaryAbiIfWebviewPackage() {
+        lenient()
+                .when(mDexUseManager.getPrimaryDexLoaders(
+                        eq(WEBVIEW_PKG_NAME), any() /* dexPath */))
+                .thenReturn(Set.of());
+        PackageState pkgState = newPackageState(WEBVIEW_PKG_NAME).setAbis("x86", "x86_64").build();
+
+        assertThat(Utils.getUsedPrimaryDexAbis(mDexUseManager, mSnapshot, pkgState, "dexPath"))
+                .containsExactly(Utils.Abi.create("armeabi-v7a", "arm", true /* isPrimaryAbi */),
+                        Utils.Abi.create("arm64-v8a", "arm64", false /* isPrimaryAbi */));
     }
 
     @Test
