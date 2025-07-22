@@ -311,13 +311,15 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
   // This interval is the result of a split.
   bool IsSplit() const { return parent_ != this; }
 
-  // Record use of an input. The use will be recorded as an environment use if
-  // `environment` is not null and as register use otherwise. If `actual_user`
-  // is specified, the use will be recorded at `actual_user`'s lifetime position.
+  // Record use of an input. The use will be recorded as an environment use if `kEnvironmentUse`
+  // is true (which must correspond to `environment` being non-null) and as register use otherwise.
+  // The use will be recorded at `actual_user`'s lifetime position.
+  template <bool kEnvironmentUse>
   void AddUse(HInstruction* instruction,
+              HBasicBlock* block,
               HEnvironment* environment,
               size_t input_index,
-              HInstruction* actual_user = nullptr);
+              HInstruction* actual_user);
 
   void AddPhiUse(HInstruction* instruction, size_t input_index, HBasicBlock* block) {
     DCHECK(instruction->IsPhi());
@@ -985,8 +987,7 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
 /**
  * Analysis that computes the liveness of instructions:
  *
- * (a) Non-environment uses of an instruction always make
- *     the instruction live.
+ * (a) Non-environment uses of an instruction always make the instruction live.
  * (b) Environment uses of an instruction whose type is object (that is, non-primitive), make the
  *     instruction live, unless the class has an @DeadReferenceSafe annotation.
  *     This avoids unexpected premature reference enqueuing or finalization, which could
@@ -1000,7 +1001,8 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
  *     from the interpreter via SuspendCheck; such use in SuspendCheck makes the instruction
  *     live.
  *
- * (b), (c) and (d) are implemented through SsaLivenessAnalysis::ShouldBeLiveForEnvironment.
+ * (b) is implemented through `SsaLivenessAnalysis::ShouldBeLiveForEnvironment()`.
+ * (c) and (d) are implemented through `SsaLivenessAnalysis::ShouldAllBeLiveForEnvironment()`.
  */
 class SsaLivenessAnalysis : public ValueObject {
  public:
@@ -1100,30 +1102,20 @@ class SsaLivenessAnalysis : public ValueObject {
   bool UpdateLiveOut(const HBasicBlock& block);
 
   static void ProcessEnvironment(HInstruction* instruction,
+                                 HBasicBlock* block,
                                  HInstruction* actual_user,
                                  BitVectorView<size_t> live_in);
   static void RecursivelyProcessInputs(HInstruction* instruction,
+                                       HBasicBlock* block,
                                        HInstruction* actual_user,
                                        BitVectorView<size_t> live_in);
 
-  // Returns whether `instruction` in an HEnvironment held by `env_holder`
-  // should be kept live by the HEnvironment.
-  static bool ShouldBeLiveForEnvironment(HInstruction* env_holder, HInstruction* instruction) {
-    DCHECK(instruction != nullptr);
-    // A value that's not live in compiled code may still be needed in interpreter,
-    // due to code motion, etc.
-    if (env_holder->IsDeoptimize()) return true;
-    // A value live at a throwing instruction in a try block may be copied by
-    // the exception handler to its location at the top of the catch block.
-    if (env_holder->CanThrowIntoCatchBlock()) return true;
-    HGraph* graph = instruction->GetBlock()->GetGraph();
-    if (graph->IsDebuggable()) return true;
-    // When compiling in OSR mode, all loops in the compiled method may be entered
-    // from the interpreter via SuspendCheck; thus we need to preserve the environment.
-    if (env_holder->IsSuspendCheck() && graph->IsCompilingOsr()) return true;
-    if (graph -> IsDeadReferenceSafe()) return false;
-    return instruction->GetType() == DataType::Type::kReference;
-  }
+  // Returns whether all instructions held by the `HEnvironment` of `env_holder` should be
+  // kept live by that `HEnvironment`
+  static bool ShouldAllBeLiveForEnvironment(HInstruction* env_holder, HGraph* graph);
+
+  // Returns whether `instruction` in an `HEnvironment` should be kept live by that `HEnvironment`.
+  static bool ShouldBeLiveForEnvironment(HInstruction* instruction, bool is_dead_reference_safe);
 
   void CheckNoLiveInIrreducibleLoop(const HBasicBlock& block) const {
     if (!block.IsLoopHeader() || !block.GetLoopInformation()->IsIrreducible()) {
