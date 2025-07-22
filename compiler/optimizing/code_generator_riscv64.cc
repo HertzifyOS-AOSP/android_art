@@ -4208,11 +4208,13 @@ void LocationsBuilderRISCV64::VisitInvokeStaticOrDirect(HInvokeStaticOrDirect* i
     CriticalNativeCallingConventionVisitorRiscv64 calling_convention_visitor(
         /*for_register_allocation=*/ true);
     CodeGenerator::CreateCommonInvokeLocationSummary(instruction, &calling_convention_visitor);
-    // Use the next argument register, if usable for C.LD, as the target method temp. Otherwise,
-    // we'll use RA. We prefer the low register temp that allows shorter encoding than RA.
-    Location maybe_temp = calling_convention_visitor.GetNextLocation(DataType::Type::kInt32);
-    if (maybe_temp.IsRegister() && maybe_temp.reg() <= A5) {
-      instruction->GetLocations()->AddTemp(maybe_temp);
+    if (instruction->GetMethodLoadKind() != MethodLoadKind::kBootImageLinkTimePcRelative) {
+      // Use the next argument register, if usable for C.LD, as the target method temp. Otherwise,
+      // we'll use RA. We prefer the low register temp that allows shorter encoding than RA.
+      Location maybe_temp = calling_convention_visitor.GetNextLocation(DataType::Type::kInt32);
+      if (maybe_temp.IsRegister() && maybe_temp.reg() <= A5) {
+        instruction->GetLocations()->AddTemp(maybe_temp);
+      }
     }
   } else {
     HandleInvoke(instruction);
