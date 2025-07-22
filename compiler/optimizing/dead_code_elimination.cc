@@ -713,6 +713,9 @@ bool HDeadCodeElimination::RemoveUnneededTries() {
   }
 
   // Deduplicate the tries which have different try entries but they are really the same try.
+  // We store the surviving keys of `tries` to guarantee consistency when eliminating them below.
+  BitVectorView<size_t> keys =
+      ArenaBitVector::CreateFixedSize(&allocator, graph_->GetBlocks().size(), kArenaAllocDCE);
   for (auto it = tries.begin(); it != tries.end(); it++) {
     HBasicBlock* block = it->first;
     DCHECK(block->EndsWithTryBoundary());
@@ -735,16 +738,20 @@ bool HDeadCodeElimination::RemoveUnneededTries() {
         other_it++;
       }
     }
+    keys.SetBit(block->GetBlockId());
   }
 
   size_t removed_tries = 0;
   bool any_block_in_loop = false;
 
-  // Check which tries contain throwing instructions.
-  for (const auto& entry : tries) {
-    if (CanPerformTryRemoval(entry.second)) {
+  // Check which tries contain throwing instructions. Iterate in block id order to guarantee
+  // consistency.
+  for (size_t id : keys.Indexes()) {
+    auto entry = tries.find(graph_->GetBlocks()[id]);
+    DCHECK(entry != tries.end());
+    if (CanPerformTryRemoval(entry->second)) {
       ++removed_tries;
-      RemoveTry(entry.first, entry.second, &any_block_in_loop);
+      RemoveTry(entry->first, entry->second, &any_block_in_loop);
     }
   }
 
