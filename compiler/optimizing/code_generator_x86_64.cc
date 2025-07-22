@@ -3100,7 +3100,8 @@ void LocationsBuilderX86_64::VisitInvokeStaticOrDirect(HInvokeStaticOrDirect* in
         /*for_register_allocation=*/ true);
     CodeGenerator::CreateCommonInvokeLocationSummary(invoke, &calling_convention_visitor);
     if (invoke->GetMethodLoadKind() != MethodLoadKind::kBootImageLinkTimePcRelative) {
-      invoke->GetLocations()->AddTemp(Location::RequiresRegister());  // For target method.
+      // Use R10 for the target method. This is neither a calleee-save nor an argument register.
+      invoke->GetLocations()->AddTemp(Location::RegisterLocation(R10));
     }
     CodeGeneratorX86_64::BlockNonVolatileXmmRegisters(invoke->GetLocations());
   } else {
