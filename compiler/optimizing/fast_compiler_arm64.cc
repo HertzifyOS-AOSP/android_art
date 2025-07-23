@@ -255,6 +255,7 @@ class FastCompilerARM64 : public FastCompiler {
   bool BuildLoadString(uint32_t vreg, dex::StringIndex string_index, const Instruction* next);
   bool BuildNewInstance(
       uint32_t vreg, dex::TypeIndex string_index, uint32_t dex_pc, const Instruction* next);
+  bool BuildNewArray(const Instruction& instruction, uint32_t dex_pc, const Instruction* next);
   bool BuildCheckCast(uint32_t vreg, dex::TypeIndex type_index, uint32_t dex_pc);
   bool BuildInstanceOf(uint32_t vreg,
                        uint32_t vreg_result,
@@ -1167,7 +1168,7 @@ bool FastCompilerARM64::BuildNewInstance(uint32_t vreg,
   Handle<mirror::Class> h_klass = handles_->NewHandle(klass);
   __ Ldr(cls_reg.W(), jit_patches_.DeduplicateJitClassLiteral(GetDexFile(),
                                                               type_index,
-                                                              h_klass ,
+                                                              h_klass,
                                                               code_generation_data_.get()));
   __ Ldr(cls_reg.W(), MemOperand(cls_reg.X()));
   DoReadBarrierOn(cls_reg);
@@ -1190,6 +1191,64 @@ bool FastCompilerARM64::BuildNewInstance(uint32_t vreg,
     return false;
   }
   UpdateLocal(vreg, /* is_object= */ true, /* can_be_null= */ false);
+  return true;
+}
+
+bool FastCompilerARM64::BuildNewArray(const Instruction& instruction,
+                                      uint32_t dex_pc,
+                                      const Instruction* next) {
+  dex::TypeIndex type_index(instruction.VRegC_22c());
+  int32_t length = instruction.VRegB_22c();
+  int32_t dst = instruction.VRegA_22c();
+  const char* descriptor = GetDexFile().GetTypeDescriptor(GetDexFile().GetTypeId(type_index));
+  DCHECK_EQ(descriptor[0], '[');
+  size_t component_type_shift = Primitive::ComponentSizeShift(Primitive::GetType(descriptor[1]));
+  QuickEntrypointEnum entrypoint =
+      CodeGenerator::GetArrayAllocationEntrypoint(component_type_shift);
+  if (!EnsureHasFrame()) {
+    return false;
+  }
+  if (Runtime::Current()->IsAotCompiler()) {
+    unimplemented_reason_ = "AOTNewArray";
+    return false;
+  }
+
+  InvokeRuntimeCallingConvention calling_convention;
+  Register cls_reg = calling_convention.GetRegisterAt(0);
+  {
+    ScopedObjectAccess soa(Thread::Current());
+    ObjPtr<mirror::Class> klass = dex_compilation_unit_.GetClassLinker()->ResolveType(
+        type_index, dex_compilation_unit_.GetDexCache(), dex_compilation_unit_.GetClassLoader());
+    if (klass == nullptr || !method_->GetDeclaringClass()->CanAccess(klass)) {
+      soa.Self()->ClearException();
+      unimplemented_reason_ = "UnsupportedClassForNewArray";
+      return false;
+    }
+
+    Handle<mirror::Class> h_klass = handles_->NewHandle(klass);
+    __ Ldr(cls_reg.W(), jit_patches_.DeduplicateJitClassLiteral(GetDexFile(),
+                                                                type_index,
+                                                                h_klass,
+                                                                code_generation_data_.get()));
+  }
+  __ Ldr(cls_reg.W(), MemOperand(cls_reg.X()));
+  DoReadBarrierOn(cls_reg);
+  if (!MoveLocation(LocationFrom(calling_convention.GetRegisterAt(1)),
+                    GetExistingRegisterLocation(length, DataType::Type::kInt32),
+                    DataType::Type::kInt32)) {
+    return false;
+  }
+  InvokeRuntime(entrypoint, dex_pc);
+  __ Dmb(InnerShareable, BarrierWrites);
+  if (!MoveLocation(CreateNewRegisterLocation(dst, DataType::Type::kReference, next),
+                    calling_convention.GetReturnLocation(DataType::Type::kReference),
+                    DataType::Type::kReference)) {
+    return false;
+  }
+  if (HitUnimplemented()) {
+    return false;
+  }
+  UpdateLocal(dst, /* is_object= */ true, /* can_be_null= */ false);
   return true;
 }
 
@@ -1221,7 +1280,7 @@ bool FastCompilerARM64::BuildCheckCast(uint32_t vreg, dex::TypeIndex type_index,
   __ Cbz(obj, &exit);
   __ Ldr(cls.W(), jit_patches_.DeduplicateJitClassLiteral(GetDexFile(),
                                                           type_index,
-                                                          h_klass ,
+                                                          h_klass,
                                                           code_generation_data_.get()));
   __ Ldr(cls.W(), MemOperand(cls.X()));
   __ Ldr(obj_cls.W(), MemOperand(obj.X()));
@@ -2363,7 +2422,7 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
     }
 
     case Instruction::NEW_ARRAY: {
-      break;
+      return BuildNewArray(instruction, dex_pc, next);
     }
 
     case Instruction::FILLED_NEW_ARRAY: {
