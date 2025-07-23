@@ -32,18 +32,18 @@ namespace art HIDDEN {
 
 // This visitor tries to simplify instructions that can be evaluated
 // as constants.
-class HConstantFoldingVisitor final : public HGraphDelegateVisitor {
+class HConstantFoldingVisitor final : public CRTPGraphVisitor<HConstantFoldingVisitor> {
  public:
   explicit HConstantFoldingVisitor(HGraph* graph,
                                    const CompilerOptions& compiler_options,
                                    OptimizingCompilerStats* stats)
-      : HGraphDelegateVisitor(graph, stats), compiler_options_(compiler_options) {}
+      : CRTPGraphVisitor(graph),
+        compiler_options_(compiler_options),
+        stats_(stats) {}
 
  private:
-  void VisitBasicBlock(HBasicBlock* block) override;
-
-  void VisitUnaryOperation(HUnaryOperation* inst) override;
-  void VisitBinaryOperation(HBinaryOperation* inst) override;
+  void VisitUnaryOperation(HUnaryOperation* inst);
+  void VisitBinaryOperation(HBinaryOperation* inst);
 
   // Tries to replace constants in binary operations like:
   // * BinaryOp(Select(false_constant, true_constant, condition), other_constant), or
@@ -52,12 +52,12 @@ class HConstantFoldingVisitor final : public HGraphDelegateVisitor {
   // with Select(15, 25, condition).
   bool TryRemoveBinaryOperationViaSelect(HBinaryOperation* inst);
 
-  void VisitArrayLength(HArrayLength* inst) override;
-  void VisitDivZeroCheck(HDivZeroCheck* inst) override;
-  void VisitIf(HIf* inst) override;
-  void VisitInvoke(HInvoke* inst) override;
-  void VisitTypeConversion(HTypeConversion* inst) override;
-  void VisitStaticFieldGet(HStaticFieldGet* instruction) override;
+  void VisitArrayLength(HArrayLength* inst);
+  void VisitDivZeroCheck(HDivZeroCheck* inst);
+  void VisitIf(HIf* inst);
+  void VisitInvoke(HInvoke* inst);
+  void VisitTypeConversion(HTypeConversion* inst);
+  void VisitStaticFieldGet(HStaticFieldGet* instruction);
 
   void PropagateValue(HBasicBlock* starting_block,
                       HInstruction* variable,
@@ -75,44 +75,64 @@ class HConstantFoldingVisitor final : public HGraphDelegateVisitor {
 
   const CompilerOptions& compiler_options_;
 
+  OptimizingCompilerStats* stats_;
+
+  template <typename T> friend class CRTPGraphVisitor;
+
   DISALLOW_COPY_AND_ASSIGN(HConstantFoldingVisitor);
 };
 
 // This visitor tries to simplify operations with an absorbing input,
 // yielding a constant. For example `input * 0` is replaced by a
 // null constant.
-class InstructionWithAbsorbingInputSimplifier final : public HGraphVisitor {
+class InstructionWithAbsorbingInputSimplifier final
+    : public CRTPGraphVisitor<InstructionWithAbsorbingInputSimplifier> {
  public:
-  explicit InstructionWithAbsorbingInputSimplifier(HGraph* graph) : HGraphVisitor(graph) {}
+  explicit InstructionWithAbsorbingInputSimplifier(HGraph* graph) : CRTPGraphVisitor(graph) {}
 
  private:
-  void VisitShift(HBinaryOperation* shift);
+  // Keep `ForwardVisit()` functions from base class visible except for those we replace below.
+  using CRTPGraphVisitor::ForwardVisit;
 
-  void VisitEqual(HEqual* instruction) override;
-  void VisitNotEqual(HNotEqual* instruction) override;
+  // Forward shifts to `HandleShift()`.
+  static constexpr auto ForwardVisit(void (CRTPGraphVisitor::*visit)(HShl*)) {
+    DCHECK(visit == &CRTPGraphVisitor::VisitShl);
+    return &InstructionWithAbsorbingInputSimplifier::HandleShift;
+  }
+  static constexpr auto ForwardVisit(void (CRTPGraphVisitor::*visit)(HShr*)) {
+    DCHECK(visit == &CRTPGraphVisitor::VisitShr);
+    return &InstructionWithAbsorbingInputSimplifier::HandleShift;
+  }
+  static constexpr auto ForwardVisit(void (CRTPGraphVisitor::*visit)(HUShr*)) {
+    DCHECK(visit == &CRTPGraphVisitor::VisitUShr);
+    return &InstructionWithAbsorbingInputSimplifier::HandleShift;
+  }
 
-  void VisitAbove(HAbove* instruction) override;
-  void VisitAboveOrEqual(HAboveOrEqual* instruction) override;
-  void VisitBelow(HBelow* instruction) override;
-  void VisitBelowOrEqual(HBelowOrEqual* instruction) override;
+  void HandleShift(HBinaryOperation* shift);
 
-  void VisitGreaterThan(HGreaterThan* instruction) override;
-  void VisitGreaterThanOrEqual(HGreaterThanOrEqual* instruction) override;
-  void VisitLessThan(HLessThan* instruction) override;
-  void VisitLessThanOrEqual(HLessThanOrEqual* instruction) override;
+  void VisitEqual(HEqual* instruction);
+  void VisitNotEqual(HNotEqual* instruction);
 
-  void VisitAnd(HAnd* instruction) override;
-  void VisitCompare(HCompare* instruction) override;
-  void VisitMul(HMul* instruction) override;
-  void VisitOr(HOr* instruction) override;
-  void VisitRem(HRem* instruction) override;
-  void VisitShl(HShl* instruction) override;
-  void VisitShr(HShr* instruction) override;
-  void VisitSub(HSub* instruction) override;
-  void VisitUShr(HUShr* instruction) override;
-  void VisitXor(HXor* instruction) override;
+  void VisitAbove(HAbove* instruction);
+  void VisitAboveOrEqual(HAboveOrEqual* instruction);
+  void VisitBelow(HBelow* instruction);
+  void VisitBelowOrEqual(HBelowOrEqual* instruction);
+
+  void VisitGreaterThan(HGreaterThan* instruction);
+  void VisitGreaterThanOrEqual(HGreaterThanOrEqual* instruction);
+  void VisitLessThan(HLessThan* instruction);
+  void VisitLessThanOrEqual(HLessThanOrEqual* instruction);
+
+  void VisitAnd(HAnd* instruction);
+  void VisitCompare(HCompare* instruction);
+  void VisitMul(HMul* instruction);
+  void VisitOr(HOr* instruction);
+  void VisitRem(HRem* instruction);
+  void VisitSub(HSub* instruction);
+  void VisitXor(HXor* instruction);
+
+  template <typename T> friend class CRTPGraphVisitor;
 };
-
 
 bool HConstantFolding::Run() {
   HConstantFoldingVisitor visitor(graph_, compiler_options_, stats_);
@@ -122,13 +142,6 @@ bool HConstantFolding::Run() {
   // instruction into a constant as well.
   visitor.VisitReversePostOrder();
   return true;
-}
-
-
-void HConstantFoldingVisitor::VisitBasicBlock(HBasicBlock* block) {
-  // Traverse this block's instructions (phis don't need to be processed) in (forward) order
-  // and replace the ones that can be statically evaluated by a compile-time counterpart.
-  VisitNonPhiInstructions(block);
 }
 
 void HConstantFoldingVisitor::VisitUnaryOperation(HUnaryOperation* inst) {
@@ -658,7 +671,7 @@ void HConstantFoldingVisitor::VisitStaticFieldGet(HStaticFieldGet* instruction) 
   }
 }
 
-void InstructionWithAbsorbingInputSimplifier::VisitShift(HBinaryOperation* instruction) {
+void InstructionWithAbsorbingInputSimplifier::HandleShift(HBinaryOperation* instruction) {
   DCHECK(instruction->IsShl() || instruction->IsShr() || instruction->IsUShr());
   HInstruction* left = instruction->GetLeft();
   if (left->IsConstant() && left->AsConstant()->IsArithmeticZero()) {
@@ -973,14 +986,6 @@ void InstructionWithAbsorbingInputSimplifier::VisitRem(HRem* instruction) {
   }
 }
 
-void InstructionWithAbsorbingInputSimplifier::VisitShl(HShl* instruction) {
-  VisitShift(instruction);
-}
-
-void InstructionWithAbsorbingInputSimplifier::VisitShr(HShr* instruction) {
-  VisitShift(instruction);
-}
-
 void InstructionWithAbsorbingInputSimplifier::VisitSub(HSub* instruction) {
   DataType::Type type = instruction->GetType();
 
@@ -1004,10 +1009,6 @@ void InstructionWithAbsorbingInputSimplifier::VisitSub(HSub* instruction) {
     instruction->ReplaceWith(GetGraph()->GetConstant(type, 0));
     block->RemoveInstruction(instruction);
   }
-}
-
-void InstructionWithAbsorbingInputSimplifier::VisitUShr(HUShr* instruction) {
-  VisitShift(instruction);
 }
 
 void InstructionWithAbsorbingInputSimplifier::VisitXor(HXor* instruction) {
