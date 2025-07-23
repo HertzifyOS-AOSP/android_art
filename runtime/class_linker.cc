@@ -8766,17 +8766,20 @@ size_t ClassLinker::LinkMethodsHelper<kPointerSize>::AssignVTableIndexes(
   // super vtable (which is only lazy populated in case of interface overriding,
   // see below). This makes sure that we pay the performance price only on that
   // class, and not on its subclasses (except in the case of interface overriding, see below).
-  size_t index = 0;
-  for (ArtMethod& method : klass->GetMethods(kPointerSize)) {
-    DCHECK(!method.IsCopied());
-    if (method.IsVirtual()) {
-      ArtMethod* signature_method = UNLIKELY(is_proxy_class)
-          ? method.GetInterfaceMethodForProxyUnchecked(kPointerSize)
-          : &method;
-      size_t hash = ComputeMethodHash(signature_method);
-      declared_virtual_signatures.PutWithHash(index, hash);
+  {
+    size_t index = 0;
+    for (ArtMethod& method : klass->GetMethods(kPointerSize)) {
+      DCHECK(!method.IsCopied());
+      if (method.IsVirtual()) {
+        ArtMethod* signature_method = UNLIKELY(is_proxy_class)
+            ? method.GetInterfaceMethodForProxyUnchecked(kPointerSize)
+            : &method;
+        size_t hash = ComputeMethodHash(signature_method);
+        // InsertWithHash won't insert duplicate methods.
+        declared_virtual_signatures.InsertWithHash(index, hash);
+      }
+      ++index;
     }
-    ++index;
   }
 
   // Loop through each super vtable method and see if they are overridden by a method we added to
@@ -8829,14 +8832,16 @@ size_t ClassLinker::LinkMethodsHelper<kPointerSize>::AssignVTableIndexes(
   }
 
   // Add the non-overridden methods at the end.
-  index = 0;
-  for (ArtMethod& m : klass->GetMethods(kPointerSize)) {
-    DCHECK(!m.IsCopied());
-    if (m.IsVirtual() && !initialized_methods.IsBitSet(index)) {
-      m.SetMethodIndex(vtable_length);
-      ++vtable_length;
+  {
+    size_t index = 0;
+    for (ArtMethod& m : klass->GetMethods(kPointerSize)) {
+      DCHECK(!m.IsCopied());
+      if (m.IsVirtual() && !initialized_methods.IsBitSet(index)) {
+        m.SetMethodIndex(vtable_length);
+        ++vtable_length;
+      }
+      ++index;
     }
-    ++index;
   }
 
   // A lazily constructed super vtable set, which we only populate in the less
@@ -8887,6 +8892,7 @@ size_t ClassLinker::LinkMethodsHelper<kPointerSize>::AssignVTableIndexes(
         // declared in an interface this class is inheriting). Only in this case
         // do we lazily populate the super_vtable_signatures.
         if (super_vtable_signatures.empty()) {
+          HashSet<uint32_t> seen_method_indices;
           for (size_t k = 0; k < super_vtable_length; ++k) {
             ArtMethod* super_method = super_vtable_accessor.GetVTableEntry(k);
             if (!super_method->IsPublic()) {
@@ -8897,7 +8903,13 @@ size_t ClassLinker::LinkMethodsHelper<kPointerSize>::AssignVTableIndexes(
                 ? class_linker_->object_virtual_method_hashes_[k]
                 : ComputeMethodHash(super_method);
             auto [it, inserted] = super_vtable_signatures.InsertWithHash(k, super_hash);
-            DCHECK(inserted || super_vtable_accessor.GetVTableEntry(*it) == super_method);
+            if (kIsDebugBuild) {
+              CHECK(inserted ||
+                    super_vtable_accessor.GetVTableEntry(*it) == super_method ||
+                    seen_method_indices.find(super_method->GetDexMethodIndex()) !=
+                        seen_method_indices.end());
+              seen_method_indices.insert(super_method->GetDexMethodIndex());
+            }
           }
         }
         auto it2 = super_vtable_signatures.FindWithHash(&interface_method, hash);

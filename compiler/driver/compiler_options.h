@@ -387,6 +387,8 @@ class CompilerOptions final {
   const AssumeValueOptions& GetAssumeValueOptions() const { return assume_value_options_; }
   AssumeValueOptions& GetAssumeValueOptions() { return assume_value_options_; }
 
+  bool EnableProfileCode() const { return enable_profile_code_; }
+
  private:
   EXPORT bool ParseDumpInitFailures(const std::string& option, std::string* error_msg);
 
@@ -491,6 +493,9 @@ class CompilerOptions final {
   const std::vector<std::string>* passes_to_run_;
 
   AssumeValueOptions assume_value_options_;
+
+  // Generate code for low-overhead tracing
+  bool enable_profile_code_;
 
   friend class Dex2Oat;
   friend class CommonCompilerDriverTest;

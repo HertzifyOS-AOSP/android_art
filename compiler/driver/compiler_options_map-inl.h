@@ -162,6 +162,11 @@ inline bool ReadCompilerOptions(Base& map, CompilerOptions* options, std::string
 
   map.AssignIfExists(Base::AssumeValueOpts, &options->assume_value_options_);
 
+  if (map.Exists(Base::AllowProfileCode) &&
+      com::android::art::rw::flags::enable_profile_code_rw()) {
+    options->enable_profile_code_ = true;
+  }
+
   return true;
 }
 
@@ -302,6 +307,10 @@ NO_INLINE void AddCompilerOptionsArgumentParserOptions(Builder& b) {
           .WithHelp("Optional assumed value for compiling a given field.\n"
                     "E.g.: --assume-value=Landroid/os/Build$VERSION;->SDK_INT:23")
           .IntoKey(Map::AssumeValueOpts)
+
+      .Define("--allow-profile-code")
+          .WithHelp("Generate code for supporting low overhead tracing")
+          .IntoKey(Map::AllowProfileCode)
 
       // Obsolete flags
       .Ignore({

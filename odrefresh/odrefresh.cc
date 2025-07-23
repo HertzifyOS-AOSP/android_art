@@ -393,7 +393,8 @@ bool ArtifactsExist(const OdrArtifacts& artifacts,
   return true;
 }
 
-void AddDex2OatCommonOptions(/*inout*/ CmdlineBuilder& args) {
+void AddDex2OatCommonOptions(/*inout*/ CmdlineBuilder& args,
+                             const OdrSystemProperties& system_properties) {
   args.Add("--android-root=out/empty");
   args.Add("--no-abort-on-hard-verifier-error");
   args.Add("--no-abort-on-soft-verifier-error");
@@ -407,6 +408,9 @@ void AddDex2OatCommonOptions(/*inout*/ CmdlineBuilder& args) {
   // to be unstable, e.g. those contains FD numbers. To avoid the problem, the whole cmdline is not
   // added to the oat header.
   args.Add("--avoid-storing-invocation");
+
+  args.AddIf(system_properties.GetBool("dalvik.vm.allow_profile_code", /*default_value=*/false),
+             "--allow-profile-code");
 }
 
 bool IsCpuSetSpecValid(const std::string& cpu_set) {
@@ -1719,7 +1723,7 @@ WARN_UNUSED CompilationResult OnDeviceRefresh::RunDex2oat(
   CmdlineBuilder args;
   args.Add(config_.GetDex2Oat());
 
-  AddDex2OatCommonOptions(args);
+  AddDex2OatCommonOptions(args, config_.GetSystemProperties());
   AddDex2OatDebugInfo(args);
   AddDex2OatInstructionSet(args, isa, config_.GetSystemProperties());
   Result<void> result = AddDex2OatConcurrencyArguments(
