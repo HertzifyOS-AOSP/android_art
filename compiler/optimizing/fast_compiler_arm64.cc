@@ -2686,7 +2686,32 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
     ARRAY_XX(_SHORT, DataType::Type::kInt16);
 
     case Instruction::ARRAY_LENGTH: {
-      break;
+      int32_t array = instruction.VRegB_12x();
+      int32_t dest = instruction.VRegA_12x();
+      if (CanBeNull(array)) {
+        if (!EnsureHasFrame()) {
+          return false;
+        }
+      }
+      Register array_reg = RegisterFrom(
+          GetExistingRegisterLocation(array, DataType::Type::kReference),
+          DataType::Type::kReference);
+      Register dest_reg = RegisterFrom(
+          CreateNewRegisterLocation(dest, DataType::Type::kInt32, next), DataType::Type::kInt32);
+      if (HitUnimplemented()) {
+        return false;
+      }
+      MemOperand mem = HeapOperand(array_reg.W(), mirror::Array::LengthOffset().Uint32Value());
+      {
+        // Ensure the pc position is recorded immediately after the store instruction.
+        EmissionCheckScope guard(GetVIXLAssembler(), kMaxMacroInstructionSizeInBytes);
+        __ Ldr(dest_reg, mem);
+        if (CanBeNull(array)) {
+          RecordPcInfo(dex_pc);
+        }
+      }
+      UpdateLocal(dest, /* is_object= */ false);
+      return true;
     }
 
     case Instruction::CONST_STRING: {
