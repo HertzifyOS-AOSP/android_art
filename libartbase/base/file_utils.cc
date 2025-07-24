@@ -729,15 +729,6 @@ bool LocationIsOnArtApexData(std::string_view location) {
   return location.starts_with(art_apex_data);
 }
 
-bool LocationIsOnArtModule(std::string_view full_path) {
-  std::string unused_error_msg;
-  std::string module_path = GetArtRootSafe(/* must_exist= */ kIsTargetBuild, &unused_error_msg);
-  if (module_path.empty()) {
-    return false;
-  }
-  return full_path.starts_with(module_path);
-}
-
 static bool StartsWithSlash(const char* str) {
   DCHECK(str != nullptr);
   return str[0] == '/';
@@ -804,10 +795,6 @@ bool LocationIsOnSystemExtFramework(std::string_view full_path) {
                       kAndroidRootEnvVar,
                       kAndroidRootDefaultPath,
                       /* subdir= */ "system_ext/framework/");
-}
-
-bool LocationIsOnConscryptModule(std::string_view full_path) {
-  return IsLocationOn(full_path, kAndroidConscryptRootEnvVar, kAndroidConscryptApexDefaultPath);
 }
 
 bool LocationIsOnApex(std::string_view full_path) {
