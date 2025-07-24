@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024 The Android Open Source Project
+ * Copyright (C) 2025 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,9 @@
 #include <cstdint>
 #include <vector>
 
+#include "compiler.h"
 #include "dex/standard_dex_file.h"
+#include "driver/compiler_options.h"
 #include "fuzzer_common.h"
 #include "gc/heap.h"
 #include "runtime.h"
@@ -34,12 +36,23 @@ int skipped_gc_iterations = 0;
 // further investigation.
 static constexpr int kMaxSkipGCIterations = 3000;
 
+// Extra debugging information.
+static constexpr bool kDebugPrints = false;
+
 std::vector<std::unique_ptr<uint8_t[]>> data_to_delete;
 std::vector<std::unique_ptr<StandardDexFile>> dex_files_to_delete;
 
+std::unique_ptr<Compiler> compiler;
+std::unique_ptr<CompilerOptions> compiler_options;
+std::unique_ptr<FuzzerCompilerCallbacks> callbacks;
+// No need for unique_ptr as it is just a fake storage.
+FuzzerCompiledMethodStorage storage;
+
 extern "C" int LLVMFuzzerInitialize([[maybe_unused]] int* argc, [[maybe_unused]] char*** argv) {
-  static NoopCompilerCallbacks callbacks;
-  FuzzerInitialize(&callbacks);
+  callbacks.reset(new FuzzerCompilerCallbacks());
+  FuzzerInitialize(callbacks.get());
+  compiler_options = CreateCompilerOptions();
+  compiler.reset(CreateCompiler(*compiler_options, &storage));
   return 0;
 }
 
@@ -70,6 +83,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   jobject class_loader = RegisterDexFileAndGetClassLoader(runtime, dex_file);
 
   VerifyClasses(class_loader, dex_file);
+  const bool at_least_one_method_called_the_compiler =
+      CompileClasses(class_loader, dex_file, compiler.get(), callbacks.get(), kDebugPrints);
+  callbacks->Reset();
   IterationCleanup(class_loader, dex_file);
 
   if (skipped_gc_iterations == kMaxSkipGCIterations) {
@@ -81,7 +97,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     skipped_gc_iterations++;
   }
 
-  return 0;
+  // Save only if at least one method compiled
+  return at_least_one_method_called_the_compiler ? 0 : -1;
 }
 
 }  // namespace fuzzer
