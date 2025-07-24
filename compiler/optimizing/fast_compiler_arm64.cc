@@ -278,6 +278,11 @@ class FastCompilerARM64 : public FastCompiler {
              bool is_object,
              uint32_t dex_pc,
              const Instruction* next);
+  bool BuildArrayAccess(const Instruction& instruction,
+                        uint32_t dex_pc,
+                        bool is_put,
+                        DataType::Type type,
+                        const Instruction* next);
 
   // Update registers and masks for the merge point.
   void PrepareToBranch(uint32_t dex_pc) {
@@ -1687,6 +1692,77 @@ void FastCompilerARM64::SetLongConstant(uint32_t register_index,
   UpdateLocal(register_index, /* is_object= */ false);
 }
 
+bool FastCompilerARM64::BuildArrayAccess(const Instruction& instruction,
+                                         uint32_t dex_pc,
+                                         bool is_put,
+                                         DataType::Type type,
+                                         const Instruction* next) {
+  // For bounds check, null check, and read barrier.
+  if (!EnsureHasFrame()) {
+    return false;
+  }
+  uint8_t source_or_dest_reg = instruction.VRegA_23x();
+  uint8_t array_reg = instruction.VRegB_23x();
+  uint8_t index_reg = instruction.VRegC_23x();
+  Register array = RegisterFrom(GetExistingRegisterLocation(array_reg, DataType::Type::kReference),
+                                DataType::Type::kReference);
+
+  MemOperand mem = HeapOperand(array.W(), mirror::Array::LengthOffset().Uint32Value());
+  InvokeRuntimeCallingConvention calling_convention;
+  Register temp = calling_convention.GetRegisterAt(1);
+  // Fetch the length, and do a null pointer check.
+  {
+    // Ensure the pc position is recorded immediately after the store instruction.
+    EmissionCheckScope guard(GetVIXLAssembler(), kMaxMacroInstructionSizeInBytes);
+    __ Ldr(temp, mem);
+    if (CanBeNull(array_reg)) {
+      RecordPcInfo(dex_pc);
+    }
+  }
+
+  Register index = RegisterFrom(GetExistingRegisterLocation(index_reg, DataType::Type::kInt32),
+                                DataType::Type::kInt32);
+
+  if (HitUnimplemented()) {
+    return false;
+  }
+  // Bounds check.
+  __ Cmp(index.W(), temp.W());
+  vixl::aarch64::Label cont;
+  __ B(vixl::aarch64::lt, &cont);
+  __ Mov(calling_convention.GetRegisterAt(0).W(), index.W());
+  InvokeRuntime(kQuickThrowArrayBounds, dex_pc);
+  __ Bind(&cont);
+
+  bool is_object = (type == DataType::Type::kReference);
+  if (is_put && is_object) {
+    Register value = RegisterFrom(GetExistingRegisterLocation(source_or_dest_reg, type), type);
+    __ Mov(calling_convention.GetRegisterAt(0).W(), array.W());
+    __ Mov(calling_convention.GetRegisterAt(1).W(), index.W());
+    __ Mov(calling_convention.GetRegisterAt(2).W(), value.W());
+    InvokeRuntime(kQuickAputObject, dex_pc);
+    return true;
+  }
+
+  __ Add(temp.W(), array.W(), mirror::Array::DataOffset(DataType::Size(type)).Uint32Value());
+  MemOperand src = HeapOperand(temp.W(), index.X(), LSL, DataType::SizeShift(type));
+  if (is_put) {
+    Register value = RegisterFrom(GetExistingRegisterLocation(source_or_dest_reg, type), type);
+    CodeGeneratorARM64::Store(GetVIXLAssembler(), type, value, src);
+  } else {
+    Register dst = RegisterFrom(CreateNewRegisterLocation(source_or_dest_reg, type, next), type);
+    CodeGeneratorARM64::Load(GetVIXLAssembler(), type, dst, src);
+    UpdateLocal(source_or_dest_reg, is_object);
+    if (is_object) {
+      DoReadBarrierOn(dst);
+    }
+  }
+  if (HitUnimplemented()) {
+    return false;
+  }
+  return true;
+}
+
 #define SETUP_BINOP_12x(type) \
   int32_t vreg_a = instruction.VRegA_12x(); \
   Register first = RegisterFrom(GetExistingRegisterLocation(vreg_a, type), type); \
@@ -2728,21 +2804,22 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
       break;
     }
 
-#define ARRAY_XX(kind, anticipated_type)                                          \
-    case Instruction::AGET##kind: {                                               \
-      break;                                                                      \
-    }                                                                             \
-    case Instruction::APUT##kind: {                                               \
-      break;                                                                      \
+#define ARRAY_XX(kind, type)                                                         \
+    case Instruction::AGET##kind: {                                                  \
+      return BuildArrayAccess(instruction, dex_pc, /* is_put= */ false, type, next); \
+    }                                                                                \
+    case Instruction::APUT##kind: {                                                  \
+      return BuildArrayAccess(instruction, dex_pc, /* is_put= */ true, type, next);  \
     }
 
-    ARRAY_XX(, DataType::Type::kInt32);
-    ARRAY_XX(_WIDE, DataType::Type::kInt64);
-    ARRAY_XX(_OBJECT, DataType::Type::kReference);
-    ARRAY_XX(_BOOLEAN, DataType::Type::kBool);
-    ARRAY_XX(_BYTE, DataType::Type::kInt8);
-    ARRAY_XX(_CHAR, DataType::Type::kUint16);
-    ARRAY_XX(_SHORT, DataType::Type::kInt16);
+    ARRAY_XX(, DataType::Type::kInt32)
+    ARRAY_XX(_WIDE, DataType::Type::kInt64)
+    ARRAY_XX(_OBJECT, DataType::Type::kReference)
+    ARRAY_XX(_BOOLEAN, DataType::Type::kBool)
+    ARRAY_XX(_BYTE, DataType::Type::kInt8)
+    ARRAY_XX(_CHAR, DataType::Type::kUint16)
+    ARRAY_XX(_SHORT, DataType::Type::kInt16)
+#undef ARRAY_XX
 
     case Instruction::ARRAY_LENGTH: {
       int32_t array = instruction.VRegB_12x();

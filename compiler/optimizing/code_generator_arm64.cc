@@ -1925,19 +1925,26 @@ void CodeGeneratorARM64::MoveLocation(Location destination,
 void CodeGeneratorARM64::Load(DataType::Type type,
                               CPURegister dst,
                               const MemOperand& src) {
+  Load(GetVIXLAssembler(), type, dst, src);
+}
+
+void CodeGeneratorARM64::Load(vixl::aarch64::MacroAssembler* assembler,
+                              DataType::Type type,
+                              CPURegister dst,
+                              const MemOperand& src) {
   switch (type) {
     case DataType::Type::kBool:
     case DataType::Type::kUint8:
-      __ Ldrb(Register(dst), src);
+      assembler->Ldrb(Register(dst), src);
       break;
     case DataType::Type::kInt8:
-      __ Ldrsb(Register(dst), src);
+      assembler->Ldrsb(Register(dst), src);
       break;
     case DataType::Type::kUint16:
-      __ Ldrh(Register(dst), src);
+      assembler->Ldrh(Register(dst), src);
       break;
     case DataType::Type::kInt16:
-      __ Ldrsh(Register(dst), src);
+      assembler->Ldrsh(Register(dst), src);
       break;
     case DataType::Type::kInt32:
     case DataType::Type::kReference:
@@ -1945,7 +1952,7 @@ void CodeGeneratorARM64::Load(DataType::Type type,
     case DataType::Type::kFloat32:
     case DataType::Type::kFloat64:
       DCHECK_EQ(dst.Is64Bits(), DataType::Is64BitType(type));
-      __ Ldr(dst, src);
+      assembler->Ldr(dst, src);
       break;
     case DataType::Type::kUint32:
     case DataType::Type::kUint64:
@@ -2038,15 +2045,22 @@ void CodeGeneratorARM64::LoadAcquire(HInstruction* instruction,
 void CodeGeneratorARM64::Store(DataType::Type type,
                                CPURegister src,
                                const MemOperand& dst) {
+  Store(GetVIXLAssembler(), type, src, dst);
+}
+
+void CodeGeneratorARM64::Store(vixl::aarch64::MacroAssembler* assembler,
+                               DataType::Type type,
+                               CPURegister src,
+                               const MemOperand& dst) {
   switch (type) {
     case DataType::Type::kBool:
     case DataType::Type::kUint8:
     case DataType::Type::kInt8:
-      __ Strb(Register(src), dst);
+      assembler->Strb(Register(src), dst);
       break;
     case DataType::Type::kUint16:
     case DataType::Type::kInt16:
-      __ Strh(Register(src), dst);
+      assembler->Strh(Register(src), dst);
       break;
     case DataType::Type::kInt32:
     case DataType::Type::kReference:
@@ -2054,7 +2068,7 @@ void CodeGeneratorARM64::Store(DataType::Type type,
     case DataType::Type::kFloat32:
     case DataType::Type::kFloat64:
       DCHECK_EQ(src.Is64Bits(), DataType::Is64BitType(type));
-      __ Str(src, dst);
+      assembler->Str(src, dst);
       break;
     case DataType::Type::kUint32:
     case DataType::Type::kUint64:
