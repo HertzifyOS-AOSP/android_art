@@ -724,6 +724,7 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
   virtual void GenerateNop() = 0;
 
   static QuickEntrypointEnum GetArrayAllocationEntrypoint(HNewArray* new_array);
+  static QuickEntrypointEnum GetArrayAllocationEntrypoint(size_t component_size_shift);
   static ScaleFactor ScaleFactorForType(DataType::Type type);
 
   ArrayRef<const uint8_t> GetCode() const {

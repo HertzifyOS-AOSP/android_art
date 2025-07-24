@@ -495,8 +495,11 @@ ArtMethod* FindMethodJNI(const ScopedObjectAccess& soa,
   } else {
     method = c->FindClassMethod(name, sig, pointer_size);
   }
-  if (method != nullptr &&
-      ShouldDenyAccessToMember(method, soa.Self(), hiddenapi::AccessMethod::kCheckWithPolicy)) {
+  if (method == nullptr || method->IsStatic() != is_static) {
+    ThrowNoSuchMethodError(soa, c, name, sig, is_static ? "static" : "non-static");
+    return nullptr;
+  }
+  if (ShouldDenyAccessToMember(method, soa.Self(), hiddenapi::AccessMethod::kCheckWithPolicy)) {
     // The resolved method that we have found cannot be accessed due to
     // hiddenapi (typically it is declared up the hierarchy and is not an SDK
     // method). Try to find an interface method from the implemented interfaces which is
@@ -507,14 +510,11 @@ ArtMethod* FindMethodJNI(const ScopedObjectAccess& soa,
       // with AccessMethod::kJNI to ensure that an appropriate warning is
       // logged.
       ShouldDenyAccessToMember(method, soa.Self(), hiddenapi::AccessMethod::kJNI);
-      method = nullptr;
+      ThrowNoSuchMethodError(soa, c, name, sig, is_static ? "static" : "non-static");
+      return nullptr;
     } else {
       // We found an interface method that is accessible, continue with the resolved method.
     }
-  }
-  if (method == nullptr || method->IsStatic() != is_static) {
-    ThrowNoSuchMethodError(soa, c, name, sig, is_static ? "static" : "non-static");
-    return nullptr;
   }
   return method;
 }

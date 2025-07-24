@@ -1813,7 +1813,11 @@ void CodeGenerator::EmitJitRoots(uint8_t* buffer,
 }
 
 QuickEntrypointEnum CodeGenerator::GetArrayAllocationEntrypoint(HNewArray* new_array) {
-  switch (new_array->GetComponentSizeShift()) {
+  return GetArrayAllocationEntrypoint(new_array->GetComponentSizeShift());
+}
+
+QuickEntrypointEnum CodeGenerator::GetArrayAllocationEntrypoint(size_t component_size_shift) {
+  switch (component_size_shift) {
     case 0: return kQuickAllocArrayResolved8;
     case 1: return kQuickAllocArrayResolved16;
     case 2: return kQuickAllocArrayResolved32;
