@@ -7693,7 +7693,6 @@ class HGraphVisitor : public ValueObject {
  protected:
   void VisitPhis(HBasicBlock* block);
   void VisitNonPhiInstructions(HBasicBlock* block);
-  void VisitNonPhiInstructionsHandleChanges(HBasicBlock* block);
 
   OptimizingCompilerStats* stats_;
 
@@ -7803,7 +7802,7 @@ class CRTPGraphVisitor {
   ALWAYS_INLINE void VisitPhis(HBasicBlock* block) {
     static constexpr auto visit_phi = T::ForwardVisit(&T::VisitPhi);
     // Skip if `&T::VisitPhi` is forwarded to the empty `&CRTPGraphVisitor::VisitInstruction`.
-    if constexpr (visit_phi == &CRTPGraphVisitor::VisitInstruction) {
+    if constexpr (IsSameVisit(visit_phi, &CRTPGraphVisitor::VisitInstruction)) {
       return;
     }
     for (HInstructionIteratorPrefetchNext it(block->GetPhis()); !it.Done(); it.Advance()) {
