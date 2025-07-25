@@ -2832,7 +2832,11 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
     }
 
     case Instruction::CMP_LONG: {
-      break;
+      SETUP_BINOP_23x(DataType::Type::kInt64)
+      __ Cmp(first, second);
+      __ Cset(dst, ne);                 // result == +1 if NE or 0 otherwise
+      __ Cneg(dst, dst, lt);            // result == -1 if LT or unchanged otherwise
+      return true;
     }
 
     case Instruction::CMPG_FLOAT: {
