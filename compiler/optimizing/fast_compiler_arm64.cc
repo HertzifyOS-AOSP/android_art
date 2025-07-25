@@ -55,6 +55,7 @@ namespace arm64 {
 using helpers::CPURegisterFrom;
 using helpers::HeapOperand;
 using helpers::LocationFrom;
+using helpers::StackOperandFrom;
 using helpers::RegisterFrom;
 using helpers::DRegisterFrom;
 using helpers::SRegisterFrom;
@@ -585,25 +586,36 @@ bool FastCompilerARM64::MoveLocation(Location destination,
   if (source.Equals(destination)) {
     return true;
   }
-  if (source.IsRegister() && destination.IsRegister()) {
-    CPURegister dst = CPURegisterFrom(destination, dst_type);
-    __ Mov(Register(dst), RegisterFrom(source, dst_type));
-    return true;
-  }
-  if (source.IsConstant() && destination.IsRegister()) {
-    if (source.GetConstant()->IsIntConstant()) {
-      DCHECK_NE(dst_type, DataType::Type::kInt64);
-      __ Mov(RegisterFrom(destination, DataType::Type::kInt32),
-             source.GetConstant()->AsIntConstant()->GetValue());
+  if (destination.IsRegister()) {
+    Register dst = RegisterFrom(destination, dst_type);
+    if (source.IsRegister()) {
+      __ Mov(dst, RegisterFrom(source, dst_type));
       return true;
-    } else if (source.GetConstant()->IsLongConstant()) {
-      DCHECK_EQ(dst_type, DataType::Type::kInt64);
-      __ Mov(RegisterFrom(destination, DataType::Type::kInt64),
-             source.GetConstant()->AsLongConstant()->GetValue());
+    }
+    if (source.IsConstant()) {
+      if (source.GetConstant()->IsIntConstant()) {
+        DCHECK_NE(dst_type, DataType::Type::kInt64);
+        __ Mov(dst, source.GetConstant()->AsIntConstant()->GetValue());
+        return true;
+      } else if (source.GetConstant()->IsLongConstant()) {
+        DCHECK_EQ(dst_type, DataType::Type::kInt64);
+        DCHECK(dst.Is64Bits());
+        __ Mov(dst, source.GetConstant()->AsLongConstant()->GetValue());
+        return true;
+      }
+    }
+    if (source.IsStackSlot() || source.IsDoubleStackSlot()) {
+      DCHECK(dst.Is64Bits() == source.IsDoubleStackSlot());
+      __ Ldr(dst, StackOperandFrom(source));
       return true;
     }
   }
-  unimplemented_reason_ = "MoveLocation";
+  if (source.IsFpuRegister() || destination.IsFpuRegister()) {
+    unimplemented_reason_ = "MoveFpuLocation";
+    return false;
+  }
+
+  unimplemented_reason_ = "UnimplementedMoveLocation";
   return false;
 }
 
@@ -670,6 +682,15 @@ Location FastCompilerARM64::GetExistingRegisterLocation(uint32_t reg, DataType::
     }
   } else if (vreg_locations_[reg].IsRegister()) {
     return vreg_locations_[reg];
+  } else if (vreg_locations_[reg].IsConstant()) {
+    uint32_t register_code = has_frame_
+        ? kAvailableCalleeSaveRegisters[reg].GetCode()
+        : kAvailableTempRegisters[reg].GetCode();
+    Location new_location = Location::RegisterLocation(register_code);
+    bool res = MoveLocation(new_location, vreg_locations_[reg], type);
+    DCHECK(res);
+    vreg_locations_[reg] = new_location;
+    return new_location;
   } else {
     unimplemented_reason_ = "UnknownLocation";
     vreg_locations_[reg] = Location::RegisterLocation(1);
