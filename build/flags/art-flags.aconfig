@@ -147,3 +147,12 @@ flag {
   is_fixed_read_only: true
   is_exported: false
 }
+
+flag {
+  name: "art_managed_install_files_validation_api"
+  namespace: "art_cloud"
+  description: "Flag for the validation API for ART-managed install files (.sdm, .dm, etc.)"
+  bug: "434137291"
+  is_fixed_read_only: true
+  is_exported: true
+}

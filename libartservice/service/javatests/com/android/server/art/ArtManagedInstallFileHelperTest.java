@@ -16,20 +16,38 @@
 
 package com.android.server.art;
 
+import static com.android.server.art.model.ValidationResult.INVALID_SDM_BAD_APK_SIGNATURE;
+import static com.android.server.art.model.ValidationResult.INVALID_SDM_BAD_SDM_SIGNATURE;
+import static com.android.server.art.model.ValidationResult.INVALID_SDM_INVALID_ISA;
+import static com.android.server.art.model.ValidationResult.INVALID_SDM_SIGNATURE_MISMATCH;
+import static com.android.server.art.model.ValidationResult.RESULT_ACCEPTED;
+import static com.android.server.art.model.ValidationResult.RESULT_SHOULD_DELETE_AND_CONTINUE;
+import static com.android.server.art.model.ValidationResult.RESULT_UNRECOGNIZED;
+import static com.android.server.art.model.ValidationResult.UNRECOGNIZED_PATH;
+
 import static com.google.common.truth.Truth.assertThat;
 
 import static org.junit.Assert.assertThrows;
+import static org.mockito.Mockito.anyInt;
+import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.when;
+
+import android.content.pm.SigningInfo;
+import android.content.pm.SigningInfoException;
 
 import androidx.test.filters.SmallTest;
 import androidx.test.runner.AndroidJUnit4;
 
+import com.android.server.art.model.ValidationResult;
 import com.android.server.art.testing.StaticMockitoRule;
+import com.android.server.art.testing.TestingUtils;
 
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.Mock;
 
 import java.util.List;
 
@@ -38,10 +56,22 @@ import java.util.List;
 public class ArtManagedInstallFileHelperTest {
     @Rule public StaticMockitoRule mockitoRule = new StaticMockitoRule(Constants.class);
 
+    @Mock private ArtManagedInstallFileHelper.Injector mInjector;
+    @Mock private SigningInfo mSigningInfoA;
+    @Mock private SigningInfo mSigningInfoB;
+    @Mock private SigningInfoException mSigningInfoException;
+
     @Before
     public void setUp() throws Exception {
         lenient().when(Constants.getNative64BitAbi()).thenReturn("arm64-v8a");
         lenient().when(Constants.getNative32BitAbi()).thenReturn("armeabi-v7a");
+
+        lenient().when(mSigningInfoA.signersMatchExactly(mSigningInfoA)).thenReturn(true);
+        lenient().when(mSigningInfoA.signersMatchExactly(mSigningInfoB)).thenReturn(false);
+        lenient().when(mSigningInfoB.signersMatchExactly(mSigningInfoB)).thenReturn(true);
+        lenient().when(mSigningInfoB.signersMatchExactly(mSigningInfoA)).thenReturn(false);
+
+        ArtManagedInstallFileHelper.sInjector = mInjector;
     }
 
     @Test
@@ -108,5 +138,108 @@ public class ArtManagedInstallFileHelperTest {
         assertThrows(IllegalArgumentException.class, () -> {
             ArtManagedInstallFileHelper.getTargetPathForApk("/foo/bar.abc", "/somewhere/base.apk");
         });
+    }
+
+    @Test
+    public void testValidateFilesOk() throws Exception {
+        lenient()
+                .when(mInjector.getVerifiedSigningInfo(eq("/somewhere/app/bar/base.apk"), anyInt()))
+                .thenReturn(mSigningInfoA);
+
+        lenient()
+                .when(mInjector.getVerifiedSigningInfo(
+                        eq("/somewhere/app/bar/base.arm64.sdm"), anyInt()))
+                .thenReturn(mSigningInfoA);
+
+        assertThat(ArtManagedInstallFileHelper.validateFiles(List.of("/somewhere/app/bar/base.dm",
+                           "/somewhere/app/bar/base.prof", "/somewhere/app/bar/base.arm64.sdm")))
+                .comparingElementsUsing(TestingUtils.<ValidationResult>deepEquality())
+                .containsExactly(
+                        new ValidationResult("/somewhere/app/bar/base.dm", RESULT_ACCEPTED),
+                        new ValidationResult("/somewhere/app/bar/base.prof", RESULT_ACCEPTED),
+                        new ValidationResult("/somewhere/app/bar/base.arm64.sdm", RESULT_ACCEPTED));
+    }
+
+    @Test
+    public void testValidateFilesUnrecognizedPath() throws Exception {
+        assertThat(ArtManagedInstallFileHelper.validateFiles(
+                           List.of("/somewhere/app/bar/base.apk", "/somewhere/app/bar/base.bogus")))
+                .comparingElementsUsing(TestingUtils.<ValidationResult>deepEquality())
+                .containsExactly(new ValidationResult("/somewhere/app/bar/base.apk",
+                                         RESULT_UNRECOGNIZED, UNRECOGNIZED_PATH,
+                                         "Path '/somewhere/app/bar/base.apk' does not represent an "
+                                                 + "ART-managed install file"),
+                        new ValidationResult("/somewhere/app/bar/base.bogus", RESULT_UNRECOGNIZED,
+                                UNRECOGNIZED_PATH,
+                                "Path '/somewhere/app/bar/base.bogus' does not represent an "
+                                        + "ART-managed install file"));
+    }
+
+    @Test
+    public void testValidateFilesInvalidSdmInvalidIsa() throws Exception {
+        assertThat(ArtManagedInstallFileHelper.validateFiles(
+                           List.of("/somewhere/app/bar/base.x86_64.sdm")))
+                .comparingElementsUsing(TestingUtils.<ValidationResult>deepEquality())
+                .containsExactly(new ValidationResult("/somewhere/app/bar/base.x86_64.sdm",
+                        RESULT_SHOULD_DELETE_AND_CONTINUE, INVALID_SDM_INVALID_ISA,
+                        "Missing or invalid instruction set name in SDM filename "
+                                + "'base.x86_64.sdm'"));
+    }
+
+    @Test
+    public void testValidateFilesInvalidSdmBadApkSignature() throws Exception {
+        when(mSigningInfoException.getMessage()).thenReturn("some message");
+
+        lenient()
+                .when(mInjector.getVerifiedSigningInfo(eq("/somewhere/app/bar/base.apk"), anyInt()))
+                .thenThrow(mSigningInfoException);
+
+        assertThat(ArtManagedInstallFileHelper.validateFiles(
+                           List.of("/somewhere/app/bar/base.arm64.sdm")))
+                .comparingElementsUsing(TestingUtils.<ValidationResult>deepEquality())
+                .containsExactly(new ValidationResult("/somewhere/app/bar/base.arm64.sdm",
+                        RESULT_SHOULD_DELETE_AND_CONTINUE, INVALID_SDM_BAD_APK_SIGNATURE,
+                        "Failed to verify APK signatures for 'base.apk': some message"));
+    }
+
+    @Test
+    public void testValidateFilesInvalidSdmBadSdmSignature() throws Exception {
+        when(mSigningInfoException.getMessage()).thenReturn("some message");
+
+        lenient()
+                .when(mInjector.getVerifiedSigningInfo(eq("/somewhere/app/bar/base.apk"), anyInt()))
+                .thenReturn(mSigningInfoA);
+
+        lenient()
+                .when(mInjector.getVerifiedSigningInfo(
+                        eq("/somewhere/app/bar/base.arm64.sdm"), anyInt()))
+                .thenThrow(mSigningInfoException);
+
+        assertThat(ArtManagedInstallFileHelper.validateFiles(
+                           List.of("/somewhere/app/bar/base.arm64.sdm")))
+                .comparingElementsUsing(TestingUtils.<ValidationResult>deepEquality())
+                .containsExactly(new ValidationResult("/somewhere/app/bar/base.arm64.sdm",
+                        RESULT_SHOULD_DELETE_AND_CONTINUE, INVALID_SDM_BAD_SDM_SIGNATURE,
+                        "Failed to verify SDM signatures for 'base.arm64.sdm': some message"));
+    }
+
+    @Test
+    public void testValidateFilesInvalidSdmSignatureMismatch() throws Exception {
+        lenient()
+                .when(mInjector.getVerifiedSigningInfo(eq("/somewhere/app/bar/base.apk"), anyInt()))
+                .thenReturn(mSigningInfoA);
+
+        lenient()
+                .when(mInjector.getVerifiedSigningInfo(
+                        eq("/somewhere/app/bar/base.arm64.sdm"), anyInt()))
+                .thenReturn(mSigningInfoB);
+
+        assertThat(ArtManagedInstallFileHelper.validateFiles(
+                           List.of("/somewhere/app/bar/base.arm64.sdm")))
+                .comparingElementsUsing(TestingUtils.<ValidationResult>deepEquality())
+                .containsExactly(new ValidationResult("/somewhere/app/bar/base.arm64.sdm",
+                        RESULT_SHOULD_DELETE_AND_CONTINUE, INVALID_SDM_SIGNATURE_MISMATCH,
+                        "SDM signatures are inconsistent with APK (SDM filename: 'base.arm64.sdm', "
+                                + "APK filename: 'base.apk')"));
     }
 }
