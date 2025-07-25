@@ -2026,6 +2026,10 @@ bool FastCompilerARM64::BuildInstanceFieldSet(const Instruction& instruction,
       }
       break;
     }
+    case Instruction::IPUT_WIDE: {
+      __ Str(XRegisterFrom(src), mem);
+      break;
+    }
     default:
       unimplemented_reason_ = instruction.Name();
       return false;
