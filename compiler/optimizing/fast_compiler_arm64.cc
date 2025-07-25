@@ -1763,7 +1763,7 @@ bool FastCompilerARM64::BuildArrayAccess(const Instruction& instruction,
   // Bounds check.
   __ Cmp(index.W(), temp.W());
   vixl::aarch64::Label cont;
-  __ B(vixl::aarch64::lt, &cont);
+  __ B(vixl::aarch64::lo, &cont);
   __ Mov(calling_convention.GetRegisterAt(0).W(), index.W());
   InvokeRuntime(kQuickThrowArrayBounds, dex_pc);
   __ Bind(&cont);
