@@ -2040,6 +2040,16 @@ void FastCompilerARM64::Rem(Register dst, Register first, Register second, uint3
   __ Msub(dst, temp, second, first);
 }
 
+#define SETUP_UNOP_12x(input_type, output_type) \
+  int32_t vreg_a = instruction.VRegA_12x(); \
+  Register input = RegisterFrom( \
+      GetExistingRegisterLocation(instruction.VRegB_12x(), input_type), input_type); \
+  Register dst = RegisterFrom(CreateNewRegisterLocation(vreg_a, output_type, next), output_type); \
+  if (HitUnimplemented()) { \
+    return false; \
+  } \
+  UpdateLocal(vreg_a, /* is_object= */ false);
+
 #define SETUP_BINOP_12x(type) \
   int32_t vreg_a = instruction.VRegA_12x(); \
   Register first = RegisterFrom(GetExistingRegisterLocation(vreg_a, type), type); \
@@ -2286,14 +2296,6 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
       break;
     }
 
-    case Instruction::NEG_INT: {
-      break;
-    }
-
-    case Instruction::NEG_LONG: {
-      break;
-    }
-
     case Instruction::NEG_FLOAT: {
       break;
     }
@@ -2302,16 +2304,63 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
       break;
     }
 
+    case Instruction::NEG_INT: {
+      SETUP_UNOP_12x(DataType::Type::kInt32, DataType::Type::kInt32)
+      __ Neg(dst, input);
+      return true;
+    }
+
+    case Instruction::NEG_LONG: {
+      SETUP_UNOP_12x(DataType::Type::kInt64, DataType::Type::kInt64)
+      __ Neg(dst, input);
+      return true;
+    }
+
+
     case Instruction::NOT_INT: {
-      break;
+      SETUP_UNOP_12x(DataType::Type::kInt32, DataType::Type::kInt32)
+      __ Mvn(dst, input);
+      return true;
     }
 
     case Instruction::NOT_LONG: {
-      break;
+      SETUP_UNOP_12x(DataType::Type::kInt64, DataType::Type::kInt64)
+      __ Mvn(dst, input);
+      return true;
     }
 
     case Instruction::INT_TO_LONG: {
-      break;
+      SETUP_UNOP_12x(DataType::Type::kInt32, DataType::Type::kInt64)
+      __ Sbfx(
+          dst.X(), input.X(), /* lsb= */ 0u, DataType::Size(DataType::Type::kInt32) * kBitsPerByte);
+      return true;
+    }
+
+    case Instruction::LONG_TO_INT: {
+      SETUP_UNOP_12x(DataType::Type::kInt64, DataType::Type::kInt32)
+      __ Mov(dst.W(), input.W());
+      return true;
+    }
+
+    case Instruction::INT_TO_BYTE: {
+      SETUP_UNOP_12x(DataType::Type::kInt32, DataType::Type::kInt32)
+      __ Sbfx(
+          dst.W(), input.W(), /* lsb= */ 0u, DataType::Size(DataType::Type::kInt8) * kBitsPerByte);
+      return true;
+    }
+
+    case Instruction::INT_TO_SHORT: {
+      SETUP_UNOP_12x(DataType::Type::kInt32, DataType::Type::kInt32)
+      __ Sbfx(
+          dst.W(), input.W(), /* lsb= */ 0u, DataType::Size(DataType::Type::kInt16) * kBitsPerByte);
+      return true;
+    }
+
+    case Instruction::INT_TO_CHAR: {
+      SETUP_UNOP_12x(DataType::Type::kInt32, DataType::Type::kInt32)
+      __ Ubfx(
+          dst.W(), input.W(), /* lsb= */ 0u, DataType::Size(DataType::Type::kInt16) * kBitsPerByte);
+      return true;
     }
 
     case Instruction::INT_TO_FLOAT: {
@@ -2319,10 +2368,6 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
     }
 
     case Instruction::INT_TO_DOUBLE: {
-      break;
-    }
-
-    case Instruction::LONG_TO_INT: {
       break;
     }
 
@@ -2355,18 +2400,6 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
     }
 
     case Instruction::DOUBLE_TO_FLOAT: {
-      break;
-    }
-
-    case Instruction::INT_TO_BYTE: {
-      break;
-    }
-
-    case Instruction::INT_TO_SHORT: {
-      break;
-    }
-
-    case Instruction::INT_TO_CHAR: {
       break;
     }
 
