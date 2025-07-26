@@ -18,6 +18,7 @@ package com.android.server.art;
 
 import static com.android.dx.mockito.inline.extended.ExtendedMockito.verify;
 
+import static org.junit.Assert.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -26,6 +27,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
 
+import android.os.RemoteException;
 import android.os.ServiceSpecificException;
 
 import com.android.server.art.model.ArtFlags;
@@ -158,16 +160,13 @@ public final class PrimaryDexopterReporterTest extends PrimaryDexopterTestBase {
     }
 
     @Test
-    public void testDex2OatResult_StartFailed() throws Exception {
-        int status = 4, exitCode = -1, signal = 0;
-        lenient()
-                .when(mArtd.dexopt(any(), anyString(), anyString(), anyString(), anyString(), any(),
-                        any(), any(), anyInt(), any(), any()))
-                .thenThrow(
-                        new ServiceSpecificException(-1, "Not your typical dex2oat error message"));
+    public void testDex2OatResult_FailedToStart_ServiceSpecificException() throws Exception {
+        mockArtdDexoptThrows(
+                new ServiceSpecificException(-1, "Not your typical dex2oat error message"));
 
         mPrimaryDexopter.dexopt();
 
+        int status = 4, exitCode = -1, signal = 0;
         Dex2OatStatsReporter.Dex2OatResult failedToStart =
                 new Dex2OatStatsReporter.Dex2OatResult(status, exitCode, signal);
         verify(()
@@ -186,14 +185,56 @@ public final class PrimaryDexopterReporterTest extends PrimaryDexopterTestBase {
     }
 
     @Test
+    public void testDex2OatResult_FailedToStart_RemoteException() throws Exception {
+        Exception expectedException = new RemoteException();
+        mockArtdDexoptThrows(expectedException);
+
+        assertThrows(expectedException.getClass(), () -> mPrimaryDexopter.dexopt());
+
+        verify(()
+                        -> Dex2OatStatsReporter.reportForAllAbis(eq(mPkgState.getAppId()),
+                                eq(COMPILER_FILTER_VERIFY), eq(COMPILER_REASON_INSTALL),
+                                eq(DexMetadata.TYPE_NONE), any(DetailedDexInfo.class), anyList(),
+                                eq(Dex2OatStatsReporter.Dex2OatResult.failedToStart())));
+
+        verify(()
+                        -> Dex2OatStatsReporter.reportForAllAbis(eq(mPkgState.getAppId()),
+                                eq(COMPILER_FILTER_VERIFY), eq(COMPILER_REASON_INSTALL),
+                                eq(DexMetadata.TYPE_NONE), any(DetailedDexInfo.class), anyList(),
+                                eq(Dex2OatStatsReporter.Dex2OatResult.failedToStart())));
+    }
+
+    @Test
+    public void testDex2OatResult_FailedToStart_RuntimeException() throws Exception {
+        Exception expectedException = new RuntimeException();
+        mockArtdDexoptThrows(expectedException);
+
+        assertThrows(expectedException.getClass(), () -> mPrimaryDexopter.dexopt());
+
+        verify(()
+                        -> Dex2OatStatsReporter.reportForAllAbis(eq(mPkgState.getAppId()),
+                                eq(COMPILER_FILTER_VERIFY), eq(COMPILER_REASON_INSTALL),
+                                eq(DexMetadata.TYPE_NONE), any(DetailedDexInfo.class), anyList(),
+                                eq(Dex2OatStatsReporter.Dex2OatResult.failedToStart())));
+
+        verify(()
+                        -> Dex2OatStatsReporter.reportForAllAbis(eq(mPkgState.getAppId()),
+                                eq(COMPILER_FILTER_VERIFY), eq(COMPILER_REASON_INSTALL),
+                                eq(DexMetadata.TYPE_NONE), any(DetailedDexInfo.class), anyList(),
+                                eq(Dex2OatStatsReporter.Dex2OatResult.failedToStart())));
+    }
+
+    @Test
     public void testDex2OatResult_NotRun() throws Exception {
         mockPrimaryDexopter(DEXOPT_PARAMS_SKIP);
 
         mPrimaryDexopter.dexopt();
 
         verify(()
-                        -> Dex2OatStatsReporter.reportSkipped(eq(UID), eq(COMPILER_REASON_INSTALL),
-                                eq(DexMetadata.TYPE_NONE), any(DetailedDexInfo.class), anyList()),
+                        -> Dex2OatStatsReporter.reportForAllAbis(eq(mPkgState.getAppId()),
+                                eq(DexoptParams.COMPILER_FILTER_NOOP), eq(COMPILER_REASON_INSTALL),
+                                eq(DexMetadata.TYPE_NONE), any(DetailedDexInfo.class), anyList(),
+                                eq(Dex2OatStatsReporter.Dex2OatResult.notRun())),
                 times(2));
     }
 
@@ -204,9 +245,9 @@ public final class PrimaryDexopterReporterTest extends PrimaryDexopterTestBase {
         mPrimaryDexopter.dexopt();
 
         verify(()
-                        -> Dex2OatStatsReporter.report(eq(UID), eq(COMPILER_FILTER_VERIFY),
-                                eq(COMPILER_REASON_INSTALL), eq(DexMetadata.TYPE_NONE),
-                                any(DetailedDexInfo.class), eq("arm64"),
+                        -> Dex2OatStatsReporter.report(eq(mPkgState.getAppId()),
+                                eq(COMPILER_FILTER_VERIFY), eq(COMPILER_REASON_INSTALL),
+                                eq(DexMetadata.TYPE_NONE), any(DetailedDexInfo.class), eq("arm64"),
                                 eq(Dex2OatStatsReporter.Dex2OatResult.cancelled()), eq(0L),
                                 eq(0L)));
     }
@@ -225,12 +266,15 @@ public final class PrimaryDexopterReporterTest extends PrimaryDexopterTestBase {
 
     private void mockArtdDexoptResultFailure(String message, int status, int exitCode, int signal)
             throws Exception {
+        mockArtdDexoptThrows(new ServiceSpecificException(-1,
+                String.format("Failed to run dex2oat: %s [status=%d,exit_code=%d,signal=%d]",
+                        message, status, exitCode, signal)));
+    }
+
+    private void mockArtdDexoptThrows(Exception exception) throws RemoteException {
         lenient()
                 .when(mArtd.dexopt(any(), anyString(), anyString(), anyString(), anyString(), any(),
                         any(), any(), anyInt(), any(), any()))
-                .thenThrow(new ServiceSpecificException(-1,
-                        String.format(
-                                "Failed to run dex2oat: %s [status=%d,exit_code=%d,signal=%d]",
-                                message, status, exitCode, signal)));
+                .thenThrow(exception);
     }
 }

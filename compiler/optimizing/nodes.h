@@ -7693,7 +7693,6 @@ class HGraphVisitor : public ValueObject {
  protected:
   void VisitPhis(HBasicBlock* block);
   void VisitNonPhiInstructions(HBasicBlock* block);
-  void VisitNonPhiInstructionsHandleChanges(HBasicBlock* block);
 
   OptimizingCompilerStats* stats_;
 
@@ -7722,6 +7721,164 @@ class HGraphDelegateVisitor : public HGraphVisitor {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(HGraphDelegateVisitor);
+};
+
+// Graph visitor class template that's using the Curiously Recurring Template Pattern to avoid
+// virtual dispatch in the visitor design pattern and allows inlining individual visit functions
+// if the compiler deems it beneficial. For further optimizations, see `Dispatch()`.
+template <typename T>
+class CRTPGraphVisitor {
+ public:
+  explicit CRTPGraphVisitor(HGraph* graph) : graph_(graph) {}
+
+  HGraph* GetGraph() const { return graph_; }
+
+  // The empty visit function that is the default target of visit method forwarding.
+  void VisitInstruction([[maybe_unused]] HInstruction* instruction) {}
+
+  // Visit function declarations for both abstract and concrete instructions. These shall
+  // not be defined. Instead, dispatch to these functions is forwarded, see `ForwardVisit()`.
+#define DECLARE_VISIT_INSTRUCTION(name, super)               \
+  void Visit##name(H##name* instr);
+  FOR_EACH_INSTRUCTION(DECLARE_VISIT_INSTRUCTION)
+#undef DECLARE_VISIT_INSTRUCTION
+
+  ALWAYS_INLINE void Dispatch(HInstruction* insn) {
+    // Evaluate target visit method for each instruction kind at compile time. If multiple
+    // kinds redirect to the same visit function, select the first kind as `dispatch_kind`,
+    // making the other cases in the second `switch` subject to dead code elimination.
+    // Rely on jump-threading optimization to avoid the second `switch` and land directly
+    // on the correct case based on the instruction kind dispatch from the first `switch`.
+    HInstruction::InstructionKind dispatch_kind = HInstruction::kLastInstructionKind;
+    switch (insn->GetKind()) {
+    #define DEFINE_CASE(kind, super)                              \
+      case HInstruction::k##kind: {                               \
+        constexpr auto visit = T::ForwardVisit(&T::Visit##kind);  \
+        using I = decltype(ExtractInstructionType(visit));        \
+        static_assert(std::is_base_of_v<I, H##kind>);             \
+        constexpr HInstruction::InstructionKind kDispatchKind =   \
+            FindDispatchKind(visit);                              \
+        dispatch_kind = kDispatchKind;                            \
+        break;                                                    \
+      }
+      FOR_EACH_CONCRETE_INSTRUCTION(DEFINE_CASE)
+    #undef DEFINE_CASE
+      default:
+        DCHECK(false) << "UNREACHABLE";  // In debug build, check that this is unreachable.
+        UNREACHABLE();
+    }
+    switch (dispatch_kind) {
+    #define DEFINE_CASE(kind, super)                              \
+      case HInstruction::k##kind: {                               \
+        constexpr auto visit = T::ForwardVisit(&T::Visit##kind);  \
+        using I = decltype(ExtractInstructionType(visit));        \
+        (down_cast<T*>(this)->*visit)(down_cast<I*>(insn));       \
+        break;                                                    \
+      }
+      FOR_EACH_CONCRETE_INSTRUCTION(DEFINE_CASE)
+    #undef DEFINE_CASE
+      default:
+        LOG(FATAL) << "UNREACHABLE";  // Should be optimized away in both debug and release build.
+        UNREACHABLE();
+    }
+  }
+
+  // Visit the graph following dominator tree reverse post-order.
+  ALWAYS_INLINE void VisitReversePostOrder() {
+    for (HBasicBlock* block : graph_->GetReversePostOrder()) {
+      down_cast<T*>(this)->VisitBasicBlock(block);
+    }
+  }
+
+  // By default we visit block's instructions in normal (forward) order.
+  // The derived class `T` can change that by providing replacement functions
+  // `VisitBasicBlock()`, `VisitPhis()` or `VisitNonPhiInstructions()`.
+  ALWAYS_INLINE void VisitBasicBlock(HBasicBlock* block) {
+    down_cast<T*>(this)->VisitPhis(block);
+    down_cast<T*>(this)->VisitNonPhiInstructions(block);
+  }
+
+ protected:
+  ALWAYS_INLINE void VisitPhis(HBasicBlock* block) {
+    static constexpr auto visit_phi = T::ForwardVisit(&T::VisitPhi);
+    // Skip if `&T::VisitPhi` is forwarded to the empty `&CRTPGraphVisitor::VisitInstruction`.
+    if constexpr (IsSameVisit(visit_phi, &CRTPGraphVisitor::VisitInstruction)) {
+      return;
+    }
+    for (HInstructionIteratorPrefetchNext it(block->GetPhis()); !it.Done(); it.Advance()) {
+      DCHECK(it.Current()->IsPhi());
+      (down_cast<T*>(this)->*visit_phi)(it.Current()->AsPhi());
+    }
+  }
+
+  ALWAYS_INLINE void VisitNonPhiInstructions(HBasicBlock* block) {
+    for (HInstructionIteratorPrefetchNext it(block->GetInstructions()); !it.Done(); it.Advance()) {
+      DCHECK(!it.Current()->IsPhi());
+      Dispatch(it.Current());
+    }
+  }
+
+  // The default `ForwardVisit()` function template just returns the `visit` argument.
+  //
+  // Overloads for instruction visit functions declared directly in the `CRTPGraphVisitor`
+  // are provided below and forward these functions to the visit functions for the
+  // instruction superclass until we find one that's defined in or forwarded differently
+  // by the derived class `T`, or reach the `VisitInstruction()`.
+  //
+  // Usually, the derived class `T` just defines visit functions for the instructions it
+  // needs to process. However, it may also define its own replacement `ForwardVisit()`
+  // functions that return member pointers to arbitrary visit functions that can take
+  // relevant instructions by pointer (no need to call them `Visit*()`).
+  template <typename U, typename I>
+  static constexpr auto ForwardVisit(void (U::*visit)(I*)) {
+    return visit;
+  }
+
+#define DEFINE_FORWARD_VISIT(name, super)                                             \
+  static constexpr auto ForwardVisit(void (CRTPGraphVisitor<T>::*visit)(H##name*)) {  \
+    DCHECK(visit == &CRTPGraphVisitor::Visit##name);                                  \
+    return T::ForwardVisit(&T::Visit##super);                                         \
+  }
+  FOR_EACH_INSTRUCTION(DEFINE_FORWARD_VISIT)
+#undef DEFINE_FORWARD_VISIT
+
+ private:
+  template <typename U, typename I>
+  static constexpr I ExtractInstructionType(void (U::*visit)(I*));
+
+  template <typename U, typename I, typename V, typename J>
+  static constexpr bool IsSameVisit([[maybe_unused]] void (U::*lhs)(I*),
+                                    [[maybe_unused]] void (V::*rhs)(J*)) { return false; }
+  template <typename U, typename I>
+  static constexpr bool IsSameVisit(void (U::*lhs)(I*), void (U::*rhs)(I*)) { return lhs == rhs; }
+
+  template <typename U, typename I>
+  static constexpr bool IsSameVisit(void (U::*visit)(I*), HInstruction::InstructionKind kind) {
+    switch (kind) {
+    #define DEFINE_CASE(kind, super)                                  \
+      case HInstruction::k##kind:                                     \
+        return IsSameVisit(visit, T::ForwardVisit(&T::Visit##kind));
+      FOR_EACH_CONCRETE_INSTRUCTION(DEFINE_CASE)
+    #undef DEFINE_CASE
+      default:
+        LOG(FATAL) << "Compile time error when executed in constexpr context.";
+        UNREACHABLE();
+    }
+  }
+
+  template <typename U, typename I>
+  static constexpr HInstruction::InstructionKind FindDispatchKind(void (U::*visit)(I*)) {
+    for (uint32_t raw_kind = 0; raw_kind != HInstruction::kLastInstructionKind; ++raw_kind) {
+      HInstruction::InstructionKind kind = enum_cast<HInstruction::InstructionKind>(raw_kind);
+      if (IsSameVisit(visit, kind)) {
+        return kind;
+      }
+    }
+    LOG(FATAL) << "Compile time error when executed in constexpr context.";
+    UNREACHABLE();
+  }
+
+  HGraph* graph_;
 };
 
 // Create a clone of the instruction, insert it into the graph; replace the old one with a new

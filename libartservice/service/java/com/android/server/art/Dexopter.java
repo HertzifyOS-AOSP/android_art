@@ -108,6 +108,8 @@ public abstract class Dexopter<DexInfoType extends DetailedDexInfo> {
             ProfilePath profile = null;
             boolean succeeded = true;
             List<String> externalProfileErrors = List.of();
+            DexMetadataInfo dmInfo =
+                    mInjector.getDexMetadataHelper().getDexMetadataInfo(buildDmPath(dexInfo));
             try {
                 if (!isDexoptable(dexInfo)) {
                     continue;
@@ -116,14 +118,13 @@ public abstract class Dexopter<DexInfoType extends DetailedDexInfo> {
                 onDexoptStart(dexInfo);
 
                 String compilerFilter = adjustCompilerFilter(mParams.getCompilerFilter(), dexInfo);
-                DexMetadataInfo dmInfo =
-                        mInjector.getDexMetadataHelper().getDexMetadataInfo(buildDmPath(dexInfo));
                 if (compilerFilter.equals(DexoptParams.COMPILER_FILTER_NOOP)) {
                     mInjector.getReporterExecutor().execute(
                             ()
-                                    -> Dex2OatStatsReporter.reportSkipped(mPkgState.getAppId(),
-                                            mParams.getReason(), dmInfo.type(), dexInfo,
-                                            getAllAbis(dexInfo)));
+                                    -> Dex2OatStatsReporter.reportForAllAbis(mPkgState.getAppId(),
+                                            DexoptParams.COMPILER_FILTER_NOOP, mParams.getReason(),
+                                            dmInfo.type(), dexInfo, getAllAbis(dexInfo),
+                                            Dex2OatResult.notRun()));
                     continue;
                 }
 
@@ -367,6 +368,14 @@ public abstract class Dexopter<DexInfoType extends DetailedDexInfo> {
                         cleanupCurProfiles(dexInfo);
                     }
                 }
+            } catch (RemoteException | RuntimeException e) {
+                mInjector.getReporterExecutor().execute(
+                        ()
+                                -> Dex2OatStatsReporter.reportForAllAbis(mPkgState.getAppId(),
+                                        mParams.getCompilerFilter(), mParams.getReason(),
+                                        dmInfo.type(), dexInfo, getAllAbis(dexInfo),
+                                        Dex2OatResult.failedToStart()));
+                throw e;
             } finally {
                 if (profile != null && profile.getTag() == ProfilePath.tmpProfilePath) {
                     mInjector.getArtd().deleteProfile(profile);

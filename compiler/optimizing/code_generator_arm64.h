@@ -786,9 +786,17 @@ class CodeGeneratorARM64 : public CodeGenerator {
   void Load(DataType::Type type,
             vixl::aarch64::CPURegister dst,
             const vixl::aarch64::MemOperand& src);
+  static void Load(vixl::aarch64::MacroAssembler* assembler,
+                   DataType::Type type,
+                   vixl::aarch64::CPURegister dst,
+                   const vixl::aarch64::MemOperand& src);
   void Store(DataType::Type type,
              vixl::aarch64::CPURegister src,
              const vixl::aarch64::MemOperand& dst);
+  static void Store(vixl::aarch64::MacroAssembler* assembler,
+                    DataType::Type type,
+                    vixl::aarch64::CPURegister src,
+                    const vixl::aarch64::MemOperand& dst);
   void LoadAcquire(HInstruction* instruction,
                    DataType::Type type,
                    vixl::aarch64::CPURegister dst,

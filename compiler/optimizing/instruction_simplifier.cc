@@ -39,13 +39,13 @@ namespace art HIDDEN {
 // is replaced with its copy if it is clonable.
 static constexpr bool kTestInstructionClonerExhaustively = false;
 
-class InstructionSimplifierVisitor final : public HGraphDelegateVisitor {
+class InstructionSimplifierVisitor final : public CRTPGraphVisitor<InstructionSimplifierVisitor> {
  public:
   InstructionSimplifierVisitor(HGraph* graph,
                                CodeGenerator* codegen,
                                OptimizingCompilerStats* stats,
                                bool be_loop_friendly)
-      : HGraphDelegateVisitor(graph),
+      : CRTPGraphVisitor(graph),
         codegen_(codegen),
         stats_(stats),
         be_loop_friendly_(be_loop_friendly) {}
@@ -75,47 +75,90 @@ class InstructionSimplifierVisitor final : public HGraphDelegateVisitor {
   bool TryCombineVecMultiplyAccumulate(HVecMul* mul);
   void TryToReuseDiv(HRem* rem);
 
-  void VisitShift(HBinaryOperation* shift);
-  void VisitEqual(HEqual* equal) override;
-  void VisitNotEqual(HNotEqual* equal) override;
-  void VisitBooleanNot(HBooleanNot* bool_not) override;
-  void VisitInstanceFieldSet(HInstanceFieldSet* equal) override;
-  void VisitStaticFieldSet(HStaticFieldSet* equal) override;
-  void VisitArraySet(HArraySet* equal) override;
-  void VisitTypeConversion(HTypeConversion* instruction) override;
-  void VisitNullCheck(HNullCheck* instruction) override;
-  void VisitArrayLength(HArrayLength* instruction) override;
-  void VisitCheckCast(HCheckCast* instruction) override;
-  void VisitAbs(HAbs* instruction) override;
-  void VisitAdd(HAdd* instruction) override;
-  void VisitAnd(HAnd* instruction) override;
-  void VisitCompare(HCompare* instruction) override;
-  void VisitCondition(HCondition* instruction) override;
-  void VisitGreaterThan(HGreaterThan* condition) override;
-  void VisitGreaterThanOrEqual(HGreaterThanOrEqual* condition) override;
-  void VisitLessThan(HLessThan* condition) override;
-  void VisitLessThanOrEqual(HLessThanOrEqual* condition) override;
-  void VisitBelow(HBelow* condition) override;
-  void VisitBelowOrEqual(HBelowOrEqual* condition) override;
-  void VisitAbove(HAbove* condition) override;
-  void VisitAboveOrEqual(HAboveOrEqual* condition) override;
-  void VisitDiv(HDiv* instruction) override;
-  void VisitRem(HRem* instruction) override;
-  void VisitMul(HMul* instruction) override;
-  void VisitNeg(HNeg* instruction) override;
-  void VisitNot(HNot* instruction) override;
-  void VisitOr(HOr* instruction) override;
-  void VisitShl(HShl* instruction) override;
-  void VisitShr(HShr* instruction) override;
-  void VisitSub(HSub* instruction) override;
-  void VisitUShr(HUShr* instruction) override;
-  void VisitXor(HXor* instruction) override;
-  void VisitSelect(HSelect* select) override;
-  void VisitIf(HIf* instruction) override;
-  void VisitInstanceOf(HInstanceOf* instruction) override;
-  void VisitInvoke(HInvoke* invoke) override;
-  void VisitDeoptimize(HDeoptimize* deoptimize) override;
-  void VisitVecMul(HVecMul* instruction) override;
+  // Keep `ForwardVisit()` functions from base class visible except for those we replace below.
+  using CRTPGraphVisitor::ForwardVisit;
+
+  // Forward shifts to `HandleShift()`.
+  static constexpr auto ForwardVisit(void (CRTPGraphVisitor::*visit)(HShl*)) {
+    DCHECK(visit == &CRTPGraphVisitor::VisitShl);
+    return &InstructionSimplifierVisitor::HandleShift;
+  }
+  static constexpr auto ForwardVisit(void (CRTPGraphVisitor::*visit)(HShr*)) {
+    DCHECK(visit == &CRTPGraphVisitor::VisitShr);
+    return &InstructionSimplifierVisitor::HandleShift;
+  }
+  static constexpr auto ForwardVisit(void (CRTPGraphVisitor::*visit)(HUShr*)) {
+    DCHECK(visit == &CRTPGraphVisitor::VisitUShr);
+    return &InstructionSimplifierVisitor::HandleShift;
+  }
+
+  // Forward inequality conditions to `VisitCondition`.
+  // (Note: `HEqual` and `HNotEqual` have some additional handling.)
+  static constexpr auto ForwardVisit(void (CRTPGraphVisitor::*visit)(HGreaterThan*)) {
+    DCHECK(visit == &CRTPGraphVisitor::VisitGreaterThan);
+    return &InstructionSimplifierVisitor::VisitCondition;
+  }
+  static constexpr auto ForwardVisit(void (CRTPGraphVisitor::*visit)(HGreaterThanOrEqual*)) {
+    DCHECK(visit == &CRTPGraphVisitor::VisitGreaterThanOrEqual);
+    return &InstructionSimplifierVisitor::VisitCondition;
+  }
+  static constexpr auto ForwardVisit(void (CRTPGraphVisitor::*visit)(HLessThan*)) {
+    DCHECK(visit == &CRTPGraphVisitor::VisitLessThan);
+    return &InstructionSimplifierVisitor::VisitCondition;
+  }
+  static constexpr auto ForwardVisit(void (CRTPGraphVisitor::*visit)(HLessThanOrEqual*)) {
+    DCHECK(visit == &CRTPGraphVisitor::VisitLessThanOrEqual);
+    return &InstructionSimplifierVisitor::VisitCondition;
+  }
+  static constexpr auto ForwardVisit(void (CRTPGraphVisitor::*visit)(HBelow*)) {
+    DCHECK(visit == &CRTPGraphVisitor::VisitBelow);
+    return &InstructionSimplifierVisitor::VisitCondition;
+  }
+  static constexpr auto ForwardVisit(void (CRTPGraphVisitor::*visit)(HBelowOrEqual*)) {
+    DCHECK(visit == &CRTPGraphVisitor::VisitBelowOrEqual);
+    return &InstructionSimplifierVisitor::VisitCondition;
+  }
+  static constexpr auto ForwardVisit(void (CRTPGraphVisitor::*visit)(HAbove*)) {
+    DCHECK(visit == &CRTPGraphVisitor::VisitAbove);
+    return &InstructionSimplifierVisitor::VisitCondition;
+  }
+  static constexpr auto ForwardVisit(void (CRTPGraphVisitor::*visit)(HAboveOrEqual*)) {
+    DCHECK(visit == &CRTPGraphVisitor::VisitAboveOrEqual);
+    return &InstructionSimplifierVisitor::VisitCondition;
+  }
+
+  void HandleShift(HBinaryOperation* shift);
+
+  void VisitEqual(HEqual* equal);
+  void VisitNotEqual(HNotEqual* equal);
+  void VisitBooleanNot(HBooleanNot* bool_not);
+  void VisitInstanceFieldSet(HInstanceFieldSet* equal);
+  void VisitStaticFieldSet(HStaticFieldSet* equal);
+  void VisitArraySet(HArraySet* equal);
+  void VisitTypeConversion(HTypeConversion* instruction);
+  void VisitNullCheck(HNullCheck* instruction);
+  void VisitArrayLength(HArrayLength* instruction);
+  void VisitCheckCast(HCheckCast* instruction);
+  void VisitAbs(HAbs* instruction);
+  void VisitAdd(HAdd* instruction);
+  void VisitAnd(HAnd* instruction);
+  void VisitCompare(HCompare* instruction);
+  void VisitCondition(HCondition* instruction);
+  void VisitDiv(HDiv* instruction);
+  void VisitRem(HRem* instruction);
+  void VisitMul(HMul* instruction);
+  void VisitNeg(HNeg* instruction);
+  void VisitNot(HNot* instruction);
+  void VisitOr(HOr* instruction);
+  void VisitSub(HSub* instruction);
+  void VisitXor(HXor* instruction);
+  void VisitSelect(HSelect* select);
+  void VisitIf(HIf* instruction);
+  void VisitInstanceOf(HInstanceOf* instruction);
+  void VisitInvoke(HInvoke* invoke);
+  void VisitDeoptimize(HDeoptimize* deoptimize);
+  void VisitVecMul(HVecMul* instruction);
+
   void SimplifyBoxUnbox(HInvoke* instruction, ArtField* field, DataType::Type type);
   void SimplifySystemArrayCopy(HInvoke* invoke);
   void SimplifyStringEquals(HInvoke* invoke);
@@ -153,6 +196,8 @@ class InstructionSimplifierVisitor final : public HGraphDelegateVisitor {
   // not be too low either, however, since we want to allow revisiting a basic block
   // with many statements and simplifications at least once.
   static constexpr int kMaxSamePositionSimplifications = 50;
+
+  template <typename T> friend class CRTPGraphVisitor;
 };
 
 bool InstructionSimplifier::Run() {
@@ -167,7 +212,7 @@ bool InstructionSimplifier::Run() {
   return visitor.Run();
 }
 
-bool InstructionSimplifierVisitor::Run() {
+ALWAYS_INLINE inline bool InstructionSimplifierVisitor::Run() {
   bool didSimplify = false;
   // Iterate in reverse post order to open up more simplifications to users
   // of instructions that got simplified.
@@ -478,7 +523,7 @@ static bool TryReplaceShiftsByConstantWithTypeConversion(HBinaryOperation *instr
   return true;
 }
 
-void InstructionSimplifierVisitor::VisitShift(HBinaryOperation* instruction) {
+void InstructionSimplifierVisitor::HandleShift(HBinaryOperation* instruction) {
   DCHECK(instruction->IsShl() || instruction->IsShr() || instruction->IsUShr());
   HInstruction* shift_amount = instruction->GetRight();
   HInstruction* value = instruction->GetLeft();
@@ -1734,38 +1779,6 @@ void InstructionSimplifierVisitor::VisitAnd(HAnd* instruction) {
   TryHandleAssociativeAndCommutativeOperation(instruction);
 }
 
-void InstructionSimplifierVisitor::VisitGreaterThan(HGreaterThan* condition) {
-  VisitCondition(condition);
-}
-
-void InstructionSimplifierVisitor::VisitGreaterThanOrEqual(HGreaterThanOrEqual* condition) {
-  VisitCondition(condition);
-}
-
-void InstructionSimplifierVisitor::VisitLessThan(HLessThan* condition) {
-  VisitCondition(condition);
-}
-
-void InstructionSimplifierVisitor::VisitLessThanOrEqual(HLessThanOrEqual* condition) {
-  VisitCondition(condition);
-}
-
-void InstructionSimplifierVisitor::VisitBelow(HBelow* condition) {
-  VisitCondition(condition);
-}
-
-void InstructionSimplifierVisitor::VisitBelowOrEqual(HBelowOrEqual* condition) {
-  VisitCondition(condition);
-}
-
-void InstructionSimplifierVisitor::VisitAbove(HAbove* condition) {
-  VisitCondition(condition);
-}
-
-void InstructionSimplifierVisitor::VisitAboveOrEqual(HAboveOrEqual* condition) {
-  VisitCondition(condition);
-}
-
 // Recognize the following pattern:
 // obj.getClass() ==/!= Foo.class
 // And replace it with a constant value if the type of `obj` is statically known.
@@ -2427,14 +2440,6 @@ void InstructionSimplifierVisitor::VisitOr(HOr* instruction) {
   TryHandleAssociativeAndCommutativeOperation(instruction);
 }
 
-void InstructionSimplifierVisitor::VisitShl(HShl* instruction) {
-  VisitShift(instruction);
-}
-
-void InstructionSimplifierVisitor::VisitShr(HShr* instruction) {
-  VisitShift(instruction);
-}
-
 void InstructionSimplifierVisitor::VisitSub(HSub* instruction) {
   HConstant* input_cst = instruction->GetConstantRight();
   HInstruction* input_other = instruction->GetLeastConstantLeft();
@@ -2606,10 +2611,6 @@ void InstructionSimplifierVisitor::VisitSub(HSub* instruction) {
       return;
     }
   }
-}
-
-void InstructionSimplifierVisitor::VisitUShr(HUShr* instruction) {
-  VisitShift(instruction);
 }
 
 void InstructionSimplifierVisitor::VisitXor(HXor* instruction) {

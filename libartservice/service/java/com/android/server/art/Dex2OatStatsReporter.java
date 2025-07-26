@@ -48,17 +48,15 @@ public class Dex2OatStatsReporter {
                 (int) compilationTime);
     }
 
-    public static void reportSkipped(int appId, @NonNull String compilationReason,
-            @DexMetadata.Type int dexMetadataType, @NonNull DetailedDexInfo dexInfo,
-            @NonNull List<Abi> abis) {
-        Dex2OatResult skipped = Dex2OatResult.notRun();
-
+    public static void reportForAllAbis(int appId, @NonNull String compilerFilter,
+            @NonNull String compilationReason, int dexMetadataType,
+            @NonNull DetailedDexInfo dexInfo, @NonNull List<Abi> abis, Dex2OatResult result) {
         for (Abi abi : abis) {
             ArtStatsLog.write(ArtStatsLog.ART_DEX2OAT_REPORTED, appId,
-                    translateCompilerFilter(DexoptParams.COMPILER_FILTER_NOOP),
+                    translateCompilerFilter(compilerFilter),
                     translateCompilationReason(compilationReason), dexMetadataType,
-                    getApkType(dexInfo), translateIsa(abi.isa()), skipped.status, skipped.exitCode,
-                    skipped.signal,
+                    getApkType(dexInfo), translateIsa(abi.isa()), result.status, result.exitCode,
+                    result.signal,
                     0, // artifacts size
                     0 // compilation time
             );
