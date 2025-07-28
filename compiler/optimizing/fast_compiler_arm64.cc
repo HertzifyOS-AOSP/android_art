@@ -1676,20 +1676,23 @@ bool FastCompilerARM64::BuildMove(uint32_t dest_reg,
 void FastCompilerARM64::SetIntConstant(uint32_t register_index,
                                        int32_t constant,
                                        const Instruction* next) {
-  if (GetCodeItemAccessor().TriesSize() == 0) {
+  bool can_be_object = (constant == 0);
+  if (GetCodeItemAccessor().TriesSize() == 0 && !can_be_object) {
     vreg_locations_[register_index] =
         Location::ConstantLocation(new (allocator_) HIntConstant(constant));
   } else {
     // In the presence of try/catch, we put the constant in a register directly.
     // This avoids having to dump dex register maps for stack maps, saving
     // compilation time.
+    // We also store in a register for the constant zero to simplify object
+    // register mask merging in the presence of control flow.
     MoveLocation(CreateNewRegisterLocation(register_index, DataType::Type::kInt32, next),
                  Location::ConstantLocation(new (allocator_) HIntConstant(constant)),
                  DataType::Type::kInt32);
   }
   // In case we branch, we need to make sure a null value can be merged
   // with an object value, so treat the 0 value as an object.
-  UpdateLocal(register_index, /* is_object= */ (constant == 0));
+  UpdateLocal(register_index, can_be_object);
 }
 
 bool FastCompilerARM64::BuildInvokeRuntime11x(QuickEntrypointEnum entrypoint,
