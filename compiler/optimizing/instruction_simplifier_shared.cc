@@ -300,7 +300,7 @@ bool TryReplaceSubSubWithSubAdd(HSub* last_sub) {
   ArenaAllocator* allocator = basic_block->GetGraph()->GetAllocator();
   HInstruction* last_sub_right = last_sub->GetRight();
   HInstruction* last_sub_left = last_sub->GetLeft();
-  if (last_sub_right->GetUses().HasExactlyOneElement()) {
+  if (last_sub_right->HasOnlyOneNonEnvironmentUse()) {
     // Reorder operands of last_sub_right: Sub(a, b) -> Sub(b, a).
     HInstruction* a = last_sub_right->InputAt(0);
     HInstruction* b = last_sub_right->InputAt(1);
