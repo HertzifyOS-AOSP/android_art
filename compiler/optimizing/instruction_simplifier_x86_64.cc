@@ -23,12 +23,13 @@ namespace art HIDDEN {
 
 namespace x86_64 {
 
-class InstructionSimplifierX86_64Visitor final : public HGraphVisitor {
+class InstructionSimplifierX86_64Visitor final
+    : public CRTPGraphVisitor<InstructionSimplifierX86_64Visitor> {
  public:
   InstructionSimplifierX86_64Visitor(HGraph* graph,
                                      CodeGenerator* codegen,
                                      OptimizingCompilerStats* stats)
-      : HGraphVisitor(graph),
+      : CRTPGraphVisitor(graph),
         codegen_(down_cast<CodeGeneratorX86_64*>(codegen)),
         stats_(stats) {}
 
@@ -40,21 +41,14 @@ class InstructionSimplifierX86_64Visitor final : public HGraphVisitor {
     return codegen_->GetInstructionSetFeatures().HasAVX2();
   }
 
-  void VisitBasicBlock(HBasicBlock* block) override {
-    for (HInstructionIteratorPrefetchNext it(block->GetInstructions()); !it.Done(); it.Advance()) {
-      HInstruction* instruction = it.Current();
-      if (instruction->IsInBlock()) {
-        Dispatch(instruction);
-      }
-    }
-  }
-
-  void VisitAnd(HAnd* instruction) override;
-  void VisitXor(HXor* instruction) override;
-
  private:
+  void VisitAnd(HAnd* instruction);
+  void VisitXor(HXor* instruction);
+
   CodeGeneratorX86_64* codegen_;
   OptimizingCompilerStats* stats_;
+
+  template <typename T> friend class art::CRTPGraphVisitor;
 };
 
 void InstructionSimplifierX86_64Visitor::VisitAnd(HAnd* instruction) {
@@ -64,7 +58,6 @@ void InstructionSimplifierX86_64Visitor::VisitAnd(HAnd* instruction) {
     RecordSimplification();
   }
 }
-
 
 void InstructionSimplifierX86_64Visitor::VisitXor(HXor* instruction) {
   if (TryGenerateMaskUptoLeastSetBit(instruction)) {
