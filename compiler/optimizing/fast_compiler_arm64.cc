@@ -253,6 +253,7 @@ class FastCompilerARM64 : public FastCompiler {
   bool BuildInvokeRuntime11x(
       QuickEntrypointEnum entrypoint, const Instruction& isntruction, uint32_t dex_pc);
 
+  bool BuildLoadClass(uint32_t vreg, dex::TypeIndex type_index, const Instruction* next);
   bool BuildLoadString(uint32_t vreg, dex::StringIndex string_index, const Instruction* next);
   bool BuildNewInstance(
       uint32_t vreg, dex::TypeIndex string_index, uint32_t dex_pc, const Instruction* next);
@@ -1178,6 +1179,43 @@ bool FastCompilerARM64::BuildLoadString(uint32_t vreg,
                                                            string_index,
                                                            h_str,
                                                            code_generation_data_.get()));
+  __ Ldr(dst.W(), MemOperand(dst.X()));
+  DoReadBarrierOn(dst);
+  UpdateLocal(vreg, /* is_object= */ true, /* can_be_null= */ false);
+  return true;
+}
+
+bool FastCompilerARM64::BuildLoadClass(uint32_t vreg,
+                                       dex::TypeIndex type_index,
+                                       const Instruction* next) {
+  // Generate a frame because of the read barrier.
+  if (!EnsureHasFrame()) {
+    return false;
+  }
+  Location loc = CreateNewRegisterLocation(vreg, DataType::Type::kReference, next);
+  if (HitUnimplemented()) {
+    return false;
+  }
+  if (Runtime::Current()->IsAotCompiler()) {
+    unimplemented_reason_ = "AOTLoadClass";
+    return false;
+  }
+
+  ScopedObjectAccess soa(Thread::Current());
+  ObjPtr<mirror::Class> klass = dex_compilation_unit_.GetClassLinker()->ResolveType(
+      type_index, dex_compilation_unit_.GetDexCache(), dex_compilation_unit_.GetClassLoader());
+  if (klass == nullptr || !method_->GetDeclaringClass()->CanAccess(klass)) {
+    soa.Self()->ClearException();
+    unimplemented_reason_ = "UnsupportedLoadClass";
+    return false;
+  }
+
+  Handle<mirror::Class> h_klass = handles_->NewHandle(klass);
+  Register dst = RegisterFrom(loc, DataType::Type::kReference);
+  __ Ldr(dst.W(), jit_patches_.DeduplicateJitClassLiteral(GetDexFile(),
+                                                          type_index,
+                                                          h_klass,
+                                                          code_generation_data_.get()));
   __ Ldr(dst.W(), MemOperand(dst.X()));
   DoReadBarrierOn(dst);
   UpdateLocal(vreg, /* is_object= */ true, /* can_be_null= */ false);
@@ -2965,7 +3003,8 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
     }
 
     case Instruction::CONST_CLASS: {
-      break;
+      dex::TypeIndex type_index(instruction.VRegB_21c());
+      return BuildLoadClass(instruction.VRegA_21c(), type_index, next);
     }
 
     case Instruction::CONST_METHOD_HANDLE: {
