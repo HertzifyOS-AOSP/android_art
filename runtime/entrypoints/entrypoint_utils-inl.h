@@ -59,20 +59,6 @@ inline std::string GetResolvedMethodErrorString(ClassLinker* class_linker,
   const uint32_t method_index = method_info.GetMethodIndex();
 
   std::stringstream error_ss;
-  std::string separator = "";
-  error_ss << "BCP vector {";
-  for (const DexFile* df : class_linker->GetBootClassPath()) {
-    error_ss << separator << df << "(" << df->GetLocation() << ")";
-    separator = ", ";
-  }
-  error_ss << "}. oat_dex_files vector: {";
-  separator = "";
-  for (const OatDexFile* odf_value :
-       parent_method->GetDexFile()->GetOatDexFile()->GetOatFile()->GetOatDexFiles()) {
-    error_ss << separator << odf_value << "(" << odf_value->GetDexFileLocation() << ")";
-    separator = ", ";
-  }
-  error_ss << "}. ";
   if (inlined_method != nullptr) {
     error_ss << "Inlined method: " << inlined_method->PrettyMethod() << " ("
              << inlined_method->GetDexFile()->GetLocation() << "/"
@@ -81,8 +67,7 @@ inline std::string GetResolvedMethodErrorString(ClassLinker* class_linker,
     error_ss << "Could not find an inlined method from an .oat file, using dex_cache to print the "
                 "inlined method: "
              << dex_cache->GetDexFile()->PrettyMethod(method_index) << " ("
-             << dex_cache->GetDexFile()->GetLocation() << "/"
-             << static_cast<const void*>(dex_cache->GetDexFile()) << "). ";
+             << dex_cache->GetDexFile()->GetLocation() << "). ";
   } else {
     error_ss << "Both inlined_method and dex_cache are null. This means that we had an OOB access "
              << "to either bcp_dex_files or oat_dex_files. ";
@@ -91,12 +76,27 @@ inline std::string GetResolvedMethodErrorString(ClassLinker* class_linker,
            << parent_method->GetDexFile()->GetLocation() << "/"
            << static_cast<const void*>(parent_method->GetDexFile())
            << "). The outermost method in the chain is: " << outer_method->PrettyMethod() << " ("
-           << outer_method->GetDexFile()->GetLocation() << "/"
-           << static_cast<const void*>(outer_method->GetDexFile())
+           << outer_method->GetDexFile()->GetLocation()
            << "). MethodInfo: method_index=" << std::dec << method_index
            << ", is_in_bootclasspath=" << std::boolalpha
            << (method_info.GetDexFileIndexKind() == MethodInfo::kKindBCP) << std::noboolalpha
            << ", dex_file_index=" << std::dec << method_info.GetDexFileIndex() << ".";
+
+  std::string separator = "";
+  error_ss << " BCP vector {";
+  for (const DexFile* df : class_linker->GetBootClassPath()) {
+    error_ss << separator << df->GetLocation();
+    separator = ", ";
+  }
+  error_ss << "}. oat_dex_files vector: {";
+  separator = "";
+  for (const OatDexFile* odf_value :
+       parent_method->GetDexFile()->GetOatDexFile()->GetOatFile()->GetOatDexFiles()) {
+    error_ss << separator << odf_value->GetDexFileLocation();
+    separator = ", ";
+  }
+  error_ss << "}";
+
   return error_ss.str();
 }
 
