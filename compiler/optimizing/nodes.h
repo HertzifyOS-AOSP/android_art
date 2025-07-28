@@ -1408,11 +1408,7 @@ class HInstruction : public ArenaObject<kArenaAllocInstruction> {
   uint32_t GetDexPc() const { return dex_pc_; }
 
   bool IsControlFlow() const {
-    return IsControlFlow(GetKind());
-  }
-
-  static constexpr bool IsControlFlow(InstructionKind kind) {
-    switch (kind) {
+    switch (GetKind()) {
       case kExit:
       case kGoto:
       case kIf:
@@ -7747,14 +7743,7 @@ class CRTPGraphVisitor {
   FOR_EACH_INSTRUCTION(DECLARE_VISIT_INSTRUCTION)
 #undef DECLARE_VISIT_INSTRUCTION
 
-  // Dispatch the `insn` to the appropriate visit function based on `insn->GetKind()`.
-  //
-  // The template parameter `bool kReturnIsControlFlow`, if true, specifies that `Dispatch()`
-  // shall return the compile-time evaluated result of `insn->IsControlFlow()` from each case
-  // in the dispatch `switch`; `CRTPGraphVisitor::VisitNonPhiInstructions()` uses this for
-  // additional optimization. Otherwise, it returns nothing (return type `void`).
-  template <bool kReturnIsControlFlow = false>
-  ALWAYS_INLINE std::conditional_t<kReturnIsControlFlow, bool, void> Dispatch(HInstruction* insn) {
+  ALWAYS_INLINE void Dispatch(HInstruction* insn) {
     // Evaluate target visit method for each instruction kind at compile time. If multiple
     // kinds redirect to the same visit function, select the first kind as `dispatch_kind`,
     // making the other cases in the second `switch` subject to dead code elimination.
@@ -7762,17 +7751,15 @@ class CRTPGraphVisitor {
     // on the correct case based on the instruction kind dispatch from the first `switch`.
     HInstruction::InstructionKind dispatch_kind = HInstruction::kLastInstructionKind;
     switch (insn->GetKind()) {
-    #define DEFINE_CASE(kind, super)                                        \
-      case HInstruction::k##kind: {                                         \
-        constexpr auto visit = T::ForwardVisit(&T::Visit##kind);            \
-        using I = decltype(ExtractInstructionType(visit));                  \
-        static_assert(std::is_base_of_v<I, H##kind>);                       \
-        constexpr HInstruction::InstructionKind kDispatchKind =             \
-            FindDispatchKind<                                               \
-                /*kCheckIsControlFlow=*/ kReturnIsControlFlow,              \
-                HInstruction::IsControlFlow(HInstruction::k##kind)>(visit); \
-        dispatch_kind = kDispatchKind;                                      \
-        break;                                                              \
+    #define DEFINE_CASE(kind, super)                              \
+      case HInstruction::k##kind: {                               \
+        constexpr auto visit = T::ForwardVisit(&T::Visit##kind);  \
+        using I = decltype(ExtractInstructionType(visit));        \
+        static_assert(std::is_base_of_v<I, H##kind>);             \
+        constexpr HInstruction::InstructionKind kDispatchKind =   \
+            FindDispatchKind(visit);                              \
+        dispatch_kind = kDispatchKind;                            \
+        break;                                                    \
       }
       FOR_EACH_CONCRETE_INSTRUCTION(DEFINE_CASE)
     #undef DEFINE_CASE
@@ -7781,16 +7768,12 @@ class CRTPGraphVisitor {
         UNREACHABLE();
     }
     switch (dispatch_kind) {
-    #define DEFINE_CASE(kind, super)                                        \
-      case HInstruction::k##kind: {                                         \
-        constexpr auto visit = T::ForwardVisit(&T::Visit##kind);            \
-        using I = decltype(ExtractInstructionType(visit));                  \
-        (down_cast<T*>(this)->*visit)(down_cast<I*>(insn));                 \
-        if constexpr (kReturnIsControlFlow) {                               \
-          return HInstruction::IsControlFlow(HInstruction::k##kind);        \
-        } else {                                                            \
-          return;                                                           \
-        }                                                                   \
+    #define DEFINE_CASE(kind, super)                              \
+      case HInstruction::k##kind: {                               \
+        constexpr auto visit = T::ForwardVisit(&T::Visit##kind);  \
+        using I = decltype(ExtractInstructionType(visit));        \
+        (down_cast<T*>(this)->*visit)(down_cast<I*>(insn));       \
+        break;                                                    \
       }
       FOR_EACH_CONCRETE_INSTRUCTION(DEFINE_CASE)
     #undef DEFINE_CASE
@@ -7829,24 +7812,10 @@ class CRTPGraphVisitor {
   }
 
   ALWAYS_INLINE void VisitNonPhiInstructions(HBasicBlock* block) {
-    HInstruction* next = block->GetFirstInstruction();
-    DCHECK(next != nullptr);
-    bool is_control_flow = false;
-    do {
-      HInstruction* current = next;
-      DCHECK(!current->IsPhi());
-      next = current->GetNext();
-      // Each block ends with a control flow instruction, use that as the loop exit
-      // condition. The `is_control_flow` is a Phi of compile-time constants in
-      // `Dispatch<>()`, so this shall be optimized with jump-threading and visitors
-      // for control-flow instructions shall be taken out of the loop. Empty visitors
-      // for non-control-flow instructions shall be redirected to the start of the loop.
-      is_control_flow = Dispatch</*kReturnIsControlFlow=*/ true>(current);
-      DCHECK_EQ(is_control_flow, current->IsControlFlow()) << current->DebugName();
-      DCHECK_EQ(is_control_flow, next == nullptr) << current->DebugName();
-      // Visitors are not allowed to remove the next instruction from the block.
-      DCHECK_IMPLIES(next != nullptr, next->IsInBlock()) << current->DebugName();
-    } while (!is_control_flow);
+    for (HInstructionIteratorPrefetchNext it(block->GetInstructions()); !it.Done(); it.Advance()) {
+      DCHECK(!it.Current()->IsPhi());
+      Dispatch(it.Current());
+    }
   }
 
   // The default `ForwardVisit()` function template just returns the `visit` argument.
@@ -7897,12 +7866,11 @@ class CRTPGraphVisitor {
     }
   }
 
-  template <bool kCheckIsControlFlow, bool kIsControlFlow, typename U, typename I>
+  template <typename U, typename I>
   static constexpr HInstruction::InstructionKind FindDispatchKind(void (U::*visit)(I*)) {
     for (uint32_t raw_kind = 0; raw_kind != HInstruction::kLastInstructionKind; ++raw_kind) {
       HInstruction::InstructionKind kind = enum_cast<HInstruction::InstructionKind>(raw_kind);
-      if (IsSameVisit(visit, kind) &&
-          (!kCheckIsControlFlow || kIsControlFlow == HInstruction::IsControlFlow(kind))) {
+      if (IsSameVisit(visit, kind)) {
         return kind;
       }
     }

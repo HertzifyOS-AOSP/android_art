@@ -95,6 +95,7 @@ class LoadStoreEliminationTestBase : public SuperTest, public OptimizingUnitTest
     HInstruction* c4 = graph_->GetIntConstant(4);
     i_add1_ = MakeBinOp<HAdd>(entry_block_, DataType::Type::kInt32, i_, c1);
     i_add4_ = MakeBinOp<HAdd>(entry_block_, DataType::Type::kInt32, i_, c4);
+    MakeGoto(entry_block_);
   }
 
   // Create suspend check, linear loop variable and loop condition.
