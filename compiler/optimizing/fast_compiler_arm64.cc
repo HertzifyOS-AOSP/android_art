@@ -1783,15 +1783,22 @@ bool FastCompilerARM64::BuildArrayAccess(const Instruction& instruction,
 
   __ Add(temp.W(), array.W(), mirror::Array::DataOffset(DataType::Size(type)).Uint32Value());
   MemOperand src = HeapOperand(temp.W(), index.X(), LSL, DataType::SizeShift(type));
+  Location location = is_put
+      ? GetExistingRegisterLocation(source_or_dest_reg, type)
+      : CreateNewRegisterLocation(source_or_dest_reg, type, next);
+  // Array access operations don't explicitly mention if they operate on
+  // floating point values. If we find this out ourselves, adjust the type.
+  if (location.IsFpuRegister()) {
+    type = (type == DataType::Type::kInt32) ? DataType::Type::kFloat32 : DataType::Type::kFloat64;
+  }
+  CPURegister value_or_dest = CPURegisterFrom(location, type);
   if (is_put) {
-    Register value = RegisterFrom(GetExistingRegisterLocation(source_or_dest_reg, type), type);
-    CodeGeneratorARM64::Store(GetVIXLAssembler(), type, value, src);
+    CodeGeneratorARM64::Store(GetVIXLAssembler(), type, value_or_dest, src);
   } else {
-    Register dst = RegisterFrom(CreateNewRegisterLocation(source_or_dest_reg, type, next), type);
-    CodeGeneratorARM64::Load(GetVIXLAssembler(), type, dst, src);
+    CodeGeneratorARM64::Load(GetVIXLAssembler(), type, value_or_dest, src);
     UpdateLocal(source_or_dest_reg, is_object);
     if (is_object) {
-      DoReadBarrierOn(dst);
+      DoReadBarrierOn(Register(value_or_dest));
     }
   }
   if (HitUnimplemented()) {
