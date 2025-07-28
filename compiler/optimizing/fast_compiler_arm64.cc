@@ -610,7 +610,7 @@ bool FastCompilerARM64::MoveLocation(Location destination,
     }
     if (source.IsConstant()) {
       if (source.GetConstant()->IsIntConstant()) {
-        DCHECK_NE(dst_type, DataType::Type::kInt64);
+        // Note: the destination may be 64bits, but that's ok.
         __ Mov(dst, source.GetConstant()->AsIntConstant()->GetValue());
         return true;
       } else if (source.GetConstant()->IsLongConstant()) {
