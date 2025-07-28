@@ -257,6 +257,10 @@ class FastCompilerARM64 : public FastCompiler {
   bool BuildNewInstance(
       uint32_t vreg, dex::TypeIndex string_index, uint32_t dex_pc, const Instruction* next);
   bool BuildNewArray(const Instruction& instruction, uint32_t dex_pc, const Instruction* next);
+  bool BuildNewArray(dex::TypeIndex type_index, Location length_location, uint32_t dex_pc);
+  bool BuildFilledNewArray(uint32_t dex_pc,
+                           dex::TypeIndex type_index,
+                           const InstructionOperands& operands);
   bool BuildCheckCast(uint32_t vreg, dex::TypeIndex type_index, uint32_t dex_pc);
   bool BuildInstanceOf(uint32_t vreg,
                        uint32_t vreg_result,
@@ -269,6 +273,7 @@ class FastCompilerARM64 : public FastCompiler {
       uint32_t dest_reg, uint32_t src_reg, DataType::Type type, const Instruction* next);
   bool LoadMethod(Register reg, ArtMethod* method);
   void DoReadBarrierOn(Register reg, vixl::aarch64::Label* exit = nullptr, bool do_mr_check = true);
+  void DoWriteBarrierOn(Register holder, UseScratchRegisterScope& temps);
   bool CanGenerateCodeFor(ArtField* field, bool can_receiver_be_null)
       REQUIRES_SHARED(Locks::mutator_lock_);
   bool DoGet(const MemOperand& mem,
@@ -1233,20 +1238,16 @@ bool FastCompilerARM64::BuildNewInstance(uint32_t vreg,
   return true;
 }
 
-bool FastCompilerARM64::BuildNewArray(const Instruction& instruction,
-                                      uint32_t dex_pc,
-                                      const Instruction* next) {
-  dex::TypeIndex type_index(instruction.VRegC_22c());
-  int32_t length = instruction.VRegB_22c();
-  int32_t dst = instruction.VRegA_22c();
+
+bool FastCompilerARM64::BuildNewArray(dex::TypeIndex type_index,
+                                      Location length_location,
+                                      uint32_t dex_pc) {
   const char* descriptor = GetDexFile().GetTypeDescriptor(GetDexFile().GetTypeId(type_index));
   DCHECK_EQ(descriptor[0], '[');
   size_t component_type_shift = Primitive::ComponentSizeShift(Primitive::GetType(descriptor[1]));
   QuickEntrypointEnum entrypoint =
       CodeGenerator::GetArrayAllocationEntrypoint(component_type_shift);
-  if (!EnsureHasFrame()) {
-    return false;
-  }
+  DCHECK(has_frame_);
   if (Runtime::Current()->IsAotCompiler()) {
     unimplemented_reason_ = "AOTNewArray";
     return false;
@@ -1273,12 +1274,31 @@ bool FastCompilerARM64::BuildNewArray(const Instruction& instruction,
   __ Ldr(cls_reg.W(), MemOperand(cls_reg.X()));
   DoReadBarrierOn(cls_reg);
   if (!MoveLocation(LocationFrom(calling_convention.GetRegisterAt(1)),
-                    GetExistingRegisterLocation(length, DataType::Type::kInt32),
+                    length_location,
                     DataType::Type::kInt32)) {
     return false;
   }
   InvokeRuntime(entrypoint, dex_pc);
   __ Dmb(InnerShareable, BarrierWrites);
+  return true;
+}
+
+bool FastCompilerARM64::BuildNewArray(const Instruction& instruction,
+                                      uint32_t dex_pc,
+                                      const Instruction* next) {
+  if (!EnsureHasFrame()) {
+    return false;
+  }
+  dex::TypeIndex type_index(instruction.VRegC_22c());
+  int32_t length = instruction.VRegB_22c();
+  int32_t dst = instruction.VRegA_22c();
+
+  Location length_location = GetExistingRegisterLocation(length, DataType::Type::kInt32);
+  if (!BuildNewArray(type_index, length_location, dex_pc)) {
+    return false;
+  }
+
+  InvokeRuntimeCallingConvention calling_convention;
   if (!MoveLocation(CreateNewRegisterLocation(dst, DataType::Type::kReference, next),
                     calling_convention.GetReturnLocation(DataType::Type::kReference),
                     DataType::Type::kReference)) {
@@ -1288,6 +1308,45 @@ bool FastCompilerARM64::BuildNewArray(const Instruction& instruction,
     return false;
   }
   UpdateLocal(dst, /* is_object= */ true, /* can_be_null= */ false);
+  return true;
+}
+
+
+bool FastCompilerARM64::BuildFilledNewArray(uint32_t dex_pc,
+                                            dex::TypeIndex type_index,
+                                            const InstructionOperands& operands) {
+  if (!EnsureHasFrame()) {
+    return false;
+  }
+  int32_t number_of_operands = operands.GetNumberOfOperands();
+
+  if (!BuildNewArray(type_index,
+                     Location::ConstantLocation(new (allocator_) HIntConstant(number_of_operands)),
+                     dex_pc)) {
+    return false;
+  }
+  const char* descriptor = GetDexFile().GetTypeDescriptor(type_index);
+  char primitive = descriptor[1];
+  bool is_reference_array = (primitive == 'L') || (primitive == '[');
+  DataType::Type type = is_reference_array ? DataType::Type::kReference : DataType::Type::kInt32;
+
+  InvokeRuntimeCallingConvention calling_convention;
+  Register array = RegisterFrom(calling_convention.GetReturnLocation(DataType::Type::kReference),
+                                DataType::Type::kReference);
+  size_t offset = mirror::Array::DataOffset(DataType::Size(type)).Uint32Value();
+  for (int32_t i = 0; i < number_of_operands; ++i) {
+    Register value = RegisterFrom(GetExistingRegisterLocation(operands.GetOperand(i), type), type);
+    MemOperand mem = HeapOperand(array, offset + (i <<  DataType::SizeShift(type)));
+    CodeGeneratorARM64::Store(GetVIXLAssembler(), type, value, mem);
+  }
+  if (HitUnimplemented()) {
+    return false;
+  }
+  if (type == DataType::Type::kReference) {
+    UseScratchRegisterScope temps(GetVIXLAssembler());
+    DoWriteBarrierOn(array, temps);
+  }
+  previous_invoke_return_type_ = DataType::Type::kReference;
   return true;
 }
 
@@ -1441,6 +1500,14 @@ void FastCompilerARM64::DoReadBarrierOn(Register reg,
   if (exit == nullptr && do_mr_check) {
     __ Bind(&local_exit);
   }
+}
+
+void FastCompilerARM64::DoWriteBarrierOn(Register holder, UseScratchRegisterScope& temps) {
+  Register card = temps.AcquireX();
+  Register temp = temps.AcquireW();
+  __ Ldr(card, MemOperand(tr, Thread::CardTableOffset<kArm64PointerSize>().Int32Value()));
+  __ Lsr(temp, holder, gc::accounting::CardTable::kCardShift);
+  __ Strb(card, MemOperand(card, temp.X()));
 }
 
 bool FastCompilerARM64::CanGenerateCodeFor(ArtField* field, bool can_receiver_be_null) {
@@ -1933,11 +2000,7 @@ bool FastCompilerARM64::BuildInstanceFieldSet(const Instruction& instruction,
     if (!assigning_constant) {
       vixl::aarch64::Label exit;
       __ Cbz(reg, &exit);
-      Register card = temps.AcquireX();
-      Register temp = temps.AcquireW();
-      __ Ldr(card, MemOperand(tr, Thread::CardTableOffset<kArm64PointerSize>().Int32Value()));
-      __ Lsr(temp, holder, gc::accounting::CardTable::kCardShift);
-      __ Strb(card, MemOperand(card, temp.X()));
+      DoWriteBarrierOn(holder, temps);
       __ Bind(&exit);
     }
     return true;
@@ -2730,11 +2793,17 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
     }
 
     case Instruction::FILLED_NEW_ARRAY: {
-      break;
+      dex::TypeIndex type_index(instruction.VRegB_35c());
+      uint32_t args[5];
+      uint32_t number_of_vreg_arguments = instruction.GetVarArgs(args);
+      VarArgsInstructionOperands operands(args, number_of_vreg_arguments);
+      return BuildFilledNewArray(dex_pc, type_index, operands);
     }
 
     case Instruction::FILLED_NEW_ARRAY_RANGE: {
-      break;
+      dex::TypeIndex type_index(instruction.VRegB_3rc());
+      RangeInstructionOperands operands(instruction.VRegC_3rc(), instruction.VRegA_3rc());
+      return BuildFilledNewArray(dex_pc, type_index, operands);
     }
 
     case Instruction::FILL_ARRAY_DATA: {
