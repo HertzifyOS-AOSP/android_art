@@ -905,6 +905,15 @@ TEST_F(ClassLinkerTest, GetDexFiles) {
   EXPECT_TRUE(dex_files2[0]->GetLocation().ends_with("MultiDex.jar"));
 }
 
+TEST_F(ClassLinkerTest, GetDexFilesFromMultiDexContainer) {
+  ScopedObjectAccess soa(Thread::Current());
+
+  jobject jclass_loader = LoadDex("MultiDexContainer");
+  std::vector<const DexFile*> dex_files(GetDexFiles(jclass_loader));
+  ASSERT_EQ(dex_files.size(), 2U);
+  EXPECT_TRUE(dex_files[0]->GetLocation().ends_with("MultiDexContainer.jar"));
+}
+
 TEST_F(ClassLinkerTest, FindClassNested) {
   ScopedObjectAccess soa(Thread::Current());
   StackHandleScope<1> hs(soa.Self());

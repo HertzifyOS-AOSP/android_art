@@ -1465,6 +1465,7 @@ filegroup {
         ":art-gtest-jars-ManyMethods",
         ":art-gtest-jars-MethodTypes",
         ":art-gtest-jars-MultiDex",
+        ":art-gtest-jars-MultiDexContainer",
         ":art-gtest-jars-MultiDexModifiedSecondary",
         ":art-gtest-jars-MyClass",
         ":art-gtest-jars-MyClassNatives",
@@ -1840,6 +1841,22 @@ java_genrule {
     defaults: ["art-gtest-jars-align-defaults"],
     srcs: [":art-gtest-jars-MultiDexUncompressed"],
     out: ["art-gtest-jars-MultiDexUncompressedAligned.jar"],
+}
+
+// A copy of MultiDex with a single, containerized classes.dex.
+java_library {
+    name: "art-gtest-jars-MultiDexContainer",
+    srcs: ["MultiDex/**/*.java"],
+    defaults: ["art-gtest-jars-defaults"],
+    min_sdk_version: "19",
+    dxflags: [
+        // Container usage is the default for minSdkVersion >= 36, but
+        // `--main-dex-list` is only supported for earlier SDK versions. For
+        // now, simply force container usage for testing purposes.
+        "-JDcom.android.tools.r8.dexContainerExperiment",
+        "--main-dex-list",
+        "art/test/MultiDexModifiedSecondary/main.list",
+    ],
 }
 
 java_library {

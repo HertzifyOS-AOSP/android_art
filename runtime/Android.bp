@@ -1084,6 +1084,7 @@ art_cc_defaults {
         ":art-gtest-jars-MainUncompressedAligned",
         ":art-gtest-jars-MethodTypes",
         ":art-gtest-jars-MultiDex",
+        ":art-gtest-jars-MultiDexContainer",
         ":art-gtest-jars-MultiDexModifiedSecondary",
         ":art-gtest-jars-MultiDexUncompressedAligned",
         ":art-gtest-jars-MyClass",
