@@ -2112,6 +2112,14 @@ void Thread::DumpState(std::ostream& os, const Thread* thread, pid_t tid) {
     }
   }
 
+  int scheduler = sched_getscheduler(tid);
+  const char* sched_name = nullptr;
+  if (scheduler == SCHED_FIFO) {
+    sched_name = " SCHED_FIFO!";
+  } else if (scheduler == SCHED_RR) {
+    sched_name = " SCHED_RR!";
+  }
+
   std::string scheduler_group_name(GetSchedulerGroupName(tid));
   if (scheduler_group_name.empty()) {
     scheduler_group_name = "default";
@@ -2130,6 +2138,9 @@ void Thread::DumpState(std::ostream& os, const Thread* thread, pid_t tid) {
     os << " prio=" << priority
        << " tid=" << thread->GetThreadId()
        << " " << thread->GetState();
+    if (sched_name != nullptr) {
+      os << sched_name;
+    }
     if (thread->IsStillStarting()) {
       os << " (still starting up)";
     }
@@ -5125,7 +5136,7 @@ int Thread::SetNativeNiceness(int niceness) {
 int Thread::GetNativeNiceness() const {
   errno = 0;
   int niceness = getpriority(PRIO_PROCESS, static_cast<id_t>(GetTid()));
-  CHECK(niceness != -1 || errno == 0);
+  CHECK(niceness != -1 || errno == 0) << " " << strerror(errno);
   return niceness;
 }
 
