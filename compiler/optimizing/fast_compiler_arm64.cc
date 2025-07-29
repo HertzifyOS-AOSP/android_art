@@ -2301,11 +2301,11 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
       return BuildMove(
           instruction.VRegA_12x(), instruction.VRegB_12x(), DataType::Type::kReference, next);
     }
-    case Instruction::MOVE_OBJECT_16: {
+    case Instruction::MOVE_OBJECT_FROM16: {
       return BuildMove(
           instruction.VRegA_22x(), instruction.VRegB_22x(), DataType::Type::kReference, next);
     }
-    case Instruction::MOVE_OBJECT_FROM16: {
+    case Instruction::MOVE_OBJECT_16: {
       return BuildMove(
           instruction.VRegA_32x(), instruction.VRegB_32x(), DataType::Type::kReference, next);
     }
