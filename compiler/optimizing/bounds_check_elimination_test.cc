@@ -63,6 +63,7 @@ TEST_F(BoundsCheckEliminationTest, NarrowingRangeArrayBoundsElimination) {
   CreateGraph();
   HBasicBlock* entry = AddNewBlock();
   graph_->SetEntryBlock(entry);
+  MakeGoto(entry);
   HInstruction* parameter1 = MakeParam(DataType::Type::kReference);  // array
   HInstruction* parameter2 = MakeParam(DataType::Type::kInt32);  // i
 
@@ -79,6 +80,7 @@ TEST_F(BoundsCheckEliminationTest, NarrowingRangeArrayBoundsElimination) {
   HArrayLength* array_length = MakeArrayLength(block2, null_check);
   HBoundsCheck* bounds_check2 = MakeBoundsCheck(block2, parameter2, array_length);
   MakeArraySet(block2, null_check, bounds_check2, constant_1, DataType::Type::kInt32);
+  MakeGoto(block2);
 
   HBasicBlock* block3 = AddNewBlock();
   null_check = MakeNullCheck(block3, parameter1);
@@ -91,12 +93,14 @@ TEST_F(BoundsCheckEliminationTest, NarrowingRangeArrayBoundsElimination) {
   array_length = MakeArrayLength(block4, null_check);
   HBoundsCheck* bounds_check4 = MakeBoundsCheck(block4, parameter2, array_length);
   MakeArraySet(block4, null_check, bounds_check4, constant_1, DataType::Type::kInt32);
+  MakeGoto(block4);
 
   HBasicBlock* block5 = AddNewBlock();
   null_check = MakeNullCheck(block5, parameter1);
   array_length = MakeArrayLength(block5, null_check);
   HBoundsCheck* bounds_check5 = MakeBoundsCheck(block5, parameter2, array_length);
   MakeArraySet(block5, null_check, bounds_check5, constant_1, DataType::Type::kInt32);
+  MakeGoto(block5);
 
   HBasicBlock* exit = AddExitBlock();
   block2->AddSuccessor(exit);
@@ -125,6 +129,7 @@ TEST_F(BoundsCheckEliminationTest, OverflowArrayBoundsElimination) {
   CreateGraph();
   HBasicBlock* entry = AddNewBlock();
   graph_->SetEntryBlock(entry);
+  MakeGoto(entry);
   HInstruction* parameter1 = MakeParam(DataType::Type::kReference);  // array
   HInstruction* parameter2 = MakeParam(DataType::Type::kInt32);  // i
 
@@ -147,6 +152,7 @@ TEST_F(BoundsCheckEliminationTest, OverflowArrayBoundsElimination) {
   HBasicBlock* block3 = AddNewBlock();
   HBoundsCheck* bounds_check = MakeBoundsCheck(block3, add, array_length);
   MakeArraySet(block3, null_check, bounds_check, constant_1, DataType::Type::kInt32);
+  MakeGoto(block3);
 
   HBasicBlock* return_block = AddNewBlock();
   MakeReturnVoid(return_block);
@@ -173,6 +179,7 @@ TEST_F(BoundsCheckEliminationTest, UnderflowArrayBoundsElimination) {
   CreateGraph();
   HBasicBlock* entry = AddNewBlock();
   graph_->SetEntryBlock(entry);
+  MakeGoto(entry);
   HInstruction* parameter1 = MakeParam(DataType::Type::kReference);  // array
   HInstruction* parameter2 = MakeParam(DataType::Type::kInt32);  // i
 
@@ -197,6 +204,7 @@ TEST_F(BoundsCheckEliminationTest, UnderflowArrayBoundsElimination) {
   HBasicBlock* block3 = AddNewBlock();
   HBoundsCheck* bounds_check = MakeBoundsCheck(block3, sub2, array_length);
   MakeArraySet(block3, null_check, bounds_check, constant_1, DataType::Type::kInt32);
+  MakeGoto(block3);
 
   HBasicBlock* return_block = AddNewBlock();
   MakeReturnVoid(return_block);
