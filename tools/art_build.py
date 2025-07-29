@@ -104,6 +104,11 @@ ART_TARGET_PLATFORM_LIBS_WITH_FULL_PATH: List[str] = [
 ]
 
 
+def using_thin_manifest():
+  """Returns true if the source tree is checked out from a thin manifest."""
+  return not os.path.isdir("frameworks/base")
+
+
 def run_subprocess(
     command: List[str],
     cwd: Optional[str] = None,
@@ -831,32 +836,42 @@ class Builder:
             make_targets=all_boot_image_make_targets,
         )
     )
-    # HOST_I18N_DATA
-    self.add_target(
-        Target(
-            name="extract-host-i18n-data",
-            action=host_i18n_data_action,
-            make_targets=[I18N_APEX, "deapexer", "debugfs", "fsck.erofs"],
-        )
-    )
-    # HOST_TZDATA_DATA
-    self.add_target(
-        Target(
-            name="extract-host-tzdata-data",
-            action=host_tzdata_data_action,
-            make_targets=[TZDATA_APEX, "deapexer", "debugfs", "fsck.erofs"],
-        )
-    )
+
+    build_art_host_dependencies = [
+        "art_host_dependencies",
+        "host_core_img_outs",
+    ]
+    if using_thin_manifest():
+      # These dependencies are only necessary when building on the thin manifest
+      # where prebuilts are used for many libraries. In a full platform tree
+      # their source variants will ensure these files get built. Also, doing
+      # this in a full platform tree tends to overwrite the built files in the
+      # post-build actions, which can make the next incremental build invalidate
+      # a lot of other targets and hence do excessive rebuilding.
+      # HOST_I18N_DATA
+      self.add_target(
+          Target(
+              name="extract-host-i18n-data",
+              action=host_i18n_data_action,
+              make_targets=[I18N_APEX, "deapexer", "debugfs", "fsck.erofs"],
+          )
+      )
+      build_art_host_dependencies.append("extract-host-i18n-data")
+      # HOST_TZDATA_DATA
+      self.add_target(
+          Target(
+              name="extract-host-tzdata-data",
+              action=host_tzdata_data_action,
+              make_targets=[TZDATA_APEX, "deapexer", "debugfs", "fsck.erofs"],
+          )
+      )
+      build_art_host_dependencies.append("extract-host-tzdata-data")
+
     self.add_target(
         Target(
             name="build-art-host",
             make_targets=["art-script"],
-            dependencies=[
-                "art_host_dependencies",
-                "host_core_img_outs",
-                "extract-host-i18n-data",
-                "extract-host-tzdata-data",
-            ],
+            dependencies=build_art_host_dependencies,
         )
     )
     # build-art-host-gtests depends on build-art-host  and
@@ -865,7 +880,7 @@ class Builder:
     self.add_target(
         Target(
             name="build-art-host-gtests",
-            dependencies=["build-art-host", "extract-host-i18n-data"],
+            dependencies=["build-art-host"],
         )
     )
     # build-art-host-run-tests
@@ -873,7 +888,7 @@ class Builder:
     self.add_target(
         Target(
             name="build-art-host-run-tests",
-            dependencies=["build-art-host", "extract-host-i18n-data"],
+            dependencies=["build-art-host"],
             make_targets=(
                 art_test_host_run_test_deps
                 + ["art-run-test-host-data", "art-run-test-jvm-data"]
@@ -1170,15 +1185,14 @@ def _setup_env_and_get_primary_build_vars(
     print(error_msg_part2)
     sys.exit(1)
 
-  frameworks_base_dir_path = "frameworks/base"
-  if not os.path.isdir(frameworks_base_dir_path):
+  if using_thin_manifest():
     # This is often necessary for reduced manifest branches (e.g.,
     # master-art) to allow them to build successfully when certain
     # framework dependencies are not present in the source tree.
-    print(f"Info: '{frameworks_base_dir_path}' directory not found.")
     print(
-        "      Setting SOONG_ALLOW_MISSING_DEPENDENCIES=true and "
-        "TARGET_BUILD_UNBUNDLED=true for this session."
+        "Info: Using thin manifest - setting"
+        " SOONG_ALLOW_MISSING_DEPENDENCIES=true and"
+        " TARGET_BUILD_UNBUNDLED=true."
     )
     os.environ["SOONG_ALLOW_MISSING_DEPENDENCIES"] = "true"
     os.environ["TARGET_BUILD_UNBUNDLED"] = "true"
