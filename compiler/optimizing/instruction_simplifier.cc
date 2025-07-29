@@ -72,7 +72,6 @@ class InstructionSimplifierVisitor final : public CRTPGraphVisitor<InstructionSi
   bool TryDeMorganNegationFactoring(HBinaryOperation* op);
   bool TryHandleAssociativeAndCommutativeOperation(HBinaryOperation* instruction);
   bool TrySubtractionChainSimplification(HBinaryOperation* instruction);
-  bool TryCombineVecMultiplyAccumulate(HVecMul* mul);
   void TryToReuseDiv(HRem* rem);
 
   // Keep `ForwardVisit()` functions from base class visible except for those we replace below.
@@ -157,7 +156,6 @@ class InstructionSimplifierVisitor final : public CRTPGraphVisitor<InstructionSi
   void VisitInstanceOf(HInstanceOf* instruction);
   void VisitInvoke(HInvoke* invoke);
   void VisitDeoptimize(HDeoptimize* deoptimize);
-  void VisitVecMul(HVecMul* instruction);
 
   void SimplifyBoxUnbox(HInvoke* instruction, ArtField* field, DataType::Type type);
   void SimplifySystemArrayCopy(HInvoke* invoke);
@@ -327,92 +325,6 @@ bool InstructionSimplifierVisitor::TryDeMorganNegationFactoring(HBinaryOperation
   }
 
   return false;
-}
-
-bool InstructionSimplifierVisitor::TryCombineVecMultiplyAccumulate(HVecMul* mul) {
-  DataType::Type type = mul->GetPackedType();
-  InstructionSet isa = codegen_->GetInstructionSet();
-  switch (isa) {
-    case InstructionSet::kArm64:
-      if (!(type == DataType::Type::kUint8 ||
-            type == DataType::Type::kInt8 ||
-            type == DataType::Type::kUint16 ||
-            type == DataType::Type::kInt16 ||
-            type == DataType::Type::kInt32)) {
-        return false;
-      }
-      break;
-    default:
-      return false;
-  }
-
-  ArenaAllocator* allocator = GetGraph()->GetAllocator();
-  if (!mul->HasOnlyOneNonEnvironmentUse()) {
-    return false;
-  }
-  HInstruction* binop = mul->GetUses().front().GetUser();
-  if (!binop->IsVecAdd() && !binop->IsVecSub()) {
-    return false;
-  }
-
-  // Replace code looking like
-  //    VECMUL tmp, x, y
-  //    VECADD/SUB dst, acc, tmp
-  // with
-  //    VECMULACC dst, acc, x, y
-  // Note that we do not want to (unconditionally) perform the merge when the
-  // multiplication has multiple uses and it can be merged in all of them.
-  // Multiple uses could happen on the same control-flow path, and we would
-  // then increase the amount of work. In the future we could try to evaluate
-  // whether all uses are on different control-flow paths (using dominance and
-  // reverse-dominance information) and only perform the merge when they are.
-  HInstruction* accumulator = nullptr;
-  HVecBinaryOperation* vec_binop = binop->AsVecBinaryOperation();
-  HInstruction* binop_left = vec_binop->GetLeft();
-  HInstruction* binop_right = vec_binop->GetRight();
-  // This is always true since the `HVecMul` has only one use (which is checked above).
-  DCHECK_NE(binop_left, binop_right);
-  if (binop_right == mul) {
-    accumulator = binop_left;
-  } else {
-    DCHECK_EQ(binop_left, mul);
-    // Only addition is commutative.
-    if (!binop->IsVecAdd()) {
-      return false;
-    }
-    accumulator = binop_right;
-  }
-
-  DCHECK(accumulator != nullptr);
-  HInstruction::InstructionKind kind =
-      binop->IsVecAdd() ? HInstruction::kAdd : HInstruction::kSub;
-
-  bool predicated_simd = vec_binop->IsPredicated();
-  if (predicated_simd && !HVecOperation::HaveSamePredicate(vec_binop, mul)) {
-    return false;
-  }
-
-  HVecMultiplyAccumulate* mulacc =
-      new (allocator) HVecMultiplyAccumulate(allocator,
-                                             kind,
-                                             accumulator,
-                                             mul->GetLeft(),
-                                             mul->GetRight(),
-                                             vec_binop->GetPackedType(),
-                                             vec_binop->GetVectorLength(),
-                                             vec_binop->GetDexPc());
-
-
-
-  vec_binop->GetBlock()->ReplaceAndRemoveInstructionWith(vec_binop, mulacc);
-  if (predicated_simd) {
-    mulacc->SetGoverningPredicate(vec_binop->GetGoverningPredicate(),
-                                  vec_binop->GetPredicationKind());
-  }
-
-  DCHECK(!mul->HasUses());
-  mul->GetBlock()->RemoveInstruction(mul);
-  return true;
 }
 
 // Replace code looking like (x << N >>> N or x << N >> N):
@@ -3652,12 +3564,6 @@ bool InstructionSimplifierVisitor::TrySubtractionChainSimplification(
   block->ReplaceAndRemoveInstructionWith(instruction, z);
   RecordSimplification();
   return true;
-}
-
-void InstructionSimplifierVisitor::VisitVecMul(HVecMul* instruction) {
-  if (TryCombineVecMultiplyAccumulate(instruction)) {
-    RecordSimplification();
-  }
 }
 
 bool TryMergeNegatedInput(HBinaryOperation* op) {

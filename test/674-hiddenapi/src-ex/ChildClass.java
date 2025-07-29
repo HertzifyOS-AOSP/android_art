@@ -83,8 +83,14 @@ public class ChildClass {
       int childDomainOrdinal, boolean everythingSdked) throws Exception {
     System.load(libFileName);
 
-    parentDomain = DexDomain.values()[parentDomainOrdinal];
-    childDomain = DexDomain.values()[childDomainOrdinal];
+    DexDomain parentDomain = DexDomain.values()[parentDomainOrdinal];
+    DexDomain childDomain = DexDomain.values()[childDomainOrdinal];
+
+    if (childDomain == DexDomain.Application) {
+      registerAppJniApiCallers(JNI.class);
+    } else {
+      registerCorePlatformJniApiCallers(JNI.class);
+    }
 
     configMessage = "parentDomain=" + parentDomain.name() + ", childDomain=" + childDomain.name()
         + ", everythingSdked=" + everythingSdked;
@@ -102,7 +108,6 @@ public class ChildClass {
       throw new RuntimeException("Expected ChildClass " + (expectedChildInBoot ? "" : "not ") +
                                  "in boot class path");
     }
-    ChildClass.everythingSdked = everythingSdked;
 
     boolean isSameBoot = (isParentInBoot == isChildInBoot);
 
@@ -559,9 +564,8 @@ public class ChildClass {
         "." + name + " to not expose hidden modifiers");
   }
 
-  private static DexDomain parentDomain;
-  private static DexDomain childDomain;
-  private static boolean everythingSdked;
-
   private static String configMessage;
+
+  private static native void registerCorePlatformJniApiCallers(Class targetClass);
+  private static native void registerAppJniApiCallers(Class targetClass);
 }

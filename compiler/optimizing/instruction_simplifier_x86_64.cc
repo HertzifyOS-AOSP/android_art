@@ -13,6 +13,7 @@
  * limitations under the License.
  */
 
+#include "instruction_simplifier.h"
 #include "instruction_simplifier_x86_64.h"
 
 #include "code_generator_x86_64.h"
@@ -43,6 +44,7 @@ class InstructionSimplifierX86_64Visitor final
 
  private:
   void VisitAnd(HAnd* instruction);
+  void VisitSub(HSub* instruction);
   void VisitXor(HXor* instruction);
 
   CodeGeneratorX86_64* codegen_;
@@ -52,26 +54,35 @@ class InstructionSimplifierX86_64Visitor final
 };
 
 void InstructionSimplifierX86_64Visitor::VisitAnd(HAnd* instruction) {
-  if (TryCombineAndNot(instruction)) {
-    RecordSimplification();
-  } else if (TryGenerateResetLeastSetBit(instruction)) {
-    RecordSimplification();
+  if (HasAVX2()) {
+    if (TryCombineAndNot(instruction)) {
+      RecordSimplification();
+    } else if (TryGenerateResetLeastSetBit(instruction)) {
+      RecordSimplification();
+    }
+  }
+}
+
+void InstructionSimplifierX86_64Visitor::VisitSub(HSub* instruction) {
+  if (HasAVX2()) {
+    if (TryMergeWithAnd(instruction)) {
+      RecordSimplification();
+    }
   }
 }
 
 void InstructionSimplifierX86_64Visitor::VisitXor(HXor* instruction) {
-  if (TryGenerateMaskUptoLeastSetBit(instruction)) {
-    RecordSimplification();
+  if (HasAVX2()) {
+    if (TryGenerateMaskUptoLeastSetBit(instruction)) {
+      RecordSimplification();
+    }
   }
 }
 
 bool InstructionSimplifierX86_64::Run() {
   InstructionSimplifierX86_64Visitor visitor(graph_, codegen_, stats_);
-  if (visitor.HasAVX2()) {
-    visitor.VisitReversePostOrder();
-    return true;
-  }
-  return false;
+  visitor.VisitReversePostOrder();
+  return true;
 }
 }  // namespace x86_64
 }  // namespace art
