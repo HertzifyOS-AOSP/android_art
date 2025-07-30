@@ -1076,7 +1076,7 @@ class Heap {
       REQUIRES_SHARED(Locks::mutator_lock_);
 
   // Checks whether we should garbage collect:
-  enum NeedGc { kNeedGc, kNoNeedGc, kNeedGcThresholdCheck };
+  enum NeedGc { kNoNeedGc, kNeedGc, kNeedGcThresholdCheck };
   ALWAYS_INLINE NeedGc ShouldConcurrentGCForJava(size_t new_num_bytes_allocated);
   float NativeMemoryOverTarget(size_t current_native_bytes, bool is_gc_concurrent);
   void CheckGCForNative(Thread* self)
