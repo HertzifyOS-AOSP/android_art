@@ -74,7 +74,7 @@ public class PreRebootDexoptJob implements ArtServiceJobInterface {
     /** An arbitrary number. Must be unique among all jobs owned by the system uid. */
     public static final int JOB_ID = 27873781;
 
-    private static final long UPDATE_ENGINE_TIMEOUT_MS = 10000;
+    private static final long UPDATE_ENGINE_TIMEOUT_MS = 20000;
 
     @NonNull private final Injector mInjector;
 
