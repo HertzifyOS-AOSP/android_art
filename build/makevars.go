@@ -30,7 +30,6 @@ var (
 	prebuiltToolsForTests = []string{
 		"bin/clang",
 		"bin/clang-real",
-		"bin/clang.real",
 		"bin/llvm-addr2line",
 		"bin/llvm-dwarfdump",
 		"bin/llvm-objdump",

@@ -79,6 +79,8 @@
 #include "dex/art_dex_file_loader.h"
 #include "exec_utils.h"
 #include "gc/collector/mark_compact.h"
+#include "oat/oat.h"
+#include "oat/oat_file.h"
 #include "odr_artifacts.h"
 #include "odr_common.h"
 #include "odr_config.h"
@@ -86,6 +88,7 @@
 #include "odr_metrics.h"
 #include "odrefresh/odrefresh.h"
 #include "tools/cmdline_builder.h"
+#include "trace_common.h"
 
 namespace art {
 namespace odrefresh {
@@ -390,6 +393,26 @@ bool ArtifactsExist(const OdrArtifacts& artifacts,
       checked_artifacts->emplace_back(path);
     }
   }
+  return true;
+}
+
+bool CheckOatHeader(const std::string& filename, std::string* error_msg) {
+  std::unique_ptr<OatFile> oat_file(OatFile::Open(
+      /*zip_fd=*/-1, filename, filename, /*executable=*/false, /*low_4gb=*/false, error_msg));
+
+  if (oat_file.get() == nullptr) {
+    // This shouldn't happen except in tests. It is safe to return true here,
+    // since it isn't a valid oat file.
+    return true;
+  }
+
+  if (oat_file->GetOatHeader().IsProfileCodeEnabled() != ShouldEnableProfileCode()) {
+    *error_msg = ART_FORMAT("EnableProfileCode mismatch (oat file: {}, runtime: {})",
+                            oat_file->GetOatHeader().IsProfileCodeEnabled(),
+                            ShouldEnableProfileCode());
+    return false;
+  }
+
   return true;
 }
 
@@ -1054,6 +1077,9 @@ WARN_UNUSED bool OnDeviceRefresh::PrimaryBootImageExist(
   if (!ArtifactsExist(artifacts, /*check_art_file=*/true, error_msg, checked_artifacts)) {
     return false;
   }
+  if (!CheckOatHeader(artifacts.OatPath(), error_msg)) {
+    return false;
+  }
   // Prior to U, there was a split between the primary boot image and the extension on /system, so
   // they need to be checked separately. This does not apply to the boot image on /data.
   if (on_system && !IsAtLeastU()) {
@@ -1074,7 +1100,10 @@ WARN_UNUSED bool OnDeviceRefresh::BootImageMainlineExtensionExist(
     /*out*/ std::vector<std::string>* checked_artifacts) const {
   std::string path = GetBootImageMainlineExtensionPath(on_system, isa);
   OdrArtifacts artifacts = OdrArtifacts::ForBootImage(path);
-  return ArtifactsExist(artifacts, /*check_art_file=*/true, error_msg, checked_artifacts);
+  if (!ArtifactsExist(artifacts, /*check_art_file=*/true, error_msg, checked_artifacts)) {
+    return false;
+  }
+  return CheckOatHeader(artifacts.OatPath(), error_msg);
 }
 
 bool OnDeviceRefresh::SystemServerArtifactsExist(
@@ -1089,6 +1118,11 @@ bool OnDeviceRefresh::SystemServerArtifactsExist(
     const bool check_art_file = !on_system;
     std::string error_msg_tmp;
     if (!ArtifactsExist(artifacts, check_art_file, &error_msg_tmp, checked_artifacts)) {
+      jars_missing_artifacts->insert(jar_path);
+      *error_msg = error_msg->empty() ? error_msg_tmp : *error_msg + "\n" + error_msg_tmp;
+      continue;
+    }
+    if (!CheckOatHeader(artifacts.OatPath(), &error_msg_tmp)) {
       jars_missing_artifacts->insert(jar_path);
       *error_msg = error_msg->empty() ? error_msg_tmp : *error_msg + "\n" + error_msg_tmp;
     }

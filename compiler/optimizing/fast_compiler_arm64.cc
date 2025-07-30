@@ -274,17 +274,27 @@ class FastCompilerARM64 : public FastCompiler {
       uint32_t dest_reg, uint32_t src_reg, DataType::Type type, const Instruction* next);
   bool LoadMethod(Register reg, ArtMethod* method);
   void DoReadBarrierOn(Register reg, vixl::aarch64::Label* exit = nullptr, bool do_mr_check = true);
-  void DoWriteBarrierOn(Register holder, UseScratchRegisterScope& temps);
+  void DoWriteBarrierOn(Register holder,
+                        UseScratchRegisterScope& temps,
+                        bool overwrite_holder = false);
   bool CanGenerateCodeFor(ArtField* field, bool can_receiver_be_null)
       REQUIRES_SHARED(Locks::mutator_lock_);
   bool DoGet(const MemOperand& mem,
              uint16_t field_index,
-             Instruction::Code code,
+             Instruction::Code opcode,
              uint32_t dest_reg,
              bool can_receiver_be_null,
              bool is_object,
              uint32_t dex_pc,
              const Instruction* next);
+  bool DoPut(const MemOperand& mem,
+             Register holder,
+             ArtField* field,
+             Instruction::Code opcode,
+             int32_t source_reg,
+             bool can_receiver_be_null,
+             bool is_object,
+             uint32_t dex_pc);
   bool BuildArrayAccess(const Instruction& instruction,
                         uint32_t dex_pc,
                         bool is_put,
@@ -297,10 +307,11 @@ class FastCompilerARM64 : public FastCompiler {
   bool BuildInstanceFieldSet(const Instruction& instruction,
                              uint32_t dex_pc,
                              bool is_object);
-  bool BuildStaticFieldGet(const Instruction& instruction,
-                           uint32_t dex_pc,
-                           bool is_object,
-                           const Instruction* next);
+  bool BuildStaticFieldAccess(const Instruction& instruction,
+                              uint32_t dex_pc,
+                              bool is_object,
+                              bool is_put,
+                              const Instruction* next);
   void Div(Register dst, Register first, Register second, uint32_t dex_pc);
   void Rem(Register dst, Register first, Register second, uint32_t dex_pc);
 
@@ -1540,9 +1551,11 @@ void FastCompilerARM64::DoReadBarrierOn(Register reg,
   }
 }
 
-void FastCompilerARM64::DoWriteBarrierOn(Register holder, UseScratchRegisterScope& temps) {
+void FastCompilerARM64::DoWriteBarrierOn(Register holder,
+                                         UseScratchRegisterScope& temps,
+                                         bool overwrite_holder) {
   Register card = temps.AcquireX();
-  Register temp = temps.AcquireW();
+  Register temp = overwrite_holder ? holder : temps.AcquireW();
   __ Ldr(card, MemOperand(tr, Thread::CardTableOffset<kArm64PointerSize>().Int32Value()));
   __ Lsr(temp, holder, gc::accounting::CardTable::kCardShift);
   __ Strb(card, MemOperand(card, temp.X()));
@@ -1999,6 +2012,24 @@ bool FastCompilerARM64::BuildInstanceFieldSet(const Instruction& instruction,
   }
   MemOperand mem = HeapOperand(holder, field->GetOffset());
 
+  return DoPut(mem,
+               holder,
+               field,
+               instruction.Opcode(),
+               source_reg,
+               can_receiver_be_null,
+               is_object,
+               dex_pc);
+}
+
+bool FastCompilerARM64::DoPut(const MemOperand& mem,
+                              Register holder,
+                              ArtField* field,
+                              Instruction::Code opcode,
+                              int32_t source_reg,
+                              bool can_receiver_be_null,
+                              bool is_object,
+                              uint32_t dex_pc) {
   // Need one temp if the stored value is a constant.
   UseScratchRegisterScope temps(GetVIXLAssembler());
   Location src = vreg_locations_[source_reg];
@@ -2023,7 +2054,7 @@ bool FastCompilerARM64::BuildInstanceFieldSet(const Instruction& instruction,
     unimplemented_reason_ = "IPUTOnStackSlot";
     return false;
   }
-  if (instruction.Opcode() == Instruction::IPUT_OBJECT) {
+  if (is_object) {
     Register reg = WRegisterFrom(src);
     {
       // Ensure the pc position is recorded immediately after the store instruction.
@@ -2036,27 +2067,44 @@ bool FastCompilerARM64::BuildInstanceFieldSet(const Instruction& instruction,
     // If we assign a constant (only null for iput-object), no need for the write
     // barrier.
     if (!assigning_constant) {
+      {
+        ScopedObjectAccess soa(Thread::Current());
+        if (method_->GetDeclaringClass()->HasTypeChecksFailure() &&
+            field->ResolveType() == nullptr) {
+          soa.Self()->ClearException();
+          unimplemented_reason_ = "UnresolvedFieldType";
+          return false;
+        }
+      }
+      // For static access, the holder is already in a temporary, and we can
+      // overwrite it.
+      bool overwrite_holder = (Instruction::FormatOf(opcode) == Instruction::k21c);
       vixl::aarch64::Label exit;
       __ Cbz(reg, &exit);
-      DoWriteBarrierOn(holder, temps);
+      DoWriteBarrierOn(holder, temps, overwrite_holder);
       __ Bind(&exit);
     }
     return true;
   }
   // Ensure the pc position is recorded immediately after the store instruction.
   EmissionCheckScope guard(GetVIXLAssembler(), kMaxMacroInstructionSizeInBytes);
-  switch (instruction.Opcode()) {
+  switch (opcode) {
     case Instruction::IPUT_BOOLEAN:
-    case Instruction::IPUT_BYTE: {
+    case Instruction::IPUT_BYTE:
+    case Instruction::SPUT_BOOLEAN:
+    case Instruction::SPUT_BYTE: {
       __ Strb(WRegisterFrom(src), mem);
       break;
     }
     case Instruction::IPUT_CHAR:
-    case Instruction::IPUT_SHORT: {
+    case Instruction::IPUT_SHORT:
+    case Instruction::SPUT_CHAR:
+    case Instruction::SPUT_SHORT: {
       __ Strh(WRegisterFrom(src), mem);
       break;
     }
-    case Instruction::IPUT: {
+    case Instruction::IPUT:
+    case Instruction::SPUT: {
       if (src.IsFpuRegister()) {
         __ Str(SRegisterFrom(src), mem);
       } else {
@@ -2064,12 +2112,13 @@ bool FastCompilerARM64::BuildInstanceFieldSet(const Instruction& instruction,
       }
       break;
     }
-    case Instruction::IPUT_WIDE: {
+    case Instruction::IPUT_WIDE:
+    case Instruction::SPUT_WIDE: {
       __ Str(XRegisterFrom(src), mem);
       break;
     }
     default:
-      unimplemented_reason_ = instruction.Name();
+      unimplemented_reason_ = Instruction::Name(opcode);
       return false;
   }
   if (can_receiver_be_null) {
@@ -2078,12 +2127,13 @@ bool FastCompilerARM64::BuildInstanceFieldSet(const Instruction& instruction,
   return true;
 }
 
-bool FastCompilerARM64::BuildStaticFieldGet(const Instruction& instruction,
-                                            uint32_t dex_pc,
-                                            bool is_object,
-                                            const Instruction* next) {
+bool FastCompilerARM64::BuildStaticFieldAccess(const Instruction& instruction,
+                                               uint32_t dex_pc,
+                                               bool is_object,
+                                               bool is_put,
+                                               const Instruction* next) {
   if (Runtime::Current()->IsAotCompiler()) {
-    unimplemented_reason_ = "AOTSGet";
+    unimplemented_reason_ = "AOTStaticFieldAccess";
     return false;
   }
   // We need a frame for the read barrier.
@@ -2102,14 +2152,14 @@ bool FastCompilerARM64::BuildStaticFieldGet(const Instruction& instruction,
                                          field_index,
                                          method_,
                                          /* is_static= */ true,
-                                         /* is_put= */ false,
+                                         is_put,
                                          /* resolve_field_type= */ 0u);
     if (!CanGenerateCodeFor(field, /* can_receiver_be_null= */ false)) {
       return false;
     }
     Handle<mirror::Class> h_klass = handles_->NewHandle(field->GetDeclaringClass());
     if (!h_klass->IsVisiblyInitialized()) {
-      unimplemented_reason_ = "UninitializedSget";
+      unimplemented_reason_ = "UninitializedStaticAccess";
       return false;
     }
     __ Ldr(temp.W(), jit_patches_.DeduplicateJitClassLiteral(h_klass->GetDexFile(),
@@ -2120,17 +2170,24 @@ bool FastCompilerARM64::BuildStaticFieldGet(const Instruction& instruction,
   __ Ldr(temp.W(), MemOperand(temp.X()));
   DoReadBarrierOn(temp);
   MemOperand mem = HeapOperand(temp.W(), field->GetOffset());
-  if (!DoGet(mem,
-             field_index,
-             instruction.Opcode(),
-             source_or_dest_reg,
-             /* can_receiver_be_null= */ false,
-             is_object,
-             dex_pc,
-             next)) {
-    return false;
+  if (is_put) {
+    return DoPut(mem,
+                 temp,
+                 field,
+                 instruction.Opcode(),
+                 source_or_dest_reg,
+                 /* can_receiver_be_null= */ false,
+                 is_object,
+                 dex_pc);
   }
-  return true;
+  return DoGet(mem,
+               field_index,
+               instruction.Opcode(),
+               source_or_dest_reg,
+               /* can_receiver_be_null= */ false,
+               is_object,
+               dex_pc,
+               next);
 }
 
 void FastCompilerARM64::Div(Register dst, Register first, Register second, uint32_t dex_pc) {
@@ -2933,17 +2990,19 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
     case Instruction::SGET_BYTE:
     case Instruction::SGET_CHAR:
     case Instruction::SGET_SHORT: {
-      return BuildStaticFieldGet(instruction, dex_pc, is_object, next);
+      return BuildStaticFieldAccess(instruction, dex_pc, is_object, /* is_put= */ false, next);
     }
 
+    case Instruction::SPUT_OBJECT:
+      is_object = true;
+      FALLTHROUGH_INTENDED;
     case Instruction::SPUT:
     case Instruction::SPUT_WIDE:
-    case Instruction::SPUT_OBJECT:
     case Instruction::SPUT_BOOLEAN:
     case Instruction::SPUT_BYTE:
     case Instruction::SPUT_CHAR:
     case Instruction::SPUT_SHORT: {
-      break;
+      return BuildStaticFieldAccess(instruction, dex_pc, is_object, /* is_put= */ true, next);
     }
 
 #define ARRAY_XX(kind, type)                                                         \
