@@ -123,6 +123,7 @@ pid_t ThreadList::GetLockOwner() {
 void ThreadList::DumpNativeStacks(std::ostream& os) {
   MutexLock mu(Thread::Current(), *Locks::thread_list_lock_);
   unwindstack::AndroidLocalUnwinder unwinder;
+  unwinder.set_check_global_elf_cache(true);
   for (const auto& thread : list_) {
     os << "DUMPING THREAD " << thread->GetTid() << "\n";
     DumpNativeStack(os, unwinder, thread->GetTid(), "\t");
@@ -196,6 +197,7 @@ class DumpCheckpoint final : public Closure {
         barrier_(0, /*verify_count_on_shutdown=*/false),
         unwinder_(std::vector<std::string>{}, std::vector<std::string> {"oat", "odex"}),
         dump_native_stack_(dump_native_stack) {
+    unwinder_.set_check_global_elf_cache(true);
   }
 
   void Run(Thread* thread) override {
