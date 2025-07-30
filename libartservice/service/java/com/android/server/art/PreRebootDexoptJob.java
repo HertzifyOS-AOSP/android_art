@@ -205,7 +205,7 @@ public class PreRebootDexoptJob implements ArtServiceJobInterface {
      * @param otaSlot The slot that contains the OTA update, "_a" or "_b", or null for a Mainline
      *         update.
      */
-    public synchronized void onUpdateReady(@Nullable String otaSlot) {
+    public void onUpdateReady(@Nullable String otaSlot) {
         // `onUpdateReadyImpl` can take time, especially on `resetLocked` when there are staged
         // files from a previous run to be cleaned up, so we put it on a separate thread.
         mSerializedExecutor.execute(() -> onUpdateReadyImpl(otaSlot));
