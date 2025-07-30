@@ -81,10 +81,6 @@ void StartupCompletedTask::DeleteStartupDexCaches(Thread* self, bool called_by_g
 
   ScopedTrace trace("Releasing dex caches and app image spaces metadata");
 
-  static struct EmptyClosure : Closure {
-    void Run([[maybe_unused]] Thread* thread) override {}
-  } closure;
-
   // Fetch the startup linear alloc so no other thread tries to allocate there.
   std::unique_ptr<LinearAlloc> startup_linear_alloc(runtime->ReleaseStartupLinearAlloc());
   // No thread could be allocating arrays or accessing dex caches when this
@@ -102,7 +98,7 @@ void StartupCompletedTask::DeleteStartupDexCaches(Thread* self, bool called_by_g
   // With this checkpoint, 3) cannot happen as T0 waits for T1 to reach the
   // checkpoint.
   if (run_checkpoints) {
-    runtime->GetThreadList()->RunCheckpoint(&closure);
+    runtime->GetThreadList()->RunEmptyCheckpoint();
   }
 
   {
@@ -116,7 +112,7 @@ void StartupCompletedTask::DeleteStartupDexCaches(Thread* self, bool called_by_g
   // - accessing the image space metadata section when we madvise it
   // - accessing dex caches when we free them
   if (run_checkpoints) {
-    runtime->GetThreadList()->RunCheckpoint(&closure);
+    runtime->GetThreadList()->RunEmptyCheckpoint();
   }
 
   // If this isn't the GC calling `DeleteStartupDexCaches` and a GC may be
