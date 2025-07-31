@@ -17,6 +17,8 @@
 #ifndef ART_RUNTIME_HIDDEN_API_H_
 #define ART_RUNTIME_HIDDEN_API_H_
 
+#include <ostream>
+
 #include "art_field.h"
 #include "art_method.h"
 #include "base/hiddenapi_domain.h"
@@ -69,6 +71,10 @@ enum class AccessMethod {
   kJNI = 2,
   kLinking = 3,
 };
+
+inline bool IsCheckOnlyMethod(AccessMethod access_method) {
+  return access_method == AccessMethod::kCheck || access_method == AccessMethod::kCheckWithPolicy;
+}
 
 // Represents the API domain of a caller/callee.
 class AccessContext {
@@ -154,6 +160,11 @@ class AccessContext {
   // Computed domain of the caller/callee.
   const Domain domain_;
 };
+
+std::ostream& operator<<(std::ostream&, EnforcementPolicy);
+std::ostream& operator<<(std::ostream&, AccessMethod);
+std::ostream& operator<<(std::ostream&, Domain);
+std::ostream& operator<<(std::ostream&, const AccessContext&);
 
 class ScopedHiddenApiEnforcementPolicySetting {
  public:
