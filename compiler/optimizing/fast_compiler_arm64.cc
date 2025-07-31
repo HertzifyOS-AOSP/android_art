@@ -625,25 +625,88 @@ bool FastCompilerARM64::MoveLocation(Location destination,
         // Note: the destination may be 64bits, but that's ok.
         __ Mov(dst, source.GetConstant()->AsIntConstant()->GetValue());
         return true;
-      } else if (source.GetConstant()->IsLongConstant()) {
-        DCHECK_EQ(dst_type, DataType::Type::kInt64);
-        DCHECK(dst.Is64Bits());
-        __ Mov(dst, source.GetConstant()->AsLongConstant()->GetValue());
-        return true;
       }
+      DCHECK(source.GetConstant()->IsLongConstant());
+      DCHECK_EQ(dst_type, DataType::Type::kInt64);
+      DCHECK(dst.Is64Bits());
+      __ Mov(dst, source.GetConstant()->AsLongConstant()->GetValue());
+      return true;
     }
     if (source.IsStackSlot() || source.IsDoubleStackSlot()) {
       DCHECK(dst.Is64Bits() == source.IsDoubleStackSlot());
       __ Ldr(dst, StackOperandFrom(source));
       return true;
     }
-  }
-  if (source.IsFpuRegister() || destination.IsFpuRegister()) {
-    unimplemented_reason_ = "MoveFpuLocation";
+    if (source.IsFpuRegister()) {
+      // FPU to core register move (conversion).
+      VRegister src = (dst_type == DataType::Type::kInt64)
+          ? DRegisterFrom(source)
+          : SRegisterFrom(source);
+      __ Fmov(dst, src);
+      return true;
+    }
+    unimplemented_reason_ = "UnimplementedSourceForRegisterDestination";
     return false;
   }
 
-  unimplemented_reason_ = "UnimplementedMoveLocation";
+  if (destination.IsFpuRegister()) {
+    VRegister dst = (dst_type == DataType::Type::kFloat64)
+        ? DRegisterFrom(destination)
+        : SRegisterFrom(destination);
+    if (source.IsFpuRegister()) {
+      VRegister src = (dst_type == DataType::Type::kFloat64)
+          ? DRegisterFrom(source)
+          : SRegisterFrom(source);
+      __ Fmov(dst, src);
+      return true;
+    }
+    if (source.IsStackSlot() || source.IsDoubleStackSlot()) {
+      __ Ldr(dst, StackOperandFrom(source));
+      return true;
+    }
+    if (source.IsRegister()) {
+      Register src = RegisterFrom(
+          source, dst.Is64Bits() ? DataType::Type::kInt64 : DataType::Type::kInt32);
+      __ Fmov(dst, src);
+      return true;
+    }
+    if (source.IsConstant()) {
+      if (source.GetConstant()->IsIntConstant()) {
+        // Note: the destination may be 64bits, but that's ok.
+        __ Fmov(dst, bit_cast<float, int32_t>(source.GetConstant()->AsIntConstant()->GetValue()));
+        return true;
+      }
+      DCHECK(source.GetConstant()->IsLongConstant());
+      DCHECK_EQ(dst_type, DataType::Type::kFloat64);
+      DCHECK(dst.Is64Bits());
+      __ Fmov(dst, bit_cast<double, int64_t>(source.GetConstant()->AsLongConstant()->GetValue()));
+      return true;
+    }
+    unimplemented_reason_ = "UnimplementedSourceForFPURegisterDestination";
+    return false;
+  }
+
+  if (destination.IsStackSlot() || destination.IsDoubleStackSlot()) {
+    if (source.IsRegister()) {
+      DataType::Type src_type = DataType::Is64BitType(dst_type)
+          ? DataType::Type::kInt64
+          : DataType::Type::kInt32;
+      Register src = RegisterFrom(source, src_type);
+      __ Str(src, StackOperandFrom(destination));
+      return true;
+    }
+    if (source.IsFpuRegister()) {
+      VRegister src = DataType::Is64BitType(dst_type)
+          ? DRegisterFrom(source)
+          : SRegisterFrom(source);
+      __ Str(src, StackOperandFrom(destination));
+      return true;
+    }
+    unimplemented_reason_ = "UnimplementedSourceForStackDestination";
+    return false;
+  }
+
+  unimplemented_reason_ = "UnimplementedDestinationLocation";
   return false;
 }
 
@@ -658,72 +721,82 @@ Location FastCompilerARM64::CreateNewRegisterLocation(uint32_t reg,
     InvokeDexCallingConventionVisitorARM64 convention;
     vreg_locations_[reg] = convention.GetReturnLocation(return_type_);
     return vreg_locations_[reg];
-  } else if (vreg_locations_[reg].IsStackSlot() ||
-             vreg_locations_[reg].IsDoubleStackSlot()) {
-    unimplemented_reason_ = "MoveStackSlot";
+  }
+
+  if (vreg_locations_[reg].IsStackSlot() || vreg_locations_[reg].IsDoubleStackSlot()) {
+    unimplemented_reason_ = "NewRegisterFromStackSlot";
     // Return a phony location.
     return DataType::IsFloatingPointType(type)
         ? Location::FpuRegisterLocation(1)
         : Location::RegisterLocation(1);
-  } else if (DataType::IsFloatingPointType(type)) {
+  }
+
+  if (DataType::IsFloatingPointType(type)) {
     if (vreg_locations_[reg].IsFpuRegister()) {
       // Re-use existing register.
       return vreg_locations_[reg];
-    } else if (has_frame_) {
-      // TODO: Regenerate the method with floating point support.
-      unimplemented_reason_ = "FpuRegisterAllocation";
-      vreg_locations_[reg] = Location::FpuRegisterLocation(1);
-      return vreg_locations_[reg];
-    } else {
-      vreg_locations_[reg] =
-          Location::FpuRegisterLocation(kAvailableTempFpuRegisters[reg].GetCode());
-      return vreg_locations_[reg];
     }
-  } else if (vreg_locations_[reg].IsRegister()) {
-    // Re-use existing register.
-    return vreg_locations_[reg];
-  } else {
-    // Get the associated register with `reg`.
     uint32_t register_code = has_frame_
-        ? kAvailableCalleeSaveRegisters[reg].GetCode()
-        : kAvailableTempRegisters[reg].GetCode();
-    vreg_locations_[reg] = Location::RegisterLocation(register_code);
+        ? kAvailableCalleeSaveFpuRegisters[reg].GetCode()
+        : kAvailableTempFpuRegisters[reg].GetCode();
+    vreg_locations_[reg] = Location::FpuRegisterLocation(register_code);
     return vreg_locations_[reg];
   }
+
+  if (vreg_locations_[reg].IsRegister()) {
+    // Re-use existing register.
+    return vreg_locations_[reg];
+  }
+
+  uint32_t register_code = has_frame_
+      ? kAvailableCalleeSaveRegisters[reg].GetCode()
+      : kAvailableTempRegisters[reg].GetCode();
+  vreg_locations_[reg] = Location::RegisterLocation(register_code);
+  return vreg_locations_[reg];
 }
 
 Location FastCompilerARM64::GetExistingRegisterLocation(uint32_t reg, DataType::Type type) {
-  if (vreg_locations_[reg].IsStackSlot() || vreg_locations_[reg].IsDoubleStackSlot()) {
-    unimplemented_reason_ = "MoveStackSlot";
+  if (vreg_locations_[reg].IsInvalid()) {
+    unimplemented_reason_ = "UnverifiedDeadCode";
     // Return a phony location.
     return DataType::IsFloatingPointType(type)
         ? Location::FpuRegisterLocation(1)
         : Location::RegisterLocation(1);
-  } else if (DataType::IsFloatingPointType(type)) {
+  }
+  if (vreg_locations_[reg].IsStackSlot() || vreg_locations_[reg].IsDoubleStackSlot()) {
+    unimplemented_reason_ = "ExistingRegisterFromStackSlot";
+    // Return a phony location.
+    return DataType::IsFloatingPointType(type)
+        ? Location::FpuRegisterLocation(1)
+        : Location::RegisterLocation(1);
+  }
+
+  if (DataType::IsFloatingPointType(type)) {
     if (vreg_locations_[reg].IsFpuRegister()) {
       return vreg_locations_[reg];
-    } else {
-      // TODO: Regenerate the method with floating point support.
-      unimplemented_reason_ = "FpuRegisterAllocation";
-      vreg_locations_[reg] = Location::FpuRegisterLocation(1);
-      return vreg_locations_[reg];
     }
-  } else if (vreg_locations_[reg].IsRegister()) {
-    return vreg_locations_[reg];
-  } else if (vreg_locations_[reg].IsConstant()) {
     uint32_t register_code = has_frame_
-        ? kAvailableCalleeSaveRegisters[reg].GetCode()
-        : kAvailableTempRegisters[reg].GetCode();
-    Location new_location = Location::RegisterLocation(register_code);
+        ? kAvailableCalleeSaveFpuRegisters[reg].GetCode()
+        : kAvailableTempFpuRegisters[reg].GetCode();
+    Location new_location = Location::FpuRegisterLocation(register_code);
     bool res = MoveLocation(new_location, vreg_locations_[reg], type);
     DCHECK(res);
     vreg_locations_[reg] = new_location;
     return new_location;
-  } else {
-    unimplemented_reason_ = "UnknownLocation";
-    vreg_locations_[reg] = Location::RegisterLocation(1);
-    return Location::RegisterLocation(1);
   }
+
+  if (vreg_locations_[reg].IsRegister()) {
+    return vreg_locations_[reg];
+  }
+
+  uint32_t register_code = has_frame_
+      ? kAvailableCalleeSaveRegisters[reg].GetCode()
+      : kAvailableTempRegisters[reg].GetCode();
+  Location new_location = Location::RegisterLocation(register_code);
+  bool res = MoveLocation(new_location, vreg_locations_[reg], type);
+  DCHECK(res);
+  vreg_locations_[reg] = new_location;
+  return new_location;
 }
 
 void FastCompilerARM64::RecordPcInfo(uint32_t dex_pc) {
@@ -824,11 +897,8 @@ bool FastCompilerARM64::EnsureHasFrame() {
   for (int i = 0; i < number_of_vregs; ++i) {
     // Assume any vreg will be held in a callee-save register.
     core_spill_mask_ |= (1 << kAvailableCalleeSaveRegisters[i].GetCode());
-    if (vreg_locations_[i].IsFpuRegister()) {
-      // TODO: Re-generate method with floating points.
-      unimplemented_reason_ = "FloatingPoint";
-      return false;
-    }
+    // TODO: do this lazily for floats, and recompile?
+    fpu_spill_mask_ |= (1 << kAvailableCalleeSaveFpuRegisters[i].GetCode());
   }
   core_spill_mask_ |= (1 << lr.GetCode());
 
@@ -882,7 +952,7 @@ bool FastCompilerARM64::EnsureHasFrame() {
     } else if (vreg_locations_[i].IsConstant() || vreg_locations_[i].IsInvalid()) {
       // Nothing to do.
     } else {
-      unimplemented_reason_ = "Unhandled location";
+      unimplemented_reason_ = "UnhandledLocation";
       return false;
     }
   }
@@ -2114,7 +2184,11 @@ bool FastCompilerARM64::DoPut(const MemOperand& mem,
     }
     case Instruction::IPUT_WIDE:
     case Instruction::SPUT_WIDE: {
-      __ Str(XRegisterFrom(src), mem);
+      if (src.IsFpuRegister()) {
+        __ Str(DRegisterFrom(src), mem);
+      } else {
+        __ Str(XRegisterFrom(src), mem);
+      }
       break;
     }
     default:
