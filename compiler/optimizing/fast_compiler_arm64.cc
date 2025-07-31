@@ -211,8 +211,11 @@ class FastCompilerARM64 : public FastCompiler {
   // Record a stack map at the given dex_pc.
   void RecordPcInfo(uint32_t dex_pc);
 
-  // Generate code to move from one location to another.
-  bool MoveLocation(Location destination, Location source, DataType::Type dst_type);
+  // Generate code to move from one location to another. Note that `hint_type`
+  // is only used for the size of the type (64 or 32 bits), as some operations
+  // come untyped and we default to integer for such operations. The
+  // destination and the source will know the type.
+  bool MoveLocation(Location destination, Location source, DataType::Type hint_type);
 
   // Get a register location for the dex register `reg`. Saves the location into
   // `vreg_locations_` for next uses of `reg`.
@@ -610,14 +613,14 @@ bool FastCompilerARM64::ProcessInstructions() {
 
 bool FastCompilerARM64::MoveLocation(Location destination,
                                      Location source,
-                                     DataType::Type dst_type) {
+                                     DataType::Type hint_type) {
   if (source.Equals(destination)) {
     return true;
   }
   if (destination.IsRegister()) {
-    Register dst = RegisterFrom(destination, dst_type);
+    Register dst = RegisterFrom(destination, hint_type);
     if (source.IsRegister()) {
-      __ Mov(dst, RegisterFrom(source, dst_type));
+      __ Mov(dst, RegisterFrom(source, hint_type));
       return true;
     }
     if (source.IsConstant()) {
@@ -627,7 +630,6 @@ bool FastCompilerARM64::MoveLocation(Location destination,
         return true;
       }
       DCHECK(source.GetConstant()->IsLongConstant());
-      DCHECK_EQ(dst_type, DataType::Type::kInt64);
       DCHECK(dst.Is64Bits());
       __ Mov(dst, source.GetConstant()->AsLongConstant()->GetValue());
       return true;
@@ -639,7 +641,7 @@ bool FastCompilerARM64::MoveLocation(Location destination,
     }
     if (source.IsFpuRegister()) {
       // FPU to core register move (conversion).
-      VRegister src = (dst_type == DataType::Type::kInt64)
+      VRegister src = DataType::Is64BitType(hint_type)
           ? DRegisterFrom(source)
           : SRegisterFrom(source);
       __ Fmov(dst, src);
@@ -650,11 +652,11 @@ bool FastCompilerARM64::MoveLocation(Location destination,
   }
 
   if (destination.IsFpuRegister()) {
-    VRegister dst = (dst_type == DataType::Type::kFloat64)
+    VRegister dst = DataType::Is64BitType(hint_type)
         ? DRegisterFrom(destination)
         : SRegisterFrom(destination);
     if (source.IsFpuRegister()) {
-      VRegister src = (dst_type == DataType::Type::kFloat64)
+      VRegister src = DataType::Is64BitType(hint_type)
           ? DRegisterFrom(source)
           : SRegisterFrom(source);
       __ Fmov(dst, src);
@@ -677,7 +679,6 @@ bool FastCompilerARM64::MoveLocation(Location destination,
         return true;
       }
       DCHECK(source.GetConstant()->IsLongConstant());
-      DCHECK_EQ(dst_type, DataType::Type::kFloat64);
       DCHECK(dst.Is64Bits());
       __ Fmov(dst, bit_cast<double, int64_t>(source.GetConstant()->AsLongConstant()->GetValue()));
       return true;
@@ -688,7 +689,7 @@ bool FastCompilerARM64::MoveLocation(Location destination,
 
   if (destination.IsStackSlot() || destination.IsDoubleStackSlot()) {
     if (source.IsRegister()) {
-      DataType::Type src_type = DataType::Is64BitType(dst_type)
+      DataType::Type src_type = DataType::Is64BitType(hint_type)
           ? DataType::Type::kInt64
           : DataType::Type::kInt32;
       Register src = RegisterFrom(source, src_type);
@@ -696,7 +697,7 @@ bool FastCompilerARM64::MoveLocation(Location destination,
       return true;
     }
     if (source.IsFpuRegister()) {
-      VRegister src = DataType::Is64BitType(dst_type)
+      VRegister src = DataType::Is64BitType(hint_type)
           ? DRegisterFrom(source)
           : SRegisterFrom(source);
       __ Str(src, StackOperandFrom(destination));
@@ -2422,10 +2423,19 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
           instruction.VRegA_32x(), instruction.VRegB_32x(), DataType::Type::kInt32, next);
     }
 
-    case Instruction::MOVE_WIDE:
-    case Instruction::MOVE_WIDE_FROM16:
+    case Instruction::MOVE_WIDE: {
+      return BuildMove(
+          instruction.VRegA_12x(), instruction.VRegB_12x(), DataType::Type::kInt64, next);
+    }
+
+    case Instruction::MOVE_WIDE_FROM16: {
+      return BuildMove(
+          instruction.VRegA_22x(), instruction.VRegB_22x(), DataType::Type::kInt64, next);
+    }
+
     case Instruction::MOVE_WIDE_16: {
-      break;
+      return BuildMove(
+          instruction.VRegA_32x(), instruction.VRegB_32x(), DataType::Type::kInt64, next);
     }
 
     case Instruction::MOVE_OBJECT: {
