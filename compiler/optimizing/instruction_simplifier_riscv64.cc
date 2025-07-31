@@ -36,66 +36,65 @@ class InstructionSimplifierRiscv64Visitor final : public HGraphVisitor {
   void VisitBasicBlock(HBasicBlock* block) override {
     for (HInstructionIteratorPrefetchNext it(block->GetInstructions()); !it.Done(); it.Advance()) {
       HInstruction* instruction = it.Current();
-      if (instruction->IsInBlock()) {
-        Dispatch(instruction);
-      }
+      HInstruction* next = instruction->GetNext();
+      Dispatch(instruction);
+      DCHECK_IMPLIES(next != nullptr, next->IsInBlock()) << instruction->DebugName();
     }
   }
 
   // Replace Add which has Shl with distance of 1 or 2 or 3 with Riscv64ShiftAdd
-  bool TryReplaceAddsWithShiftAdds(HShl* shl) {
+  bool TryReplaceAddShlWithShiftAdd(HAdd* add, HShl* shl, HInstruction* add_other_input) {
     // There is no reason to replace Int32 Shl+Add with ShiftAdd because of
     // additional sign-extension required.
     if (shl->GetType() != DataType::Type::kInt64) {
       return false;
     }
 
-    if (!shl->GetRight()->IsConstant()) {
+    DCHECK_EQ(add->GetType(), DataType::Type::kInt64)
+        << "Add must be the same 64 bit type as the input";
+
+    // The bytecode does not permit the shift distance to come from a wide variable.
+    DCHECK_EQ(shl->GetRight()->IsConstant(), shl->GetRight()->IsIntConstant());
+    if (!shl->GetRight()->IsIntConstant()) {
       return false;
     }
-
-    // The bytecode does not permit the shift distance to come from a wide variable
-    DCHECK(shl->GetRight()->IsIntConstant());
 
     const int32_t distance = shl->GetRight()->AsIntConstant()->GetValue();
     if (distance < 1 || distance > 3) {
       return false;
     }
 
-    bool replaced = false;
-
-    for (const HUseListNode<HInstruction*>& use : shl->GetUses()) {
-      HInstruction* user = use.GetUser();
-
-      if (!user->IsAdd()) {
-        continue;
-      }
-      HAdd* add = user->AsAdd();
-      HInstruction* left = add->GetLeft();
-      HInstruction* right = add->GetRight();
-      DCHECK_EQ(add->GetType(), DataType::Type::kInt64)
-          << "Replaceable Add must be the same 64 bit type as the input";
-
-      // If the HAdd to replace has both inputs the same HShl<1|2|3>, then
-      // don't perform the optimization. The processor will not be able to execute
-      // these shifts parallel which is the purpose of the replace below.
-      if (left == right) {
-        continue;
-      }
-
-      HInstruction* add_other_input = left == shl ? right : left;
-      HRiscv64ShiftAdd* shift_add = new (GetGraph()->GetAllocator())
-          HRiscv64ShiftAdd(shl->GetLeft(), add_other_input, distance);
-
-      add->GetBlock()->ReplaceAndRemoveInstructionWith(add, shift_add);
-      replaced = true;
+    // If the HAdd to replace has both inputs the same HShl<1|2|3>, then
+    // don't perform the optimization. The processor will not be able to execute
+    // these shifts parallel which is the purpose of the replace below.
+    if (shl == add_other_input) {
+      return false;
     }
+
+    HRiscv64ShiftAdd* shift_add = new (GetGraph()->GetAllocator())
+        HRiscv64ShiftAdd(shl->GetLeft(), add_other_input, distance);
+
+    add->GetBlock()->ReplaceAndRemoveInstructionWith(add, shift_add);
 
     if (!shl->HasUses()) {
       shl->GetBlock()->RemoveInstruction(shl);
     }
 
-    return replaced;
+    return true;
+  }
+
+  // Replace code looking like
+  //    SHL tmp, a, 1 or 2 or 3
+  //    ADD dst, tmp, b
+  // with
+  //    Riscv64ShiftAdd dst, a, b
+  void VisitAdd(HAdd* add) override {
+    HInstruction* left = add->GetLeft();
+    HInstruction* right = add->GetRight();
+    if ((left->IsShl() && TryReplaceAddShlWithShiftAdd(add, left->AsShl(), right)) ||
+        (right->IsShl() && TryReplaceAddShlWithShiftAdd(add, right->AsShl(), left))) {
+      RecordSimplification();
+    }
   }
 
   bool TryReplaceShrAndWithBitExtract(HAnd* op) {
@@ -306,17 +305,6 @@ class InstructionSimplifierRiscv64Visitor final : public HGraphVisitor {
     if (TryMergeNegatedInput(inst)) {
       RecordSimplification();
     } else if (TryOptimizeWithBitManipulation(inst)) {
-      RecordSimplification();
-    }
-  }
-
-  // Replace code looking like
-  //    SHL tmp, a, 1 or 2 or 3
-  //    ADD dst, tmp, b
-  // with
-  //    Riscv64ShiftAdd dst, a, b
-  void VisitShl(HShl* inst) override {
-    if (TryReplaceAddsWithShiftAdds(inst)) {
       RecordSimplification();
     }
   }
