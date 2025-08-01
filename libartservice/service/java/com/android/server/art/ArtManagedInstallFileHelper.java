@@ -90,12 +90,11 @@ public final class ArtManagedInstallFileHelper {
     public static @NonNull List<String> filterPathsForApk(
             @NonNull List<String> paths, @NonNull String apkPath) {
         Set<String> candidates =
-                FILE_TYPES.stream()
-                        .flatMap(ext
-                                -> ext.equals(ArtConstants.SECURE_DEX_METADATA_FILE_EXT)
-                                        ? SDM_SUFFIXES.stream().map(suffix
-                                                  -> Utils.replaceFileExtension(apkPath, suffix))
-                                        : Stream.of(Utils.replaceFileExtension(apkPath, ext)))
+                Stream.concat(SDM_SUFFIXES.stream().map(
+                                      suffix -> Utils.replaceFileExtension(apkPath, suffix)),
+                              Stream.of(Utils.replaceFileExtension(
+                                                apkPath, ArtConstants.DEX_METADATA_FILE_EXT),
+                                      apkPath + ArtConstants.PROFILE_FILE_EXT))
                         .collect(Collectors.toSet());
         return paths.stream().filter(path -> candidates.contains(path)).toList();
     }
@@ -112,11 +111,11 @@ public final class ArtManagedInstallFileHelper {
      */
     public static @NonNull String getTargetPathForApk(
             @NonNull String originalPath, @NonNull String apkPath) {
-        for (String ext : FILE_TYPES) {
-            if (!ext.equals(ArtConstants.SECURE_DEX_METADATA_FILE_EXT)
-                    && originalPath.endsWith(ext)) {
-                return Utils.replaceFileExtension(apkPath, ext);
-            }
+        if (originalPath.endsWith(ArtConstants.DEX_METADATA_FILE_EXT)) {
+            return Utils.replaceFileExtension(apkPath, ArtConstants.DEX_METADATA_FILE_EXT);
+        }
+        if (originalPath.endsWith(ArtConstants.PROFILE_FILE_EXT)) {
+            return apkPath + ArtConstants.PROFILE_FILE_EXT;
         }
         if (originalPath.endsWith(ArtConstants.SECURE_DEX_METADATA_FILE_EXT)) {
             for (String suffix : SDM_SUFFIXES) {
