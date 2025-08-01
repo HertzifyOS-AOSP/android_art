@@ -110,21 +110,20 @@ public abstract class Dexopter<DexInfoType extends DetailedDexInfo> {
             List<String> externalProfileErrors = List.of();
             DexMetadataInfo dmInfo =
                     mInjector.getDexMetadataHelper().getDexMetadataInfo(buildDmPath(dexInfo));
+            List<Abi> allAbis = getAllAbis(dexInfo);
+            var session = new Dex2OatStatsReporter.Session(mPkgState.getAppId(), dmInfo, dexInfo,
+                    mParams.getCompilerFilter(), mParams.getReason(), allAbis);
             try {
                 if (!isDexoptable(dexInfo)) {
+                    session.disable();
                     continue;
                 }
 
                 onDexoptStart(dexInfo);
 
                 String compilerFilter = adjustCompilerFilter(mParams.getCompilerFilter(), dexInfo);
+                session.setCompilerFilter(compilerFilter);
                 if (compilerFilter.equals(DexoptParams.COMPILER_FILTER_NOOP)) {
-                    mInjector.getReporterExecutor().execute(
-                            ()
-                                    -> Dex2OatStatsReporter.reportForAllAbis(mPkgState.getAppId(),
-                                            DexoptParams.COMPILER_FILTER_NOOP, mParams.getReason(),
-                                            dmInfo.type(), dexInfo, getAllAbis(dexInfo),
-                                            Dex2OatResult.notRun()));
                     continue;
                 }
 
@@ -180,6 +179,7 @@ public abstract class Dexopter<DexInfoType extends DetailedDexInfo> {
                                 "there is no valid profile"
                                         + (needsToBeShared ? " and the package needs to be shared"
                                                            : ""));
+                        session.setCompilerFilter(compilerFilter);
                     }
                 }
                 boolean isProfileGuidedCompilerFilter =
@@ -194,13 +194,13 @@ public abstract class Dexopter<DexInfoType extends DetailedDexInfo> {
                 DexoptOptions dexoptOptions =
                         getDexoptOptions(dexInfo, isProfileGuidedCompilerFilter);
 
-                for (Abi abi : getAllAbis(dexInfo)) {
+                for (Abi abi : allAbis) {
                     @DexoptResult.DexoptResultStatus int status = DexoptResult.DEXOPT_SKIPPED;
                     long wallTimeMs = 0;
                     long cpuTimeMs = 0;
                     long sizeBytes = 0;
                     long sizeBeforeBytes = 0;
-                    Dex2OatResult dex2OatResult = Dex2OatResult.notRun();
+                    Dex2OatResult dex2OatResult;
                     @DexoptResult.DexoptResultExtendedStatusFlags int extendedStatusFlags = 0;
                     DexoptTarget<DexInfoType> target = null;
                     try {
@@ -287,8 +287,10 @@ public abstract class Dexopter<DexInfoType extends DetailedDexInfo> {
                         sizeBeforeBytes = dexoptResult.sizeBeforeBytes;
                         dex2OatResult = dexoptResult.cancelled ? Dex2OatResult.cancelled()
                                                                : Dex2OatResult.exited(0);
+                        session.recordResultForAbi(abi, dex2OatResult, sizeBytes, wallTimeMs);
 
                         if (status == DexoptResult.DEXOPT_CANCELLED) {
+                            session.recordResultForRemainingAbis(dex2OatResult);
                             return results;
                         }
                     } catch (ServiceSpecificException e) {
@@ -311,6 +313,8 @@ public abstract class Dexopter<DexInfoType extends DetailedDexInfo> {
                         } else {
                             dex2OatResult = Dex2OatResult.failedToStart();
                         }
+                        session.recordResultForAbi(
+                                abi, dex2OatResult, 0 /* sizeBytes */, 0 /* wallTimeMs */);
                     } finally {
                         if (!externalProfileErrors.isEmpty()) {
                             extendedStatusFlags |= DexoptResult.EXTENDED_BAD_EXTERNAL_PROFILE;
@@ -332,17 +336,6 @@ public abstract class Dexopter<DexInfoType extends DetailedDexInfo> {
                         // Make sure artd does not leak even if the caller holds
                         // `mCancellationSignal` forever.
                         mCancellationSignal.setOnCancelListener(null);
-
-                        // Variables used in lambda needs to be effectively final.
-                        Dex2OatResult finalDex2OatResult = dex2OatResult;
-                        mInjector.getReporterExecutor().execute(
-                                ()
-                                        -> Dex2OatStatsReporter.report(mPkgState.getAppId(),
-                                                result.getActualCompilerFilter(),
-                                                mParams.getReason(), dmInfo.type(), dexInfo,
-                                                abi.isa(), finalDex2OatResult,
-                                                result.getSizeBytes(),
-                                                result.getDex2oatWallTimeMillis()));
                     }
                 }
 
@@ -369,14 +362,10 @@ public abstract class Dexopter<DexInfoType extends DetailedDexInfo> {
                     }
                 }
             } catch (RemoteException | RuntimeException e) {
-                mInjector.getReporterExecutor().execute(
-                        ()
-                                -> Dex2OatStatsReporter.reportForAllAbis(mPkgState.getAppId(),
-                                        mParams.getCompilerFilter(), mParams.getReason(),
-                                        dmInfo.type(), dexInfo, getAllAbis(dexInfo),
-                                        Dex2OatResult.failedToStart()));
+                session.recordResultForRemainingAbis(Dex2OatResult.failedToStart());
                 throw e;
             } finally {
+                mInjector.getReporterExecutor().execute(session::report);
                 if (profile != null && profile.getTag() == ProfilePath.tmpProfilePath) {
                     mInjector.getArtd().deleteProfile(profile);
                 }

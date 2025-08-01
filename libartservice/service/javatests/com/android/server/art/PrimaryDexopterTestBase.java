@@ -65,7 +65,7 @@ public class PrimaryDexopterTestBase {
 
     @Rule
     public StaticMockitoRule mockitoRule = new StaticMockitoRule(SystemProperties.class,
-            Constants.class, PackageStateModulesUtils.class, Dex2OatStatsReporter.class);
+            Constants.class, PackageStateModulesUtils.class, ArtStatsLog.class);
 
     @Mock protected PrimaryDexopter.Injector mInjector;
     @Mock protected FilteredSnapshot mSnapshot;
