@@ -970,8 +970,7 @@ CodeGenerator* OptimizingCompiler::TryCompile(ArenaAllocator* allocator,
       compilation_kind == CompilationKind::kBaseline &&
       graph->IsUsefulOptimizing() &&
       graph->GetProfilingInfo() == nullptr) {
-    ProfilingInfoBuilder(
-        graph, codegen->GetCompilerOptions(), codegen.get(), compilation_stats_.get()).Run();
+    ProfilingInfoBuilder(graph, codegen->GetCompilerOptions(), codegen.get()).Run();
     // We expect a profiling info to be created and attached to the graph.
     // However, we may have run out of memory trying to create it, so in this
     // case just abort the compilation.
