@@ -34,11 +34,12 @@ namespace arm64 {
 
 using helpers::ShifterOperandSupportsExtension;
 
-class InstructionSimplifierArm64Visitor final : public HGraphVisitor {
+class InstructionSimplifierArm64Visitor final
+    : public CRTPGraphVisitor<InstructionSimplifierArm64Visitor> {
  public:
   InstructionSimplifierArm64Visitor(
       HGraph* graph, CodeGenerator* codegen, OptimizingCompilerStats* stats)
-      : HGraphVisitor(graph),
+      : CRTPGraphVisitor(graph),
         codegen_(codegen),
         stats_(stats),
         shifter_operand_map_(std::nullopt) {}
@@ -71,47 +72,61 @@ class InstructionSimplifierArm64Visitor final : public HGraphVisitor {
            TryCombineMultiplyAccumulate(use, maybe_mul->AsMul(), InstructionSet::kArm64);
   }
 
-  /**
-   * This simplifier uses a special-purpose BB visitor.
-   * (1) No need to visit Phi nodes.
-   * (2) Since statements can be removed in a "forward" fashion,
-   *     the visitor should test if each statement is still there.
-   */
-  void VisitBasicBlock(HBasicBlock* block) override {
-    // TODO: fragile iteration, provide more robust iterators?
-    for (HInstructionIteratorPrefetchNext it(block->GetInstructions()); !it.Done(); it.Advance()) {
-      HInstruction* instruction = it.Current();
-      HInstruction* next = instruction->GetNext();
-      Dispatch(instruction);
-      DCHECK_IMPLIES(next != nullptr, next->IsInBlock()) << instruction->DebugName();
-    }
+  // Keep `ForwardVisit()` functions from base class visible except for those we replace below.
+  using CRTPGraphVisitor::ForwardVisit;
+
+  // Forward `Shl`, `Shr` and `UShr` to `HandleShiftForShifterOperand()`.
+  static constexpr auto ForwardVisit(void (CRTPGraphVisitor::*visit)(HShl*)) {
+    DCHECK(visit == &CRTPGraphVisitor::VisitShl);
+    return &InstructionSimplifierArm64Visitor::HandleShiftForShifterOperand;
+  }
+  static constexpr auto ForwardVisit(void (CRTPGraphVisitor::*visit)(HShr*)) {
+    DCHECK(visit == &CRTPGraphVisitor::VisitShr);
+    return &InstructionSimplifierArm64Visitor::HandleShiftForShifterOperand;
+  }
+  static constexpr auto ForwardVisit(void (CRTPGraphVisitor::*visit)(HUShr*)) {
+    DCHECK(visit == &CRTPGraphVisitor::VisitUShr);
+    return &InstructionSimplifierArm64Visitor::HandleShiftForShifterOperand;
   }
 
+  // Forward `And`, `Or` and `Xor` to `HandleBitwiseOp()`.
+  static constexpr auto ForwardVisit(void (CRTPGraphVisitor::*visit)(HAnd*)) {
+    DCHECK(visit == &CRTPGraphVisitor::VisitAnd);
+    return &InstructionSimplifierArm64Visitor::HandleBitwiseOp;
+  }
+  static constexpr auto ForwardVisit(void (CRTPGraphVisitor::*visit)(HOr*)) {
+    DCHECK(visit == &CRTPGraphVisitor::VisitOr);
+    return &InstructionSimplifierArm64Visitor::HandleBitwiseOp;
+  }
+  static constexpr auto ForwardVisit(void (CRTPGraphVisitor::*visit)(HXor*)) {
+    DCHECK(visit == &CRTPGraphVisitor::VisitXor);
+    return &InstructionSimplifierArm64Visitor::HandleBitwiseOp;
+  }
+
+  void HandleShiftForShifterOperand(HBinaryOperation* shift);
+  void HandleBitwiseOp(HBinaryOperation* bitwise_op);
+
   // HInstruction visitors, sorted alphabetically.
-  void VisitAdd(HAdd* instruction) override;
-  void VisitAnd(HAnd* instruction) override;
-  void VisitArrayGet(HArrayGet* instruction) override;
-  void VisitArraySet(HArraySet* instruction) override;
-  void VisitMul(HMul* instruction) override;
-  void VisitNeg(HNeg* instruction) override;
-  void VisitOr(HOr* instruction) override;
-  void VisitRol(HRol* instruction) override;
-  void VisitShl(HShl* instruction) override;
-  void VisitShr(HShr* instruction) override;
-  void VisitSub(HSub* instruction) override;
-  void VisitTypeConversion(HTypeConversion* instruction) override;
-  void VisitUShr(HUShr* instruction) override;
-  void VisitXor(HXor* instruction) override;
-  void VisitVecLoad(HVecLoad* instruction) override;
-  void VisitVecStore(HVecStore* instruction) override;
-  void VisitVecAdd(HVecAdd* instruction) override;
-  void VisitVecSub(HVecSub* instruction) override;
+  void VisitAdd(HAdd* instruction);
+  void VisitArrayGet(HArrayGet* instruction);
+  void VisitArraySet(HArraySet* instruction);
+  void VisitMul(HMul* instruction);
+  void VisitNeg(HNeg* instruction);
+  void VisitRol(HRol* instruction);
+  void VisitSub(HSub* instruction);
+  void VisitTypeConversion(HTypeConversion* instruction);
+  void VisitVecLoad(HVecLoad* instruction);
+  void VisitVecStore(HVecStore* instruction);
+  void VisitVecAdd(HVecAdd* instruction);
+  void VisitVecSub(HVecSub* instruction);
 
   bool TryCombineVecMultiplyAccumulate(HVecMul* mul, HVecBinaryOperation* binop);
 
   CodeGenerator* codegen_;
   OptimizingCompilerStats* stats_;
   std::optional<ShifterOperandMap> shifter_operand_map_;
+
+  template <typename T> friend class art::CRTPGraphVisitor;
 };
 
 bool InstructionSimplifierArm64Visitor::TryMergeIntoShifterOperand(HInstruction* use,
@@ -230,17 +245,26 @@ bool InstructionSimplifierArm64Visitor::TryMergingShifterOperand(HInstruction* u
   return true;
 }
 
-void InstructionSimplifierArm64Visitor::VisitAdd(HAdd* instruction) {
-  if (TryMergingShifterOperand(instruction) ||
-      TryMultiplyAccumulateSimplification(instruction, instruction->GetLeft()) ||
-      TryMultiplyAccumulateSimplification(instruction, instruction->GetRight())) {
+void InstructionSimplifierArm64Visitor::HandleShiftForShifterOperand(HBinaryOperation* shift) {
+  DCHECK(shift->IsShl() || shift->IsShr() || shift->IsUShr());
+  DCHECK_EQ(shift->GetRight()->IsConstant(), shift->GetRight()->IsIntConstant());
+  if (shift->GetRight()->IsIntConstant()) {
+    TryMarkingShifterOperand(shift);
+  }
+}
+
+void InstructionSimplifierArm64Visitor::HandleBitwiseOp(HBinaryOperation* bitwise_op) {
+  DCHECK(bitwise_op->IsAnd() || bitwise_op->IsOr() || bitwise_op->IsXor());
+  if (TryMergingShifterOperand(bitwise_op) ||
+      TryMergeNegatedInput(bitwise_op)) {
     RecordSimplification();
   }
 }
 
-void InstructionSimplifierArm64Visitor::VisitAnd(HAnd* instruction) {
+void InstructionSimplifierArm64Visitor::VisitAdd(HAdd* instruction) {
   if (TryMergingShifterOperand(instruction) ||
-      TryMergeNegatedInput(instruction)) {
+      TryMultiplyAccumulateSimplification(instruction, instruction->GetLeft()) ||
+      TryMultiplyAccumulateSimplification(instruction, instruction->GetRight())) {
     RecordSimplification();
   }
 }
@@ -288,28 +312,9 @@ void InstructionSimplifierArm64Visitor::VisitNeg(HNeg* instruction) {
   }
 }
 
-void InstructionSimplifierArm64Visitor::VisitOr(HOr* instruction) {
-  if (TryMergingShifterOperand(instruction) ||
-      TryMergeNegatedInput(instruction)) {
-    RecordSimplification();
-  }
-}
-
 void InstructionSimplifierArm64Visitor::VisitRol(HRol* rol) {
   UnfoldRotateLeft(rol);
   RecordSimplification();
-}
-
-void InstructionSimplifierArm64Visitor::VisitShl(HShl* instruction) {
-  if (instruction->InputAt(1)->IsConstant()) {
-    TryMarkingShifterOperand(instruction);
-  }
-}
-
-void InstructionSimplifierArm64Visitor::VisitShr(HShr* instruction) {
-  if (instruction->InputAt(1)->IsConstant()) {
-    TryMarkingShifterOperand(instruction);
-  }
 }
 
 void InstructionSimplifierArm64Visitor::VisitSub(HSub* instruction) {
@@ -351,19 +356,6 @@ void InstructionSimplifierArm64Visitor::VisitTypeConversion(HTypeConversion* ins
 
   if (DataType::IsIntegralType(result_type) && DataType::IsIntegralType(input_type)) {
     TryMarkingShifterOperand(instruction);
-  }
-}
-
-void InstructionSimplifierArm64Visitor::VisitUShr(HUShr* instruction) {
-  if (instruction->InputAt(1)->IsConstant()) {
-    TryMarkingShifterOperand(instruction);
-  }
-}
-
-void InstructionSimplifierArm64Visitor::VisitXor(HXor* instruction) {
-  if (TryMergingShifterOperand(instruction) ||
-      TryMergeNegatedInput(instruction)) {
-    RecordSimplification();
   }
 }
 
