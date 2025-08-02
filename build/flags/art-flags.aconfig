@@ -156,3 +156,12 @@ flag {
   is_fixed_read_only: true
   is_exported: true
 }
+
+flag {
+  name: "hiddenapi_jni_api_callers"
+  namespace: "art_mainline"
+  description: "Make hiddenapi accurately identify native JNI API callers"
+  bug: "403305904"
+  is_fixed_read_only: true
+  is_exported: false
+}

@@ -17,6 +17,7 @@
 #include "hidden_api.h"
 
 #include <atomic>
+#include <optional>
 
 #include "art_field-inl.h"
 #include "art_method-inl.h"
@@ -34,6 +35,10 @@
 #include "stack.h"
 #include "thread-inl.h"
 #include "well_known_classes.h"
+
+#ifndef __APPLE__
+#include <link.h>
+#endif
 
 namespace art HIDDEN {
 namespace hiddenapi {
@@ -95,6 +100,37 @@ static const std::vector<std::string> kCorePlatformApiExemptions = {
     "Ldalvik/system/VMDebug;->setWaitingForDebugger",
 };
 
+static std::optional<std::string> FindDsoForNativeCaller(void* native_caller_addr) {
+#ifndef __APPLE__
+  struct dl_iterate_context {
+    void* address;
+    std::string dso_name;
+
+    static int callback(dl_phdr_info* info, [[maybe_unused]] size_t size, void* data) {
+      struct dl_iterate_context* ctx = reinterpret_cast<dl_iterate_context*>(data);
+      for (Elf64_Half i = 0; i < info->dlpi_phnum; ++i) {
+        const ElfW(Phdr) & phdr = info->dlpi_phdr[i];
+        if (phdr.p_type == PT_LOAD) {
+          uint8_t* start_addr = reinterpret_cast<uint8_t*>(info->dlpi_addr + phdr.p_vaddr);
+          uint8_t* end_addr = start_addr + phdr.p_memsz;
+          if (ctx->address >= start_addr && ctx->address < end_addr) {
+            ctx->dso_name = info->dlpi_name;
+            return 1;  // DSO found - stop iteration.
+          }
+        }
+      }
+      return 0;  // Continue iteration.
+    }
+  } context{.address = native_caller_addr};
+
+  if (dl_iterate_phdr(dl_iterate_context::callback, &context)) {
+    return std::move(context.dso_name);
+  }
+#endif
+
+  return std::nullopt;
+}
+
 std::ostream& operator<<(std::ostream& os, EnforcementPolicy policy) {
   switch (policy) {
     case EnforcementPolicy::kDisabled:
@@ -153,6 +189,12 @@ std::ostream& operator<<(std::ostream& os, const AccessContext& value)
     os << value.GetClass()->GetDescriptor(&tmp);
   } else if (value.GetDexFile() != nullptr) {
     os << value.GetDexFile()->GetLocation();
+  } else if (std::optional<std::string> dso_name =
+                 value.GetNativeCallerAddr() != nullptr
+                     ? FindDsoForNativeCaller(value.GetNativeCallerAddr())
+                     : std::nullopt;
+             dso_name.has_value()) {
+    os << dso_name.value();
   } else {
     os << "<unknown_caller>";
   }
@@ -172,26 +214,31 @@ static const char* FormatHiddenApiRuntimeFlags(uint32_t runtime_flags) {
   }
 }
 
-static Domain DetermineDomainFromLocation(const std::string& dex_location,
-                                          ObjPtr<mirror::ClassLoader> class_loader) {
+static std::optional<Domain> DetermineDomainForApexLocation(const std::string& location) {
   // If running with APEX, check `path` against known APEX locations.
   // These checks will be skipped on target buildbots where ANDROID_ART_ROOT
   // is set to "/system".
   if (ArtModuleRootDistinctFromAndroidRoot()) {
-    if (LocationIsOnArtModule(dex_location) || LocationIsOnConscryptModule(dex_location)) {
+    if (LocationIsOnArtModule(location) || LocationIsOnConscryptModule(location)) {
       return Domain::kCorePlatform;
     }
 
-    if (LocationIsOnApex(dex_location)) {
+    if (LocationIsOnApex(location)) {
       return Domain::kPlatform;
     }
   }
 
-  if (LocationIsOnSystemFramework(dex_location)) {
-    return Domain::kPlatform;
+  return std::nullopt;
+}
+
+static Domain DetermineDomainFromDexLocation(const std::string& dex_location,
+                                             ObjPtr<mirror::ClassLoader> class_loader) {
+  if (std::optional<Domain> dex_domain = DetermineDomainForApexLocation(dex_location);
+      dex_domain.has_value()) {
+    return dex_domain.value();
   }
 
-  if (LocationIsOnSystemExtFramework(dex_location)) {
+  if (LocationIsOnSystemFramework(dex_location) || LocationIsOnSystemExtFramework(dex_location)) {
     return Domain::kPlatform;
   }
 
@@ -207,8 +254,27 @@ static Domain DetermineDomainFromLocation(const std::string& dex_location,
   return Domain::kApplication;
 }
 
+AccessContext AccessContext::FromNativeCaller(void* native_caller_addr) {
+  if (std::optional<std::string> opt_dso_name = FindDsoForNativeCaller(native_caller_addr);
+      opt_dso_name.has_value()) {
+    std::string dso_name = std::move(opt_dso_name.value());
+    if (std::optional<Domain> d = DetermineDomainForApexLocation(dso_name); d.has_value()) {
+      return AccessContext(nullptr, nullptr, native_caller_addr, d.value());
+    }
+
+    if (LocationIsOnSystem(dso_name) || LocationIsOnSystemExt(dso_name)) {
+      return AccessContext(nullptr, nullptr, native_caller_addr, Domain::kPlatform);
+    }
+
+    return AccessContext(nullptr, nullptr, native_caller_addr, Domain::kApplication);
+  }
+
+  LOG(INFO) << "hiddenapi: DSO couldn't be determined for caller " << native_caller_addr;
+  return AccessContext(/*is_trusted=*/false);
+}
+
 void InitializeDexFileDomain(const DexFile& dex_file, ObjPtr<mirror::ClassLoader> class_loader) {
-  Domain dex_domain = DetermineDomainFromLocation(dex_file.GetLocation(), class_loader);
+  Domain dex_domain = DetermineDomainFromDexLocation(dex_file.GetLocation(), class_loader);
 
   // Assign the domain unless a more permissive domain has already been assigned.
   // This may happen when DexFile is initialized as trusted.
@@ -236,6 +302,86 @@ void InitializeCorePlatformApiPrivateFields() {
     field->SetAccessFlags(new_access_flags);
   }
 }
+
+static bool EnableNativeCallerCheckForApp() {
+  uint32_t target_sdk_version = Runtime::Current()->GetTargetSdkVersion();
+  // Enable if the target SDK is higher than 36 (Android 16). Also enable if the
+  // target SDK version is not set, e.g. in the zygote.
+  return IsSdkVersionUnsetOrMoreThan(target_sdk_version, SdkVersion::kB);
+}
+
+template <typename T>
+bool ShouldDenyJniAccessToMember(T* member,
+                                 Thread* self,
+                                 AccessMethod access_kind,
+                                 void* native_caller_addr) {
+  struct {
+    Thread* self;
+    void* native_caller_addr;
+
+    AccessContext GetNativeCallerContext() {
+      return AccessContext::FromNativeCaller(native_caller_addr);
+    }
+
+    AccessContext GetJavaCallerContext() REQUIRES_SHARED(Locks::mutator_lock_) {
+      ObjPtr<mirror::Class> caller = GetCallingClass(self, /* num_frames= */ 1);
+      // If the calling class cannot be determined, e.g. unattached threads, we
+      // conservatively assume the caller is trusted.
+      return caller.IsNull() ? AccessContext(/* is_trusted= */ true) : AccessContext(caller);
+    }
+  } ctx{.self = self, .native_caller_addr = native_caller_addr};
+
+  return ShouldDenyAccessToMember(
+      member,
+      [&ctx]() REQUIRES_SHARED(Locks::mutator_lock_) {
+        if (com::android::art::flags::hiddenapi_jni_api_callers()) {
+          // Construct the context from the native caller address.
+          AccessContext context = ctx.GetNativeCallerContext();
+
+          if (context.GetNativeCallerAddr() != nullptr) {
+            switch (context.GetDomain()) {
+              case Domain::kApplication:
+                // If the native caller is an app then it should only be used if
+                // the app's target SDK version is recent enough.
+                if (EnableNativeCallerCheckForApp()) {
+                  VLOG(hiddenapi) << "hiddenapi: Native JNI caller " << context << " from "
+                                  << context.GetDomain() << " (target_sdk_version="
+                                  << Runtime::Current()->GetTargetSdkVersion() << ")";
+                  return context;
+                }
+                VLOG(hiddenapi) << "hiddenapi: Native JNI caller " << context << " from "
+                                << context.GetDomain() << " ignored"
+                                << " (target_sdk_version="
+                                << Runtime::Current()->GetTargetSdkVersion() << ")";
+                break;
+
+              default:
+                VLOG(hiddenapi) << "hiddenapi: TODO: Handle the other domains";
+                break;
+            }
+          }
+        }
+
+        // If we couldn't (or shouldn't) determine the context from the native
+        // caller address then look at the first calling class on the Java stack.
+        // This is the legacy approach, and it's also better than nothing if a DSO
+        // cannot be identified (e.g. for generated code).
+        AccessContext context = ctx.GetJavaCallerContext();
+        VLOG(hiddenapi) << "hiddenapi: Managed JNI caller " << context << " from "
+                        << context.GetDomain();
+        return context;
+      },
+      access_kind);
+}
+
+template bool ShouldDenyJniAccessToMember<ArtField>(ArtField* member,
+                                                    Thread* self,
+                                                    AccessMethod access_kind,
+                                                    void* native_caller_addr);
+template bool ShouldDenyJniAccessToMember<ArtMethod>(ArtMethod* member,
+                                                     Thread* self,
+                                                     AccessMethod access_kind,
+                                                     void* native_caller_addr);
 
 AccessContext GetReflectionCallerAccessContext(Thread* self) REQUIRES_SHARED(Locks::mutator_lock_) {
   // Walk the stack and find the first frame not from java.lang.Class,

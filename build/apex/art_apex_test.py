@@ -656,6 +656,7 @@ class TestingChecker:
     self._checker.check_art_test_data('art-gtest-jars-ForClassLoaderA.jar')
     self._checker.check_art_test_data('art-gtest-jars-StaticLeafMethods.jar')
     self._checker.check_art_test_data('art-gtest-jars-MultiDex.jar')
+    self._checker.check_art_test_data('art-gtest-jars-MultiDexContainer.jar')
     self._checker.check_art_test_data('art-gtest-jars-Packages.jar')
     self._checker.check_art_test_data('art-gtest-jars-ProtoCompare2.jar')
     self._checker.check_art_test_data('art-gtest-jars-Statics.jar')
