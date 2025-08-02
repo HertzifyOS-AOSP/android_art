@@ -1737,13 +1737,33 @@ bool Runtime::Init(RuntimeArgumentMap&& runtime_options_in) {
   hidden_api_policy_ = runtime_options.GetOrDefault(Opt::HiddenApiPolicy);
   DCHECK_IMPLIES(is_zygote_, hidden_api_policy_ == hiddenapi::EnforcementPolicy::kDisabled);
 
-  // Set core platform API enforcement policy. The checks are disabled by default and
-  // can be enabled with a command line flag. AndroidRuntime will pass the flag if
-  // a system property is set.
-  core_platform_api_policy_ = runtime_options.GetOrDefault(Opt::CorePlatformApiPolicy);
-  if (core_platform_api_policy_ != hiddenapi::EnforcementPolicy::kDisabled) {
-    LOG(INFO) << "Core platform API reporting enabled, enforcing="
-        << (core_platform_api_policy_ == hiddenapi::EnforcementPolicy::kEnabled ? "true" : "false");
+  // Set core platform API enforcement policy. Always enabled if the
+  // hiddenapi_platform_enforcement flag is set, otherwise the checks are
+  // disabled by default and can be enabled with a command line flag.
+  // AndroidRuntime will pass the flag if a system property is set.
+  // TODO(b/377676642): Replace flag with SDK level check when ramped.
+  {
+    bool always_enable = false;
+#ifdef ART_TARGET_ANDROID
+    if (com::android::art::flags::hiddenapi_platform_enforcement()) {
+      always_enable = true;
+    }
+#endif
+    const char* reason;
+    if (always_enable) {
+      core_platform_api_policy_ = hiddenapi::EnforcementPolicy::kEnabled;
+      reason = "from the hiddenapi_platform_enforcement flag";
+    } else {
+      core_platform_api_policy_ = runtime_options.GetOrDefault(Opt::CorePlatformApiPolicy);
+      reason = "by runtime option";
+    }
+    if (core_platform_api_policy_ != hiddenapi::EnforcementPolicy::kDisabled) {
+      LOG(INFO) << "Core platform API "
+                << (core_platform_api_policy_ == hiddenapi::EnforcementPolicy::kEnabled
+                        ? "enforcement"
+                        : "reporting")
+                << " enabled " << reason;
+    }
   }
 
   // Dex2Oat's Runtime does not need the signal chain or the fault handler

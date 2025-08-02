@@ -98,6 +98,15 @@ static const std::vector<std::string> kCorePlatformApiExemptions = {
     "Ldalvik/system/VMDebug;->removeApplication",
     "Ldalvik/system/VMDebug;->setUserId",
     "Ldalvik/system/VMDebug;->setWaitingForDebugger",
+    // frameworks/base/core/jni/eventlog_helper.h accesses these fields directly
+    // via JNI during initialisation (typically in the zygote).
+    "Ljava/lang/Integer;->value:I",
+    "Ljava/lang/Long;->value:J",
+    "Ljava/lang/Float;->value:F",
+    // More JNI accesses from libandroid_runtime.so in the platform.
+    "Ljava/io/FileDescriptor;-><init>(I)V",
+    "Ljava/lang/Thread;->dispatchUncaughtException(Ljava/lang/Throwable;)V",
+    "Ljava/util/zip/ZipEntry;-><init>(Ljava/lang/String;Ljava/lang/String;JJJII[BJ)V",
 };
 
 static std::optional<std::string> FindDsoForNativeCaller(void* native_caller_addr) {
@@ -255,6 +264,7 @@ static Domain DetermineDomainFromDexLocation(const std::string& dex_location,
 }
 
 AccessContext AccessContext::FromNativeCaller(void* native_caller_addr) {
+#ifdef ART_TARGET_ANDROID
   if (std::optional<std::string> opt_dso_name = FindDsoForNativeCaller(native_caller_addr);
       opt_dso_name.has_value()) {
     std::string dso_name = std::move(opt_dso_name.value());
@@ -271,6 +281,21 @@ AccessContext AccessContext::FromNativeCaller(void* native_caller_addr) {
 
   LOG(INFO) << "hiddenapi: DSO couldn't be determined for caller " << native_caller_addr;
   return AccessContext(/*is_trusted=*/false);
+
+#else  // !ART_TARGET_ANDROID
+  // In host tests all APEX and system .so libs end up in the same directory
+  // (typically out/host/linux-x86/lib64), making it tedious to tell platform and
+  // core-platform domains apart. Leave the caller unidentified to use fallback
+  // code paths, but it means some tests may not behave correctly on host.
+  //
+  // With some work we could identify the .so libs in the tests themselves as
+  // belonging to the app domain (e.g. out/host/linux-x86/nativetest(64),
+  // out/host/linux-x86/testcases, and /tmp/art/test for run tests), but that's
+  // not done yet.
+  UNUSED(native_caller_addr);
+  VLOG(hiddenapi) << "hiddenapi: Skipping native caller check on host";
+  return AccessContext(/*is_trusted=*/false);
+#endif
 }
 
 void InitializeDexFileDomain(const DexFile& dex_file, ObjPtr<mirror::ClassLoader> class_loader) {
@@ -355,9 +380,25 @@ bool ShouldDenyJniAccessToMember(T* member,
                                 << Runtime::Current()->GetTargetSdkVersion() << ")";
                 break;
 
-              default:
-                VLOG(hiddenapi) << "hiddenapi: TODO: Handle the other domains";
+              case Domain::kPlatform:
+                // If the native caller is platform then it should only be used if
+                // the SDK level is recent enough.
+                // TODO(b/377676642): Replace flag with SDK level check when ramped.
+                if (com::android::art::flags::hiddenapi_platform_enforcement()) {
+                  VLOG(hiddenapi) << "hiddenapi: Native JNI caller " << context << " from "
+                                  << context.GetDomain();
+                  return context;
+                }
+                VLOG(hiddenapi) << "hiddenapi: Native JNI caller " << context << " from "
+                                << context.GetDomain() << " ignored";
                 break;
+
+              case Domain::kCorePlatform:
+                // The native caller is essentially ourselves, and this is the most
+                // permissive domain so it's fine.
+                VLOG(hiddenapi) << "hiddenapi: Native JNI caller " << context << " from "
+                                << context.GetDomain();
+                return context;
             }
           }
         }

@@ -1,2 +1,0 @@
-Tests that InstructionSimplifierRiscv64 correctly optimizes bit manipulation operations,
-e.g. clearing and setting individual bits.
