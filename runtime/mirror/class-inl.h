@@ -1267,6 +1267,16 @@ inline bool Class::HasTypeChecksFailure() {
   return (flags & kAccHasTypeChecksFailure) != 0u;
 }
 
+inline void Class::SetHasDuplicateMethods() {
+  uint32_t flags = GetField32(OFFSET_OF_OBJECT_MEMBER(Class, access_flags_));
+  SetAccessFlags(flags | kAccHasDuplicateMethods);
+}
+
+inline bool Class::HasDuplicateMethods() {
+  uint32_t flags = GetField32(OFFSET_OF_OBJECT_MEMBER(Class, access_flags_));
+  return (flags & kAccHasDuplicateMethods) != 0u;
+}
+
 inline void Class::ClearFinalizable() {
   // We're clearing the finalizable flag only for `Object` and `Enum`
   // during early setup without the boot image.
@@ -1326,7 +1336,17 @@ ALWAYS_INLINE FLATTEN inline ArtField* Class::FindDeclaredField(uint32_t dex_fie
 }
 
 template <bool kOnlyLookAtIndex, PointerSize kPointerSize>
-ALWAYS_INLINE FLATTEN inline ArtMethod* Class::FindDeclaredClassMethod(uint32_t dex_method_idx) {
+ALWAYS_INLINE inline ArtMethod* Class::FindDeclaredClassMethod(uint32_t dex_method_idx) {
+  return UNLIKELY(HasDuplicateMethods())
+      ? FindDeclaredClassMethodSlow<kPointerSize>(dex_method_idx)
+      : FindDeclaredClassMethodFast<kOnlyLookAtIndex, kPointerSize>(dex_method_idx);
+}
+
+
+template <bool kOnlyLookAtIndex, PointerSize kPointerSize>
+ALWAYS_INLINE FLATTEN inline ArtMethod* Class::FindDeclaredClassMethodFast(
+    uint32_t dex_method_idx) {
+  DCHECK(!HasDuplicateMethods());
   LengthPrefixedArray<ArtMethod>* array = GetMethodsPtr();
   static constexpr size_t kMethodAlignment = ArtMethod::Alignment(kPointerSize);
   static constexpr size_t kMethodSize = ArtMethod::Size(kPointerSize);

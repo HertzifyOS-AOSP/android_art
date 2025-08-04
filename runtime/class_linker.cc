@@ -4036,7 +4036,8 @@ class ClassLinker::LoadClassHelper {
         stack_(runtime->GetArenaPool()),
         allocator_(&stack_),
         num_direct_methods_(0u),
-        has_finalizer_(false) {}
+        has_finalizer_(false),
+        has_duplicate_methods_(false) {}
 
   // Note: This function can take a long time and therefore it should not be called while holding
   // the mutator lock. Otherwise we can experience an occasional suspend request timeout.
@@ -4108,6 +4109,7 @@ class ClassLinker::LoadClassHelper {
   ArrayRef<ArtMethodData> methods_;
   uint32_t num_direct_methods_;
   bool has_finalizer_;
+  bool has_duplicate_methods_;
 };
 
 inline void ClassLinker::LoadClassHelper::LoadField(const ClassAccessor::Field& field,
@@ -4311,6 +4313,7 @@ void ClassLinker::LoadClassHelper::Load(const ClassAccessor& accessor,
         uint32_t it_method_index = method.GetIndex();
         if (last_dex_method_index == it_method_index) {
           // duplicate case
+          has_duplicate_methods_ = true;
           method_data->method_index = last_class_def_method_index;
         } else {
           method_data->method_index = class_def_method_index;
@@ -4322,6 +4325,13 @@ void ClassLinker::LoadClassHelper::Load(const ClassAccessor& accessor,
         ArtMethodData* method_data = &methods[class_def_method_index];
         LoadMethod(method, &mai_virtual, method_data);
         LinkCode(method_data, class_def_method_index, &occi);
+        uint32_t it_method_index = method.GetIndex();
+        if (last_dex_method_index == it_method_index) {
+          // duplicate case
+          has_duplicate_methods_ = true;
+        } else {
+          last_dex_method_index = it_method_index;
+        }
         DCHECK_EQ(method_data->method_index, 0u);  // Shall be updated in `LinkMethods()`.
         ++class_def_method_index;
       });
@@ -4431,6 +4441,9 @@ void ClassLinker::LoadClassHelper::Commit(Handle<mirror::Class> klass,
   klass->SetMethodsPtr(methods, num_direct_methods_, methods_.size() - num_direct_methods_);
   if (has_finalizer_) {
     klass->SetFinalizable();
+  }
+  if (has_duplicate_methods_) {
+    klass->SetHasDuplicateMethods();
   }
 }
 
