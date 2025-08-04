@@ -472,14 +472,9 @@ bool HSchedulerARM64::IsSchedulable(const HInstruction* instruction) const {
   }
 }
 
-std::pair<SchedulingGraph, ScopedArenaVector<SchedulingNode*>>
-HSchedulerARM64::BuildSchedulingGraph(
-    HBasicBlock* block,
-    ScopedArenaAllocator* allocator,
-    const HeapLocationCollector* heap_location_collector) {
+void HSchedulerARM64::CalculateLatencies(ArrayRef<SchedulingNode* const> scheduling_nodes) {
   SchedulingLatencyVisitorARM64 latency_visitor;
-  return HScheduler::BuildSchedulingGraph(
-      block, allocator, heap_location_collector, &latency_visitor);
+  return HScheduler::CalculateLatencies(scheduling_nodes, &latency_visitor);
 }
 
 }  // namespace arm64

@@ -507,34 +507,16 @@ class HScheduler {
   virtual bool IsSchedulingBarrier(const HInstruction* instruction) const;
 
  protected:
-  virtual std::pair<SchedulingGraph, ScopedArenaVector<SchedulingNode*>> BuildSchedulingGraph(
-      HBasicBlock* block,
-      ScopedArenaAllocator* allocator,
-      const HeapLocationCollector* heap_location_collector) = 0;
+  virtual void CalculateLatencies(ArrayRef<SchedulingNode* const> scheduling_nodes) = 0;
 
   template <typename LatencyVisitor>
-  std::pair<SchedulingGraph, ScopedArenaVector<SchedulingNode*>> BuildSchedulingGraph(
-      HBasicBlock* block,
-      ScopedArenaAllocator* allocator,
-      const HeapLocationCollector* heap_location_collector,
-      LatencyVisitor* latency_visitor) ALWAYS_INLINE {
-    SchedulingGraph scheduling_graph(allocator, heap_location_collector);
-    ScopedArenaVector<SchedulingNode*> scheduling_nodes(allocator->Adapter(kArenaAllocScheduler));
-    for (HBackwardInstructionIteratorPrefetchNext it(block->GetInstructions()); !it.Done();
-         it.Advance()) {
-      HInstruction* instruction = it.Current();
-      CHECK_EQ(instruction->GetBlock(), block)
-          << instruction->DebugName()
-          << " is in block " << instruction->GetBlock()->GetBlockId()
-          << ", and expected in block " << block->GetBlockId();
-      SchedulingNode* node =
-          scheduling_graph.AddNode(instruction, IsSchedulingBarrier(instruction));
+  void CalculateLatencies(ArrayRef<SchedulingNode* const> scheduling_nodes,
+                          LatencyVisitor* latency_visitor) ALWAYS_INLINE {
+    for (SchedulingNode* node : scheduling_nodes) {
       latency_visitor->CalculateLatency(node);
       node->SetLatency(latency_visitor->GetLastVisitedLatency());
       node->SetInternalLatency(latency_visitor->GetLastVisitedInternalLatency());
-      scheduling_nodes.push_back(node);
     }
-    return {std::move(scheduling_graph), std::move(scheduling_nodes)};
   }
 
   void Schedule(HBasicBlock* block, const HeapLocationCollector* heap_location_collector);
