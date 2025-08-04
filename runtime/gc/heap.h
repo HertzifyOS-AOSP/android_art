@@ -1626,7 +1626,7 @@ class Heap {
   // The time*alloc threshold for when to trigger the next concurrent GC when
   // using time based GC triggering.
   // In units of ms * KB, which should give enough space for a worst case
-  // 1 year * 512MB value. When set to 0, falls back to non-time-based GC
+  // 1 year * 512GB value. When set to 0, falls back to non-time-based GC
   // triggering.
   uint64_t time_based_gc_threshold_ = 0;
 
