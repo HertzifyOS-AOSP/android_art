@@ -756,10 +756,11 @@ CompiledMethod* OptimizingCompiler::Emit(ArenaAllocator* allocator,
 
 // This class acts as a filter and enables gradual enablement of ART Simulator work - we
 // compile (and hence simulate) only limited types of methods.
-class CompilationFilterForRestrictedMode : public HGraphDelegateVisitor {
+class CompilationFilterForRestrictedMode
+    : public CRTPGraphVisitor<CompilationFilterForRestrictedMode> {
  public:
   explicit CompilationFilterForRestrictedMode(HGraph* graph)
-      : HGraphDelegateVisitor(graph),
+      : CRTPGraphVisitor(graph),
         has_unsupported_instructions_(false) {}
 
   // Returns true if the graph contains instructions which are not currently supported in
@@ -767,7 +768,7 @@ class CompilationFilterForRestrictedMode : public HGraphDelegateVisitor {
   bool GraphRejected() const { return has_unsupported_instructions_; }
 
  private:
-  void VisitInstruction(HInstruction*) override {
+  void VisitInstruction(HInstruction*) {
     // Currently we don't support compiling methods unless they were annotated with $compile$.
     RejectGraph();
   }
@@ -776,6 +777,8 @@ class CompilationFilterForRestrictedMode : public HGraphDelegateVisitor {
   }
 
   bool has_unsupported_instructions_;
+
+  template <typename T> friend class CRTPGraphVisitor;
 };
 
 // Returns whether an ArtMethod, specified by a name, should be compiled. Used in restricted

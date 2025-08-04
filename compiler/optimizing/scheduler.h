@@ -402,7 +402,7 @@ class SchedulingLatencyVisitor : public CRTPGraphVisitor<T> {
  public:
   // This class and its sub-classes will never be used to drive a visit of an
   // `HGraph` but only to visit `HInstructions` one at a time, so we do not need
-  // to pass a valid graph to `HGraphDelegateVisitor()`.
+  // to pass a valid graph to `CRTPGraphVisitor<T>()`.
   SchedulingLatencyVisitor()
       : CRTPGraphVisitor<T>(nullptr),
         last_visited_latency_(0),
