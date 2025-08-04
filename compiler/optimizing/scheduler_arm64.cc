@@ -55,10 +55,11 @@ static constexpr uint32_t kArm64SIMDDivDoubleLatency = 60;
 static constexpr uint32_t kArm64SIMDDivFloatLatency = 30;
 static constexpr uint32_t kArm64SIMDTypeConversionInt2FPLatency = 10;
 
-class SchedulingLatencyVisitorARM64 final : public SchedulingLatencyVisitor {
+class SchedulingLatencyVisitorARM64 final
+    : public SchedulingLatencyVisitor<SchedulingLatencyVisitorARM64> {
  public:
   // Default visitor for instructions not handled specifically below.
-  void VisitInstruction([[maybe_unused]] HInstruction*) override {
+  void VisitInstruction([[maybe_unused]] HInstruction*) {
     last_visited_latency_ = kArm64IntegerOpLatency;
   }
 
@@ -118,7 +119,7 @@ class SchedulingLatencyVisitorARM64 final : public SchedulingLatencyVisitor {
   M(DataProcWithShifterOp, unused)
 
 #define DECLARE_VISIT_INSTRUCTION(type, unused)  \
-  void Visit##type(H##type* instruction) override;
+  void Visit##type(H##type* instruction);
 
   FOR_EACH_SCHEDULED_COMMON_INSTRUCTION(DECLARE_VISIT_INSTRUCTION)
   FOR_EACH_SCHEDULED_ABSTRACT_INSTRUCTION(DECLARE_VISIT_INSTRUCTION)
@@ -130,6 +131,8 @@ class SchedulingLatencyVisitorARM64 final : public SchedulingLatencyVisitor {
  private:
   void HandleSimpleArithmeticSIMD(HVecOperation *instr);
   void HandleVecAddress(HVecMemoryOperation* instruction, size_t size);
+
+  template <typename T> friend class art::CRTPGraphVisitor;
 };
 
 void SchedulingLatencyVisitorARM64::VisitBinaryOperation(HBinaryOperation* instr) {

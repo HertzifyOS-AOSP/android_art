@@ -397,27 +397,21 @@ class SchedulingGraph : public ValueObject {
  * The visitors derived from this base class are used by schedulers to evaluate
  * the latencies of `HInstruction`s.
  */
-class SchedulingLatencyVisitor : public HGraphDelegateVisitor {
+template <typename T>
+class SchedulingLatencyVisitor : public CRTPGraphVisitor<T> {
  public:
   // This class and its sub-classes will never be used to drive a visit of an
   // `HGraph` but only to visit `HInstructions` one at a time, so we do not need
   // to pass a valid graph to `HGraphDelegateVisitor()`.
   SchedulingLatencyVisitor()
-      : HGraphDelegateVisitor(nullptr),
+      : CRTPGraphVisitor<T>(nullptr),
         last_visited_latency_(0),
         last_visited_internal_latency_(0) {}
-
-  void VisitInstruction(HInstruction* instruction) override {
-    LOG(FATAL) << "Error visiting " << instruction->DebugName() << ". "
-        "Architecture-specific scheduling latency visitors must handle all instructions"
-        " (potentially by overriding the generic `VisitInstruction()`.";
-    UNREACHABLE();
-  }
 
   void CalculateLatency(SchedulingNode* node) {
     // By default nodes have no internal latency.
     last_visited_internal_latency_ = 0;
-    Dispatch(node->GetInstruction());
+    this->Dispatch(node->GetInstruction());
   }
 
   uint32_t GetLastVisitedLatency() const { return last_visited_latency_; }
@@ -430,6 +424,12 @@ class SchedulingLatencyVisitor : public HGraphDelegateVisitor {
   // This represents the time spent *within* the generated code for the most recent visited
   // SchedulingNode. This is for reporting the internal latency value to the user of this visitor.
   uint32_t last_visited_internal_latency_;
+
+ private:
+  // Hide `VisitInstruction()` from `CRTPGraphVisitor<>` with a deleted function.
+  // Architecture-specific scheduling latency visitors must handle all instructions
+  // (potentially by implementing their own generic `VisitInstruction()`.
+  void VisitInstruction(HInstruction* instruction) = delete;
 };
 
 class SchedulingNodeSelector : public ArenaObject<kArenaAllocScheduler> {
@@ -510,8 +510,8 @@ class HScheduler {
   virtual void CalculateLatencies(ArrayRef<SchedulingNode* const> scheduling_nodes) = 0;
 
   template <typename LatencyVisitor>
-  void CalculateLatencies(ArrayRef<SchedulingNode* const> scheduling_nodes,
-                          LatencyVisitor* latency_visitor) ALWAYS_INLINE {
+  ALWAYS_INLINE void CalculateLatencies(ArrayRef<SchedulingNode* const> scheduling_nodes,
+                                        LatencyVisitor* latency_visitor) {
     for (SchedulingNode* node : scheduling_nodes) {
       latency_visitor->CalculateLatency(node);
       node->SetLatency(latency_visitor->GetLastVisitedLatency());
