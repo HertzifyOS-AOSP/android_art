@@ -21,14 +21,17 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 
 try:
   import profile_pb2
 except ImportError:
   # Allow running the script from a checkout, not as a python_binary_host
   ANDROID_BUILD_TOP = os.environ.get('ANDROID_BUILD_TOP')
-  sys.path.append(ANDROID_BUILD_TOP + '/system/extras/simpleperf/scripts')
+  if ANDROID_BUILD_TOP:
+    import_path = ANDROID_BUILD_TOP + '/system/extras/simpleperf/scripts'
+  else:
+    import_path = os.getcwd() + '/system/extras/simpleperf/scripts'
+  sys.path.append(import_path)
   import profile_pb2
 
 # Common file extensions for OAT/ODEX files.
@@ -99,7 +102,6 @@ def stream_and_parse_oatdump(paths, proguard_map=None, is_host_file=False):
   for path in paths:
     print(f'Parsing {path}...')
     current_oat_file = path
-    lines_iterator = None
     process = None
 
     if is_host_file:
@@ -110,8 +112,7 @@ def stream_and_parse_oatdump(paths, proguard_map=None, is_host_file=False):
         continue
     else:
       oatdump_command = (
-          f'adb shell oatdump --oatdump-file={path} --no-disassemble'
-          ' --no-dump:vmap'
+          f'adb shell oatdump --oat-file={path} --no-disassemble --no-dump:vmap'
       )
       process = subprocess.Popen(
           oatdump_command,
@@ -181,7 +182,7 @@ def stream_and_parse_oatdump(paths, proguard_map=None, is_host_file=False):
 
       current_method_name = None
 
-    if is_host_file:
+    if is_host_file and lines_iterator:
       lines_iterator.close()
 
     if process:
@@ -218,27 +219,29 @@ def generate_pprof_report(data, output_path, argv):
   st_size.type = get_string_id('space')
   st_size.unit = get_string_id('bytes')
 
-  for oat_file, package, class_name, method, size in data:
+  for oat_file, package_name, class_name, method_name, size in data:
     if size == 0:
       continue
 
     sample = profile.sample.add()
     sample.value.append(size)
 
+    # Generate a stack trace for the sample with the following hierarchy:
+    #   - Oat file path (to identify where the code comes from)
+    #   - Package name parts, e.g. 'android', 'app'
+    #   - Class name, e.g. 'Activity'
+    #   - Fully qualified method name, e.g. 'android.app.Activity.onCreate(android.os.Bundle)'
     stack_frames = []
     stack_frames.append((oat_file, os.path.basename(oat_file)))
-
-    package_parts = package.split('.')
-    current_path_prefix = oat_file
+    package_parts = package_name.split('.')
+    current_package = ''
     for part in package_parts:
-      current_path_prefix = f'{current_path_prefix}/{part}'
-      stack_frames.append((current_path_prefix, part))
-
-    class_full_name = f'{current_path_prefix}/{class_name}'
-    stack_frames.append((class_full_name, class_name))
-
-    method_full_name = f'{class_full_name}/{method}'
-    stack_frames.append((method_full_name, method))
+      current_package = f'{current_package}.{part}' if current_package else part
+      stack_frames.append((current_package, current_package))
+    full_class_name = f'{current_package}.{class_name}'
+    stack_frames.append((full_class_name, full_class_name))
+    full_method_name = f'{package_name}.{class_name}.{method_name}'
+    stack_frames.append((full_method_name, full_method_name))
 
     location_ids = []
 
