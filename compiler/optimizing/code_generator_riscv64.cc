@@ -5456,6 +5456,86 @@ void InstructionCodeGeneratorRISCV64::VisitRiscv64ShiftAdd(HRiscv64ShiftAdd* ins
   }
 }
 
+void LocationsBuilderRISCV64::HandleBitManipulations(HBinaryOperation* instruction) {
+  DCHECK(instruction->IsRiscv64BitSet() || instruction->IsRiscv64BitExtract() ||
+         instruction->IsRiscv64BitClear() || instruction->IsRiscv64BitInvert());
+  DCHECK(instruction->GetResultType() == DataType::Type::kInt64);
+
+  LocationSummary* locations = LocationSummary::CreateNoCall(allocator_, instruction);
+  locations->SetInAt(0, Location::RequiresRegister());
+  locations->SetInAt(1, Location::RegisterOrConstant(instruction->InputAt(1)));
+  locations->SetOut(Location::RequiresRegister(), Location::kNoOutputOverlap);
+}
+
+void InstructionCodeGeneratorRISCV64::HandleBitManipulations(HBinaryOperation* instruction) {
+  DCHECK(instruction->IsRiscv64BitSet() || instruction->IsRiscv64BitExtract() ||
+         instruction->IsRiscv64BitClear() || instruction->IsRiscv64BitInvert());
+  DCHECK(instruction->GetResultType() == DataType::Type::kInt64);
+
+  LocationSummary* locations = instruction->GetLocations();
+  XRegister rd = locations->Out().AsRegister<XRegister>();
+  XRegister rs1 = locations->InAt(0).AsRegister<XRegister>();
+  Location rs2_location = locations->InAt(1);
+
+  if (rs2_location.IsConstant()) {
+    int64_t imm = CodeGenerator::GetInt64ValueOf(rs2_location.GetConstant());
+    DataType::Type type = instruction->GetResultType();
+    uint32_t shamt = imm & kMaxLongShiftDistance;
+    if (instruction->IsRiscv64BitSet()) {
+      __ Bseti(rd, rs1, shamt);
+    } else if (instruction->IsRiscv64BitExtract()) {
+      __ Bexti(rd, rs1, shamt);
+    } else if (instruction->IsRiscv64BitClear()) {
+      __ Bclri(rd, rs1, shamt);
+    } else if (instruction->IsRiscv64BitInvert()) {
+      __ Binvi(rd, rs1, shamt);
+    }
+  } else {
+    XRegister rs2 = rs2_location.AsRegister<XRegister>();
+    if (instruction->IsRiscv64BitSet()) {
+      __ Bset(rd, rs1, rs2);
+    } else if (instruction->IsRiscv64BitExtract()) {
+      __ Bext(rd, rs1, rs2);
+    } else if (instruction->IsRiscv64BitClear()) {
+      __ Bclr(rd, rs1, rs2);
+    } else if (instruction->IsRiscv64BitInvert()) {
+      __ Binv(rd, rs1, rs2);
+    }
+  }
+}
+
+void LocationsBuilderRISCV64::VisitRiscv64BitSet(HRiscv64BitSet* instruction) {
+  HandleBitManipulations(instruction);
+}
+
+void InstructionCodeGeneratorRISCV64::VisitRiscv64BitSet(HRiscv64BitSet* instruction) {
+  HandleBitManipulations(instruction);
+}
+
+void LocationsBuilderRISCV64::VisitRiscv64BitExtract(HRiscv64BitExtract* instruction) {
+  HandleBitManipulations(instruction);
+}
+
+void InstructionCodeGeneratorRISCV64::VisitRiscv64BitExtract(HRiscv64BitExtract* instruction) {
+  HandleBitManipulations(instruction);
+}
+
+void LocationsBuilderRISCV64::VisitRiscv64BitClear(HRiscv64BitClear* instruction) {
+  HandleBitManipulations(instruction);
+}
+
+void InstructionCodeGeneratorRISCV64::VisitRiscv64BitClear(HRiscv64BitClear* instruction) {
+  HandleBitManipulations(instruction);
+}
+
+void LocationsBuilderRISCV64::VisitRiscv64BitInvert(HRiscv64BitInvert* instruction) {
+  HandleBitManipulations(instruction);
+}
+
+void InstructionCodeGeneratorRISCV64::VisitRiscv64BitInvert(HRiscv64BitInvert* instruction) {
+  HandleBitManipulations(instruction);
+}
+
 void LocationsBuilderRISCV64::VisitBitwiseNegatedRight(HBitwiseNegatedRight* instruction) {
   DCHECK(codegen_->GetInstructionSetFeatures().HasZbb());
   DCHECK(DataType::IsIntegralType(instruction->GetType())) << instruction->GetType();

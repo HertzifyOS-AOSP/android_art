@@ -78,6 +78,7 @@ public class ArtManagedInstallFileHelperTest {
     public void testIsArtManaged() throws Exception {
         assertThat(ArtManagedInstallFileHelper.isArtManaged("/foo/bar.dm")).isTrue();
         assertThat(ArtManagedInstallFileHelper.isArtManaged("/foo/bar.prof")).isTrue();
+        assertThat(ArtManagedInstallFileHelper.isArtManaged("/foo/bar.apk.prof")).isTrue();
         assertThat(ArtManagedInstallFileHelper.isArtManaged("/foo/bar.sdm")).isTrue();
         assertThat(ArtManagedInstallFileHelper.isArtManaged("/foo/bar.arm.sdm")).isTrue();
         assertThat(ArtManagedInstallFileHelper.isArtManaged("/foo/bar.arm64.sdm")).isTrue();
@@ -87,24 +88,24 @@ public class ArtManagedInstallFileHelperTest {
     @Test
     public void testFilterPathsForApk() throws Exception {
         assertThat(ArtManagedInstallFileHelper.filterPathsForApk(
-                           List.of("/foo/bar.dm", "/foo/bar.prof", "/foo/bar.sdm",
-                                   "/foo/bar.x86_64.sdm", "/foo/bar.arm.sdm", "/foo/bar.arm64.sdm",
-                                   "/foo/bar.abc", "/foo/baz.dm"),
+                           List.of("/foo/bar.dm", "/foo/bar.prof", "/foo/bar.apk.prof",
+                                   "/foo/bar.sdm", "/foo/bar.x86_64.sdm", "/foo/bar.arm.sdm",
+                                   "/foo/bar.arm64.sdm", "/foo/bar.abc", "/foo/baz.dm"),
                            "/foo/bar.apk"))
-                .containsExactly(
-                        "/foo/bar.dm", "/foo/bar.prof", "/foo/bar.arm.sdm", "/foo/bar.arm64.sdm");
+                .containsExactly("/foo/bar.dm", "/foo/bar.apk.prof", "/foo/bar.arm.sdm",
+                        "/foo/bar.arm64.sdm");
 
         // Filenames don't match.
         assertThat(ArtManagedInstallFileHelper.filterPathsForApk(
-                           List.of("/foo/bar.dm", "/foo/bar.prof", "/foo/bar.arm64.sdm",
-                                   "/foo/bar.abc", "/foo/baz.dm"),
+                           List.of("/foo/bar.dm", "/foo/bar.prof", "/foo/bar.apk.prof",
+                                   "/foo/bar.arm64.sdm", "/foo/bar.abc", "/foo/baz.dm"),
                            "/foo/qux.apk"))
                 .isEmpty();
 
         // Directories don't match.
         assertThat(ArtManagedInstallFileHelper.filterPathsForApk(
-                           List.of("/foo/bar.dm", "/foo/bar.prof", "/foo/bar.arm64.sdm",
-                                   "/foo/bar.abc", "/foo/baz.dm"),
+                           List.of("/foo/bar.dm", "/foo/bar.prof", "/foo/bar.apk.prof",
+                                   "/foo/bar.arm64.sdm", "/foo/bar.abc", "/foo/baz.dm"),
                            "/quz/bar.apk"))
                 .isEmpty();
     }
@@ -116,7 +117,7 @@ public class ArtManagedInstallFileHelperTest {
                 .isEqualTo("/somewhere/base.dm");
         assertThat(ArtManagedInstallFileHelper.getTargetPathForApk(
                            "/foo/bar.prof", "/somewhere/base.apk"))
-                .isEqualTo("/somewhere/base.prof");
+                .isEqualTo("/somewhere/base.apk.prof");
         assertThat(ArtManagedInstallFileHelper.getTargetPathForApk(
                            "/foo/bar.arm.sdm", "/somewhere/base.apk"))
                 .isEqualTo("/somewhere/base.arm.sdm");

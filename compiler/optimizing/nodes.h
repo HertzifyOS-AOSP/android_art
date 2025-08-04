@@ -698,7 +698,12 @@ class HBasicBlock final : public ArenaObject<kArenaAllocBasicBlock> {
 #define FOR_EACH_CONCRETE_INSTRUCTION_ARM64(M)
 
 #if defined(ART_ENABLE_CODEGEN_riscv64)
-#define FOR_EACH_CONCRETE_INSTRUCTION_RISCV64(M) M(Riscv64ShiftAdd, Instruction)
+#define FOR_EACH_CONCRETE_INSTRUCTION_RISCV64(M) \
+  M(Riscv64ShiftAdd, Instruction)                \
+  M(Riscv64BitSet, Instruction)                  \
+  M(Riscv64BitClear, Instruction)                \
+  M(Riscv64BitExtract, Instruction)              \
+  M(Riscv64BitInvert, Instruction)
 #else
 #define FOR_EACH_CONCRETE_INSTRUCTION_RISCV64(M)
 #endif

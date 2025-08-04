@@ -16,10 +16,18 @@
 
 import gzip
 import os
+import sys
 import tempfile
 import unittest
 import oatdump_pprof
-from oatdump_pprof import profile_pb2
+
+try:
+  import profile_pb2
+except ImportError:
+  # Allow running the script from a checkout, not as a python_binary_host
+  ANDROID_BUILD_TOP = os.environ.get('ANDROID_BUILD_TOP')
+  sys.path.append(ANDROID_BUILD_TOP + '/system/extras/simpleperf/scripts')
+  import profile_pb2
 
 
 class OatdumpPprofTest(unittest.TestCase):
@@ -63,10 +71,18 @@ a: La; (1 method)
         profile = profile_pb2.Profile()
         profile.ParseFromString(f.read())
         string_table = profile.string_table
-        self.assertIn('MyClass', string_table)
-        self.assertIn('myMethod()', string_table)
-        self.assertNotIn(' a ', string_table)
-        self.assertNotIn(' a()', string_table)
+        self.assertIn(os.path.basename(oatdump_file_path), string_table)
+        self.assertIn('android', string_table)
+        self.assertIn('android.app', string_table)
+        self.assertIn('android.app.Activity', string_table)
+        self.assertIn(
+            'android.app.Activity.onCreate(android.os.Bundle)', string_table
+        )
+        self.assertIn('com.example.MyClass', string_table)
+        self.assertIn('com.example.MyClass.myMethod()', string_table)
+        self.assertNotIn('a', string_table)
+        self.assertNotIn('a()', string_table)
+        self.assertNotIn('a.a()', string_table)
 
 
 if __name__ == '__main__':

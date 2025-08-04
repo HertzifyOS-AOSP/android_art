@@ -99,14 +99,14 @@ static const vixl::aarch64::VRegister kAvailableCalleeSaveFpuRegisters[] = {
 };
 
 static const vixl::aarch64::VRegister kAvailableTempFpuRegisters[] = {
-  vixl::aarch64::d0,
-  vixl::aarch64::d1,
-  vixl::aarch64::d2,
-  vixl::aarch64::d3,
-  vixl::aarch64::d4,
-  vixl::aarch64::d5,
-  vixl::aarch64::d6,
-  vixl::aarch64::d7,
+  vixl::aarch64::d16,
+  vixl::aarch64::d17,
+  vixl::aarch64::d18,
+  vixl::aarch64::d19,
+  vixl::aarch64::d20,
+  vixl::aarch64::d21,
+  vixl::aarch64::d22,
+  vixl::aarch64::d23,
 };
 
 class FastCompilerARM64 : public FastCompiler {
@@ -225,9 +225,9 @@ class FastCompilerARM64 : public FastCompiler {
   // Return the existing register location for `reg`.
   Location GetExistingRegisterLocation(uint32_t reg, DataType::Type type);
 
-  // Move dex registers holding constants into physical registers. Used when
+  // Move dex registers holding constants and fpu registers into core registers. Used when
   // branching.
-  void MoveConstantsToRegisters();
+  void MoveConstantsAndFpusToRegisters();
 
   // Update the masks associated to the given dex_pc. Used when dex_pc is a
   // branch target.
@@ -303,6 +303,10 @@ class FastCompilerARM64 : public FastCompiler {
                         bool is_put,
                         DataType::Type type,
                         const Instruction* next);
+  bool BuildArrayLength(const Instruction& insttruction, uint32_t dex_pc, const Instruction* next);
+  bool BuildCompare(const Instruction& instruction, const Instruction* next);
+  bool BuildReturn(const Instruction& instruction);
+  bool BuildMoveResult(const Instruction& instruction, bool is_object, const Instruction* next);
   bool BuildInstanceFieldGet(const Instruction& instruction,
                              uint32_t dex_pc,
                              bool is_object,
@@ -317,12 +321,17 @@ class FastCompilerARM64 : public FastCompiler {
                               const Instruction* next);
   void Div(Register dst, Register first, Register second, uint32_t dex_pc);
   void Rem(Register dst, Register first, Register second, uint32_t dex_pc);
+  bool Frem(CPURegister dst,
+            CPURegister first,
+            CPURegister second,
+            uint32_t dex_pc,
+            DataType::Type type);
 
   // Update registers and masks for the merge point.
   void PrepareToBranch(uint32_t dex_pc) {
     // We are going to branch, move all constants to registers to make the merge
     // point use the same locations.
-    MoveConstantsToRegisters();
+    MoveConstantsAndFpusToRegisters();
     UpdateMasks(dex_pc);
   }
 
@@ -522,7 +531,7 @@ bool FastCompilerARM64::InitializeParameters() {
   return true;
 }
 
-void FastCompilerARM64::MoveConstantsToRegisters() {
+void FastCompilerARM64::MoveConstantsAndFpusToRegisters() {
   for (uint32_t i = 0; i < vreg_locations_.size(); ++i) {
     Location location  = vreg_locations_[i];
     if (location.IsConstant()) {
@@ -533,6 +542,14 @@ void FastCompilerARM64::MoveConstantsToRegisters() {
       vreg_locations_[i] = CreateNewRegisterLocation(i, type, /* next= */ nullptr);
       MoveLocation(vreg_locations_[i], location, type);
       DCHECK(!HitUnimplemented());
+    } else if (location.IsFpuRegister()) {
+      vreg_locations_[i] =
+          CreateNewRegisterLocation(i, DataType::Type::kInt64, /* next= */ nullptr);
+      MoveLocation(vreg_locations_[i], location, DataType::Type::kInt64);
+      DCHECK(!HitUnimplemented());
+      // The floating point value may have come from a zero constant, which we
+      // treat as object. Therefore, remove the flag if it is there.
+      UpdateLocal(i, /* is_object= */ false);
     }
   }
 }
@@ -783,6 +800,9 @@ Location FastCompilerARM64::GetExistingRegisterLocation(uint32_t reg, DataType::
     bool res = MoveLocation(new_location, vreg_locations_[reg], type);
     DCHECK(res);
     vreg_locations_[reg] = new_location;
+    // The floating point value may have come from a zero constant, which we
+    // treat as object. Therefore, remove the flag if it is there.
+    UpdateLocal(reg, /* is_object= */ false);
     return new_location;
   }
 
@@ -1996,6 +2016,36 @@ bool FastCompilerARM64::BuildArrayAccess(const Instruction& instruction,
   return true;
 }
 
+bool FastCompilerARM64::BuildArrayLength(
+    const Instruction& instruction, uint32_t dex_pc, const Instruction* next) {
+  int32_t array = instruction.VRegB_12x();
+  int32_t dest = instruction.VRegA_12x();
+  if (CanBeNull(array)) {
+    if (!EnsureHasFrame()) {
+      return false;
+    }
+  }
+  Register array_reg = RegisterFrom(
+      GetExistingRegisterLocation(array, DataType::Type::kReference),
+      DataType::Type::kReference);
+  Register dest_reg = RegisterFrom(
+      CreateNewRegisterLocation(dest, DataType::Type::kInt32, next), DataType::Type::kInt32);
+  if (HitUnimplemented()) {
+    return false;
+  }
+  MemOperand mem = HeapOperand(array_reg.W(), mirror::Array::LengthOffset().Uint32Value());
+  {
+    // Ensure the pc position is recorded immediately after the store instruction.
+    EmissionCheckScope guard(GetVIXLAssembler(), kMaxMacroInstructionSizeInBytes);
+    __ Ldr(dest_reg, mem);
+    if (CanBeNull(array)) {
+      RecordPcInfo(dex_pc);
+    }
+  }
+  UpdateLocal(dest, /* is_object= */ false);
+  return true;
+}
+
 bool FastCompilerARM64::BuildInstanceFieldGet(const Instruction& instruction,
                                               uint32_t dex_pc,
                                               bool is_object,
@@ -2284,11 +2334,40 @@ void FastCompilerARM64::Rem(Register dst, Register first, Register second, uint3
   __ Msub(dst, temp, second, first);
 }
 
+bool FastCompilerARM64::Frem(CPURegister dst,
+                             CPURegister first,
+                             CPURegister second,
+                             uint32_t dex_pc,
+                             DataType::Type type) {
+  DCHECK(has_frame_);
+  InvokeRuntimeCallingConvention calling_convention;
+  if (!MoveLocation(LocationFrom(calling_convention.GetFpuRegisterAt(0)),
+                    LocationFrom(VRegister(first)),
+                    type)) {
+    return false;
+  }
+  if (!MoveLocation(LocationFrom(calling_convention.GetFpuRegisterAt(1)),
+                    LocationFrom(VRegister(second)),
+                    type)) {
+    return false;
+  }
+  QuickEntrypointEnum entrypoint =
+      (type == DataType::Type::kFloat32) ? kQuickFmodf : kQuickFmod;
+  InvokeRuntime(entrypoint, dex_pc);
+  if (!MoveLocation(LocationFrom(VRegister(dst)),
+                    calling_convention.GetReturnLocation(type),
+                    type)) {
+    return false;
+  }
+  return true;
+}
+
 #define SETUP_UNOP_12x(input_type, output_type) \
   int32_t vreg_a = instruction.VRegA_12x(); \
-  Register input = RegisterFrom( \
+  CPURegister input = CPURegisterFrom( \
       GetExistingRegisterLocation(instruction.VRegB_12x(), input_type), input_type); \
-  Register dst = RegisterFrom(CreateNewRegisterLocation(vreg_a, output_type, next), output_type); \
+  CPURegister dst = CPURegisterFrom( \
+      CreateNewRegisterLocation(vreg_a, output_type, next), output_type); \
   if (HitUnimplemented()) { \
     return false; \
   } \
@@ -2296,10 +2375,10 @@ void FastCompilerARM64::Rem(Register dst, Register first, Register second, uint3
 
 #define SETUP_BINOP_12x(type) \
   int32_t vreg_a = instruction.VRegA_12x(); \
-  Register first = RegisterFrom(GetExistingRegisterLocation(vreg_a, type), type); \
-  Register second = RegisterFrom( \
+  CPURegister first = CPURegisterFrom(GetExistingRegisterLocation(vreg_a, type), type); \
+  CPURegister second = CPURegisterFrom( \
       GetExistingRegisterLocation(instruction.VRegB_12x(), type), type); \
-  Register dst = RegisterFrom(CreateNewRegisterLocation(vreg_a, type, next), type); \
+  CPURegister dst = CPURegisterFrom(CreateNewRegisterLocation(vreg_a, type, next), type); \
   if (HitUnimplemented()) { \
     return false; \
   } \
@@ -2307,11 +2386,11 @@ void FastCompilerARM64::Rem(Register dst, Register first, Register second, uint3
 
 #define SETUP_BINOP_23x(type) \
   int32_t vreg_a = instruction.VRegA_23x(); \
-  Register first = RegisterFrom( \
+  CPURegister first = CPURegisterFrom( \
       GetExistingRegisterLocation(instruction.VRegB_23x(), type), type); \
-  Register second = RegisterFrom( \
+  CPURegister second = CPURegisterFrom( \
       GetExistingRegisterLocation(instruction.VRegC_23x(), type), type); \
-  Register dst = RegisterFrom(CreateNewRegisterLocation(vreg_a, type, next), type); \
+  CPURegister dst = CPURegisterFrom(CreateNewRegisterLocation(vreg_a, type, next), type); \
   if (HitUnimplemented()) { \
     return false; \
   } \
@@ -2319,12 +2398,22 @@ void FastCompilerARM64::Rem(Register dst, Register first, Register second, uint3
 
 #define SIMPLE_BINOP_12x(type, instruction) \
     SETUP_BINOP_12x(type) \
-    __ instruction(dst, first, second); \
+    __ instruction(Register(dst), Register(first), Register(second)); \
+    return true;
+
+#define SIMPLE_FPU_BINOP_12x(type, instruction) \
+    SETUP_BINOP_12x(type) \
+    __ instruction(VRegister(dst), VRegister(first), VRegister(second)); \
     return true;
 
 #define SIMPLE_BINOP_23x(type, instruction) \
     SETUP_BINOP_23x(type) \
-    __ instruction(dst, first, second); \
+    __ instruction(Register(dst), Register(first), Register(second)); \
+    return true;
+
+#define SIMPLE_FPU_BINOP_23x(type, instruction) \
+    SETUP_BINOP_23x(type) \
+    __ instruction(VRegister(dst), VRegister(first), VRegister(second)); \
     return true;
 
 #define FRAME_BINOP_12x(type, instruction) \
@@ -2332,7 +2421,7 @@ void FastCompilerARM64::Rem(Register dst, Register first, Register second, uint3
       return false; \
     } \
     SETUP_BINOP_12x(type) \
-    instruction(dst, first, second, dex_pc); \
+    instruction(Register(dst), Register(first), Register(second), dex_pc); \
     return true;
 
 #define FRAME_BINOP_23x(type, instruction) \
@@ -2340,8 +2429,89 @@ void FastCompilerARM64::Rem(Register dst, Register first, Register second, uint3
       return false; \
     } \
     SETUP_BINOP_23x(type) \
-    instruction(dst, first, second, dex_pc); \
+    instruction(Register(dst), Register(first), Register(second), dex_pc); \
     return true;
+
+
+bool FastCompilerARM64::BuildCompare(const Instruction& instruction, const Instruction* next) {
+  bool is_gt_bias = (instruction.Opcode() == Instruction::CMPG_FLOAT ||
+                     instruction.Opcode() == Instruction::CMPG_DOUBLE);
+  bool is_double = (instruction.Opcode() == Instruction::CMPL_DOUBLE ||
+                    instruction.Opcode() == Instruction::CMPG_DOUBLE);
+  bool is_long = instruction.Opcode() == Instruction::CMP_LONG;
+  DataType::Type type = is_long
+      ? DataType::Type::kInt64
+      : is_double ? DataType::Type::kFloat64 : DataType::Type::kFloat32;
+  int32_t vreg_a = instruction.VRegA_23x();
+  CPURegister first = CPURegisterFrom(
+      GetExistingRegisterLocation(instruction.VRegB_23x(), type), type);
+  CPURegister second = CPURegisterFrom(
+      GetExistingRegisterLocation(instruction.VRegC_23x(), type), type);
+  Register dst = RegisterFrom(
+      CreateNewRegisterLocation(vreg_a, DataType::Type::kInt32, next), DataType::Type::kInt32);
+  if (HitUnimplemented()) {
+    return false;
+  }
+  UpdateLocal(vreg_a, /* is_object= */ false);
+
+  if (is_long) {
+    __ Cmp(first.X(), second.X());
+  } else {
+    __ Fcmp(VRegister(first), VRegister(second));
+  }
+  __ Cset(dst.W(), ne);                             // result == +1 if NE or 0 otherwise
+  __ Cneg(dst.W(), dst.W(), is_gt_bias ? cc : lt);  // result == -1 if LT or unchanged otherwise
+  return true;
+}
+
+bool FastCompilerARM64::BuildReturn(const Instruction& instruction) {
+  int32_t register_index = instruction.VRegA_11x();
+  InvokeDexCallingConventionVisitorARM64 convention;
+  if (!MoveLocation(convention.GetReturnLocation(return_type_),
+                    vreg_locations_[register_index],
+                    return_type_)) {
+    return false;
+  }
+  if (has_frame_) {
+    // We may have used the "record last instruction before return in return
+    // register" optimization (see `CreateNewRegisterLocation`),
+    // so set the returned register back to what it should be by marking it
+    // with an invalid location and let the `CreateNewRegisterLocation` pick
+    // the right register again.
+    vreg_locations_[register_index] = Location();
+    CreateNewRegisterLocation(
+        register_index, return_type_, /* next= */ nullptr);
+    if (HitUnimplemented()) {
+      return false;
+    }
+  }
+  PopFrameAndReturn();
+  return true;
+}
+
+bool FastCompilerARM64::BuildMoveResult(const Instruction& instruction,
+                                        bool is_object,
+                                        const Instruction* next) {
+  int32_t register_index = instruction.VRegA_11x();
+  InvokeDexCallingConventionVisitorARM64 convention;
+  Location new_location =
+      CreateNewRegisterLocation(register_index, previous_invoke_return_type_, next);
+  if (HitUnimplemented()) {
+    return false;
+  }
+  if (!MoveLocation(new_location,
+                    convention.GetReturnLocation(previous_invoke_return_type_),
+                    previous_invoke_return_type_)) {
+    return false;
+  }
+  UpdateLocal(register_index, is_object);
+  return true;
+}
+
+// Don't error on the stack size of `ProcessDexInstruction`, we know we are not
+// going to stack overflow in the compiler.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wframe-larger-than="
 
 bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
                                               uint32_t dex_pc,
@@ -2492,28 +2662,7 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
     case Instruction::RETURN:
     case Instruction::RETURN_OBJECT:
     case Instruction::RETURN_WIDE: {
-      int32_t register_index = instruction.VRegA_11x();
-      InvokeDexCallingConventionVisitorARM64 convention;
-      if (!MoveLocation(convention.GetReturnLocation(return_type_),
-                        vreg_locations_[register_index],
-                        return_type_)) {
-        return false;
-      }
-      if (has_frame_) {
-        // We may have used the "record last instruction before return in return
-        // register" optimization (see `CreateNewRegisterLocation`),
-        // so set the returned register back to what it should be by marking it
-        // with an invalid location and let the `CreateNewRegisterLocation` pick
-        // the right register again.
-        vreg_locations_[register_index] = Location();
-        CreateNewRegisterLocation(
-            register_index, return_type_, /* next= */ nullptr);
-        if (HitUnimplemented()) {
-          return false;
-        }
-      }
-      PopFrameAndReturn();
-      return true;
+      return BuildReturn(instruction);
     }
 
     case Instruction::INVOKE_DIRECT:
@@ -2550,35 +2699,39 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
     }
 
     case Instruction::NEG_FLOAT: {
-      break;
+      SETUP_UNOP_12x(DataType::Type::kFloat32, DataType::Type::kFloat32)
+      __ Fneg(dst.S(), input.S());
+      return true;
     }
 
     case Instruction::NEG_DOUBLE: {
-      break;
+      SETUP_UNOP_12x(DataType::Type::kFloat64, DataType::Type::kFloat64)
+      __ Fneg(dst.D(), input.D());
+      return true;
     }
 
     case Instruction::NEG_INT: {
       SETUP_UNOP_12x(DataType::Type::kInt32, DataType::Type::kInt32)
-      __ Neg(dst, input);
+      __ Neg(dst.W(), input.W());
       return true;
     }
 
     case Instruction::NEG_LONG: {
       SETUP_UNOP_12x(DataType::Type::kInt64, DataType::Type::kInt64)
-      __ Neg(dst, input);
+      __ Neg(dst.X(), input.X());
       return true;
     }
 
 
     case Instruction::NOT_INT: {
       SETUP_UNOP_12x(DataType::Type::kInt32, DataType::Type::kInt32)
-      __ Mvn(dst, input);
+      __ Mvn(dst.W(), input.W());
       return true;
     }
 
     case Instruction::NOT_LONG: {
       SETUP_UNOP_12x(DataType::Type::kInt64, DataType::Type::kInt64)
-      __ Mvn(dst, input);
+      __ Mvn(dst.X(), input.X());
       return true;
     }
 
@@ -2617,84 +2770,108 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
     }
 
     case Instruction::INT_TO_FLOAT: {
-      break;
+      SETUP_UNOP_12x(DataType::Type::kInt32, DataType::Type::kFloat32)
+      __ Scvtf(dst.S(), input.W());
+      return true;
     }
 
     case Instruction::INT_TO_DOUBLE: {
-      break;
+      SETUP_UNOP_12x(DataType::Type::kInt32, DataType::Type::kFloat64)
+      __ Scvtf(dst.D(), input.W());
+      return true;
     }
 
     case Instruction::LONG_TO_FLOAT: {
-      break;
+      SETUP_UNOP_12x(DataType::Type::kInt64, DataType::Type::kFloat32)
+      __ Scvtf(dst.S(), input.X());
+      return true;
     }
 
     case Instruction::LONG_TO_DOUBLE: {
-      break;
+      SETUP_UNOP_12x(DataType::Type::kInt64, DataType::Type::kFloat64)
+      __ Scvtf(dst.D(), input.X());
+      return true;
     }
 
     case Instruction::FLOAT_TO_INT: {
-      break;
+      SETUP_UNOP_12x(DataType::Type::kFloat32, DataType::Type::kInt32)
+      __ Fcvtzs(dst.W(), input.S());
+      return true;
     }
 
     case Instruction::FLOAT_TO_LONG: {
-      break;
+      SETUP_UNOP_12x(DataType::Type::kFloat32, DataType::Type::kInt64)
+      __ Fcvtzs(dst.X(), input.S());
+      return true;
     }
 
     case Instruction::FLOAT_TO_DOUBLE: {
-      break;
+      SETUP_UNOP_12x(DataType::Type::kFloat32, DataType::Type::kFloat64)
+      __ Fcvt(dst.D(), input.S());
+      return true;
     }
 
     case Instruction::DOUBLE_TO_INT: {
-      break;
+      SETUP_UNOP_12x(DataType::Type::kFloat64, DataType::Type::kInt32)
+      __ Fcvtzs(dst.W(), input.D());
+      return true;
     }
 
     case Instruction::DOUBLE_TO_LONG: {
-      break;
+      SETUP_UNOP_12x(DataType::Type::kFloat64, DataType::Type::kInt64)
+      __ Fcvtzs(dst.X(), input.D());
+      return true;
     }
 
     case Instruction::DOUBLE_TO_FLOAT: {
-      break;
+      SETUP_UNOP_12x(DataType::Type::kFloat64, DataType::Type::kFloat32)
+      __ Fcvt(dst.S(), input.D());
+      return true;
     }
 
-    case Instruction::ADD_DOUBLE: {
-      break;
-    }
-
-    case Instruction::ADD_FLOAT: {
-      break;
-    }
-
-    case Instruction::SUB_FLOAT: {
-      break;
-    }
-
-    case Instruction::SUB_DOUBLE: {
-      break;
-    }
-
-    case Instruction::MUL_FLOAT: {
-      break;
-    }
-
-    case Instruction::MUL_DOUBLE: {
-      break;
-    }
-
-    case Instruction::DIV_FLOAT: {
-      break;
-    }
-
-    case Instruction::DIV_DOUBLE: {
-      break;
-    }
+#define REM_BINOP(type, format) \
+    if (!EnsureHasFrame()) { \
+      return false; \
+    } \
+    SETUP_BINOP_##format(type); \
+    return Frem(dst, first, second, dex_pc, type);
 
     case Instruction::REM_FLOAT: {
-      break;
+      REM_BINOP(DataType::Type::kFloat32, 23x);
     }
 
     case Instruction::REM_DOUBLE: {
-      break;
+      REM_BINOP(DataType::Type::kFloat64, 23x);
     }
+
+    case Instruction::REM_FLOAT_2ADDR: {
+      REM_BINOP(DataType::Type::kFloat32, 12x);
+    }
+
+    case Instruction::REM_DOUBLE_2ADDR: {
+      REM_BINOP(DataType::Type::kFloat64, 12x);
+    }
+#undef REM_BINOP
+
+#define SIMPLE_FPU_OP_CASE(opcode, instruction) \
+    case Instruction::opcode ##_FLOAT_2ADDR: { \
+      SIMPLE_FPU_BINOP_12x(DataType::Type::kFloat32, instruction) \
+    } \
+    case Instruction::opcode ##_DOUBLE_2ADDR: { \
+      SIMPLE_FPU_BINOP_12x(DataType::Type::kFloat64, instruction) \
+    } \
+    case Instruction::opcode ##_FLOAT: { \
+      SIMPLE_FPU_BINOP_23x(DataType::Type::kFloat32, instruction) \
+    } \
+    case Instruction::opcode ##_DOUBLE: { \
+      SIMPLE_FPU_BINOP_23x(DataType::Type::kFloat64, instruction) \
+    }
+
+    SIMPLE_FPU_OP_CASE(ADD, Fadd)
+    SIMPLE_FPU_OP_CASE(SUB, Fsub)
+    SIMPLE_FPU_OP_CASE(MUL, Fmul)
+    SIMPLE_FPU_OP_CASE(DIV, Fdiv)
+#undef SIMPLE_FPU_OP_CASE
 
 #define SIMPLE_OP_CASE(opcode, instruction) \
     case Instruction::opcode ##_INT_2ADDR: { \
@@ -2738,46 +2915,6 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
     DIV_REM_OP_CASE(DIV, Div)
     DIV_REM_OP_CASE(REM, Rem)
 #undef DIV_OP_CASE
-
-    case Instruction::ADD_DOUBLE_2ADDR: {
-      break;
-    }
-
-    case Instruction::ADD_FLOAT_2ADDR: {
-      break;
-    }
-
-    case Instruction::SUB_FLOAT_2ADDR: {
-      break;
-    }
-
-    case Instruction::SUB_DOUBLE_2ADDR: {
-      break;
-    }
-
-    case Instruction::MUL_FLOAT_2ADDR: {
-      break;
-    }
-
-    case Instruction::MUL_DOUBLE_2ADDR: {
-      break;
-    }
-
-    case Instruction::REM_FLOAT_2ADDR: {
-      break;
-    }
-
-    case Instruction::REM_DOUBLE_2ADDR: {
-      break;
-    }
-
-    case Instruction::DIV_FLOAT_2ADDR: {
-      break;
-    }
-
-    case Instruction::DIV_DOUBLE_2ADDR: {
-      break;
-    }
 
 #define SETUP_BINOP_22(suffix) \
   Register source = RegisterFrom( \
@@ -2998,44 +3135,15 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
       FALLTHROUGH_INTENDED;
     case Instruction::MOVE_RESULT:
     case Instruction::MOVE_RESULT_WIDE: {
-      int32_t register_index = instruction.VRegA_11x();
-      InvokeDexCallingConventionVisitorARM64 convention;
-      Location new_location =
-          CreateNewRegisterLocation(register_index, previous_invoke_return_type_, next);
-      if (HitUnimplemented()) {
-        return false;
-      }
-      if (!MoveLocation(new_location,
-                        convention.GetReturnLocation(previous_invoke_return_type_),
-                        previous_invoke_return_type_)) {
-        return false;
-      }
-      UpdateLocal(register_index, is_object);
-      return true;
+      return BuildMoveResult(instruction, is_object, next);
     }
 
-    case Instruction::CMP_LONG: {
-      SETUP_BINOP_23x(DataType::Type::kInt64)
-      __ Cmp(first, second);
-      __ Cset(dst, ne);                 // result == +1 if NE or 0 otherwise
-      __ Cneg(dst, dst, lt);            // result == -1 if LT or unchanged otherwise
-      return true;
-    }
-
-    case Instruction::CMPG_FLOAT: {
-      break;
-    }
-
-    case Instruction::CMPG_DOUBLE: {
-      break;
-    }
-
+    case Instruction::CMP_LONG:
+    case Instruction::CMPG_DOUBLE:
+    case Instruction::CMPL_DOUBLE:
+    case Instruction::CMPG_FLOAT:
     case Instruction::CMPL_FLOAT: {
-      break;
-    }
-
-    case Instruction::CMPL_DOUBLE: {
-      break;
+      return BuildCompare(instruction, next);
     }
 
     case Instruction::NOP:
@@ -3107,32 +3215,7 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
 #undef ARRAY_XX
 
     case Instruction::ARRAY_LENGTH: {
-      int32_t array = instruction.VRegB_12x();
-      int32_t dest = instruction.VRegA_12x();
-      if (CanBeNull(array)) {
-        if (!EnsureHasFrame()) {
-          return false;
-        }
-      }
-      Register array_reg = RegisterFrom(
-          GetExistingRegisterLocation(array, DataType::Type::kReference),
-          DataType::Type::kReference);
-      Register dest_reg = RegisterFrom(
-          CreateNewRegisterLocation(dest, DataType::Type::kInt32, next), DataType::Type::kInt32);
-      if (HitUnimplemented()) {
-        return false;
-      }
-      MemOperand mem = HeapOperand(array_reg.W(), mirror::Array::LengthOffset().Uint32Value());
-      {
-        // Ensure the pc position is recorded immediately after the store instruction.
-        EmissionCheckScope guard(GetVIXLAssembler(), kMaxMacroInstructionSizeInBytes);
-        __ Ldr(dest_reg, mem);
-        if (CanBeNull(array)) {
-          RecordPcInfo(dex_pc);
-        }
-      }
-      UpdateLocal(dest, /* is_object= */ false);
-      return true;
+      return BuildArrayLength(instruction, dex_pc, next);
     }
 
     case Instruction::CONST_STRING: {
