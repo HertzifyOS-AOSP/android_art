@@ -1832,13 +1832,13 @@ class EXPORT Thread {
 
   void CreatePeer(const char* name, bool as_daemon, jobject thread_group);
 
-  template<bool kTransactionActive>
+  template <bool kTransactionActive>
   static void InitPeer(ObjPtr<mirror::Object> peer,
                        bool as_daemon,
                        ObjPtr<mirror::Object> thread_group,
                        ObjPtr<mirror::String> thread_name,
-                       jint thread_priority)
-      REQUIRES_SHARED(Locks::mutator_lock_);
+                       jint thread_priority,
+                       jint thread_niceness) REQUIRES_SHARED(Locks::mutator_lock_);
 
   // Avoid use, callers should use SetState.
   // Used only by `Thread` destructor and stack trace collection in semi-space GC (currently
