@@ -22,6 +22,38 @@
 
 namespace art HIDDEN {
 
+namespace helpers {
+
+bool IsBeforeInReversePostOrder(HGraph* graph, HInstruction* lhs, HInstruction* rhs) {
+  DCHECK(lhs->IsInBlock());
+  DCHECK(rhs->IsInBlock());
+  DCHECK(!lhs->IsPhi());
+  DCHECK(!rhs->IsPhi());
+  if (lhs->GetBlock() == rhs->GetBlock()) {
+    for (HInstruction* insn = lhs->GetBlock()->GetFirstInstruction(); ; insn = insn->GetNext()) {
+      DCHECK(insn != nullptr);
+      if (insn == rhs) {
+        return false;
+      }
+      if (insn == lhs) {
+        return true;
+      }
+    }
+  } else {
+    for (auto it = graph->GetReversePostOrder().begin(); ; ++it) {
+      DCHECK(it != graph->GetReversePostOrder().end());
+      if (*it == rhs->GetBlock()) {
+        return false;
+      }
+      if (*it == lhs->GetBlock()) {
+        return true;
+      }
+    }
+  }
+}
+
+}  // namespace helpers
+
 namespace {
 
 bool TrySimpleMultiplyAccumulatePatterns(HMul* mul,

@@ -28,6 +28,7 @@ namespace art HIDDEN {
 
 using helpers::CanFitInShifterOperand;
 using helpers::HasShifterOperand;
+using helpers::IsBeforeInReversePostOrder;
 using helpers::IsSubRightSubLeftShl;
 using helpers::ShifterOperandMap;
 
@@ -338,17 +339,26 @@ void InstructionSimplifierArmVisitor::VisitSub(HSub* instruction) {
     return;
   }
   if (IsSubRightSubLeftShl(instruction)) {
-    HInstruction* shl = instruction->GetRight()->InputAt(0);
+    HSub* right_sub = instruction->GetRight()->AsSub();
+    HInstruction* shl = right_sub->InputAt(0);
     if (shl->InputAt(1)->IsConstant() && TryReplaceSubSubWithSubAdd(instruction)) {
       DCHECK(!instruction->IsInBlock());
       DCHECK(shl->IsInBlock());
+      DCHECK(right_sub->IsInBlock());
+      DCHECK(right_sub->HasOnlyOneNonEnvironmentUse());
       if (TryMarkingShifterOperand(shl)) {
-        DCHECK(shl->HasOnlyOneNonEnvironmentUse());
-        HInstruction* sub = shl->GetUses().front().GetUser();
-        DCHECK(sub->IsSub());
-        DCHECK(sub->AsSub()->GetRight() == shl);
-        bool success = TryMergingShifterOperand(sub);
+        HInstruction* replacement = right_sub->GetUses().front().GetUser();
+        bool success = TryMergingShifterOperand(right_sub);
         DCHECK(success);
+        for (auto it = shl->GetUses().begin(), end = shl->GetUses().end(); it != end; ) {
+          HInstruction* use = it->GetUser();
+          ++it;  // Move to next use early as the current use node can be removed below.
+          if (IsBeforeInReversePostOrder(GetGraph(), use, replacement)) {
+            // This use shall not be visited again, so make the replacement now.
+            success = TryMergingShifterOperand(use);
+            DCHECK(success);
+          }
+        }
         return;
       }
     }
