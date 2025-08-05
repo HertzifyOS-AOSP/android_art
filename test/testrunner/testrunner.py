@@ -352,7 +352,7 @@ def get_device_name():
   """
   if env.ART_TEST_RUN_FROM_SOONG:
     return "target"  # We can't use adb during build.
-  if env.ART_TEST_ON_VM:
+  if env.ART_TEST_ON_VM or env.ART_TEST_ON_SBC:
     return subprocess.Popen(f"{env.ART_SSH_CMD} uname -a".split(),
                             stdout = subprocess.PIPE,
                             universal_newlines=True).stdout.read().strip()
@@ -682,7 +682,7 @@ def run_test(args, test, test_variant, test_name):
     failed_tests.append((test_name, 'Timed out in %d seconds' % timeout))
 
     # HACK(b/142039427): Print extra backtraces on timeout.
-    if "-target-" in test_name and not env.ART_TEST_ON_VM:
+    if "-target-" in test_name and not env.ART_TEST_ON_VM and not env.ART_TEST_ON_SBC:
       for i in range(8):
         proc_name = "dalvikvm" + test_name[-2:]
         pidof = subprocess.run(["adb", "shell", "pidof", proc_name], stdout=subprocess.PIPE)
@@ -1037,7 +1037,7 @@ def parse_test_name(test_name):
 
 
 def get_target_cpu_count():
-  if env.ART_TEST_ON_VM:
+  if env.ART_TEST_ON_VM or env.ART_TEST_ON_SBC:
     command = f"{env.ART_SSH_CMD} cat /sys/devices/system/cpu/present"
   else:
     command = 'adb shell cat /sys/devices/system/cpu/present'

@@ -1625,6 +1625,11 @@
       "env_vars": {"ART_TEST_ON_VM": "true"}
     },
     {
+      "tests": ["137-cfi"],
+      "description": ["Fails on SBC"],
+      "env_vars": {"ART_TEST_ON_SBC": "true"}
+    },
+    {
       "tests": ["2390-virtual-thread-carrier-leak",
                 "2390-virtual-thread-context-leak",
                 "2390-virtual-thread-parking-error-leak",

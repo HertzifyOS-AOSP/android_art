@@ -59,6 +59,13 @@ cc_defaults {
         "base/utils.cc",
         "base/zip_archive.cc",
     ],
+    arch: {
+        riscv64: {
+            srcs: [
+                "arch/riscv64/sbc_v_adraln_workaround.cc",
+            ],
+        },
+    },
     target: {
         android: {
             srcs: [

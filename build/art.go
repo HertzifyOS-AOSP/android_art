@@ -157,6 +157,10 @@ func globalFlags(ctx android.LoadHookContext) ([]string, []string) {
 		cflags = append(cflags, "-DUSE_D8_DESUGAR=1")
 	}
 
+	if ctx.Config().IsEnvTrue("ART_TEST_ON_SBC_RISCV64_V_ADRALN_WORKAROUND") {
+		cflags = append(cflags, "-DART_TEST_ON_SBC_RISCV64_V_ADRALN_WORKAROUND=1")
+	}
+
 	return cflags, asflags
 }
 
