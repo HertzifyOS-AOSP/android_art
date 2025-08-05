@@ -147,9 +147,6 @@ namespace gc {
 
 DEFINE_RUNTIME_DEBUG_FLAG(Heap, kStressCollectorTransition);
 
-// Minimum amount of remaining bytes before a concurrent GC is triggered.
-static constexpr size_t kMinConcurrentRemainingBytes = 128 * KB;
-static constexpr size_t kMaxConcurrentRemainingBytes = 512 * KB;
 // Sticky GC throughput adjustment. Increasing this causes sticky GC to occur more
 // relative to partial/full GC. This may be desirable since sticky GCs interfere less
 // with mutator threads (lower pauses, use less memory bandwidth). The value
@@ -2328,8 +2325,6 @@ void Heap::SetDefaultConcurrentStartBytesLocked() {
   if (IsGcConcurrent()) {
     size_t target_footprint = target_footprint_.load(std::memory_order_relaxed);
     size_t reserve_bytes = target_footprint / 4;
-    reserve_bytes = std::min(reserve_bytes, kMaxConcurrentRemainingBytes);
-    reserve_bytes = std::max(reserve_bytes, kMinConcurrentRemainingBytes);
     concurrent_start_bytes_ = UnsignedDifference(target_footprint, reserve_bytes);
   } else {
     concurrent_start_bytes_ = std::numeric_limits<size_t>::max();
@@ -3922,20 +3917,13 @@ void Heap::GrowForUtilization(collector::GarbageCollector* collector_ran,
       // Calculate when to perform the next ConcurrentGC.
       // Estimate how many remaining bytes we will have when we need to start the next GC.
       size_t remaining_bytes = bytes_allocated_during_gc;
-      remaining_bytes = std::min(remaining_bytes, kMaxConcurrentRemainingBytes);
-      remaining_bytes = std::max(remaining_bytes, kMinConcurrentRemainingBytes);
       size_t target_footprint = target_footprint_.load(std::memory_order_relaxed);
-      if (UNLIKELY(remaining_bytes > target_footprint)) {
-        // A never going to happen situation that from the estimated allocation rate we will exceed
-        // the applications entire footprint with the given estimated allocation rate. Schedule
-        // another GC nearly straight away.
-        remaining_bytes = std::min(kMinConcurrentRemainingBytes, target_footprint);
-      }
       DCHECK_LE(target_footprint_.load(std::memory_order_relaxed), GetMaxMemory());
       // Start a concurrent GC when we get close to the estimated remaining bytes. When the
       // allocation rate is very high, remaining_bytes could tell us that we should start a GC
       // right away.
-      concurrent_start_bytes_ = std::max(target_footprint - remaining_bytes, bytes_allocated);
+      concurrent_start_bytes_ =
+          std::max(UnsignedDifference(target_footprint, remaining_bytes), bytes_allocated);
       // Store concurrent_start_bytes_ (computed with foreground heap growth multiplier) for update
       // itself when process state switches to foreground.
       min_foreground_concurrent_start_bytes_ =
