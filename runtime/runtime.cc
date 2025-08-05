@@ -1827,6 +1827,7 @@ bool Runtime::Init(RuntimeArgumentMap&& runtime_options_in) {
                        runtime_options.GetOrDefault(Opt::HeapMinFree),
                        runtime_options.GetOrDefault(Opt::HeapMaxFree),
                        runtime_options.GetOrDefault(Opt::HeapTargetUtilization),
+                       runtime_options.GetOrDefault(Opt::EnableTimeBasedGcTrigger),
                        runtime_options.GetOrDefault(Opt::HeapMemoryGcCostFactor),
                        foreground_heap_growth_multiplier,
                        runtime_options.GetOrDefault(Opt::StopForNativeAllocs),

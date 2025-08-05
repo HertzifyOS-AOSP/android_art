@@ -149,7 +149,10 @@ class Heap {
   static constexpr size_t kDefaultLongGCLogThresholdGcStress = MsToNs(1000);
   static constexpr size_t kDefaultTLABSize = 32 * KB;
   static constexpr double kDefaultTargetUtilization = 0.6;
-  static constexpr size_t kDefaultMemoryGcCostFactor = 0 * MB;  // disabled by default
+
+  static constexpr bool kDefaultEnableTimeBasedGcTrigger = false;
+  static constexpr size_t kDefaultMemoryGcCostFactor = 32 * MB;
+
   static constexpr double kDefaultHeapGrowthMultiplier = 2.0;
   // Primitive arrays larger than this size are put in the large object space.
   // TODO: Preliminary experiments suggest this value might be not optimal.
@@ -206,6 +209,7 @@ class Heap {
        size_t min_free,
        size_t max_free,
        double target_utilization,
+       bool enable_time_based_gc_trigger,
        size_t memory_gc_cost_factor,
        double foreground_heap_growth_multiplier,
        size_t stop_for_native_allocs,
@@ -1618,10 +1622,11 @@ class Heap {
   // Target ideal heap utilization ratio.
   double target_utilization_;
 
+  const bool enable_time_based_gc_trigger_;
+
   // How many bytes of memory we are willing to spend 1% GC cost per second on.
-  // Used for the time based concurrent GC trigger. Set to 0 to disable time
-  // based GC triggering.
-  const size_t memory_gc_cost_factor_ = 0;
+  // Used for the time based concurrent GC trigger.
+  const size_t memory_gc_cost_factor_;
 
   // The time*alloc threshold for when to trigger the next concurrent GC when
   // using time based GC triggering.
