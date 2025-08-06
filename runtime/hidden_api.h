@@ -491,6 +491,7 @@ inline bool ShouldDenyAccessToMember(T* member,
                                      const AccessContext& access_context,
                                      AccessMethod access_method)
     REQUIRES_SHARED(Locks::mutator_lock_) {
+  access_context.GetClass().AssertValid();
   return ShouldDenyAccessToMember(member, [&]() { return access_context; }, access_method);
 }
 

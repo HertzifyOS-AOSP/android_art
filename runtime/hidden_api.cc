@@ -1029,6 +1029,7 @@ bool ShouldDenyAccessToMember(T* member,
   // This can be *very* expensive. This is why ShouldDenyAccessToMember
   // should not be called on every individual access.
   const AccessContext caller_context = fn_get_access_context();
+  caller_context.GetClass().AssertValid();
   const AccessContext callee_context(member->GetDeclaringClass());
 
   // Non-boot classpath callers should have exited early.

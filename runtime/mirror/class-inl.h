@@ -323,6 +323,9 @@ template<typename T>
 inline bool Class::IsDiscoverable(bool public_only,
                                   const hiddenapi::AccessContext& access_context,
                                   T* member) {
+  // For `ObjPtr<>` poisoning, check access context's class validity even
+  // in cases when the class is not actually needed.
+  access_context.GetClass().AssertValid();
   if (public_only && ((member->GetAccessFlags() & kAccPublic) == 0)) {
     return false;
   }
