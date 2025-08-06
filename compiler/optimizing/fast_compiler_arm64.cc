@@ -565,6 +565,7 @@ bool FastCompilerARM64::ProcessInstructions() {
   DexInstructionIterator it = GetCodeItemAccessor().begin();
   DexInstructionIterator end = GetCodeItemAccessor().end();
   DCHECK(it != end);
+  bool flow_continues = false;
   do {
     DexInstructionPcPair pair = *it;
     ++it;
@@ -583,8 +584,10 @@ bool FastCompilerARM64::ProcessInstructions() {
     }
     vixl::aarch64::Label* label = GetLabelOf(pair.DexPc());
     if (label->IsLinked()) {
-      // Emulate a branch to this pc.
-      PrepareToBranch(pair.DexPc());
+      if (flow_continues) {
+        // Emulate a branch to this pc.
+        PrepareToBranch(pair.DexPc());
+      }
       // Set new masks based on all incoming edges.
       is_non_null_mask_ = is_non_null_masks_[pair.DexPc()];
       object_register_mask_ = object_register_masks_[pair.DexPc()];
@@ -624,6 +627,10 @@ bool FastCompilerARM64::ProcessInstructions() {
         << " " << pair.Inst().Name() << "@" << pair.DexPc();
 
     DCHECK(!HitUnimplemented()) << GetUnimplementedReason();
+
+    // For the next instruction, let it know if the previous instruction was
+    // flowing through.
+    flow_continues = pair.Inst().CanFlowThrough();
   } while (it != end);
   return true;
 }

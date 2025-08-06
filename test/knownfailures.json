@@ -998,6 +998,7 @@
           "852-invoke-super",
           "864-catch",
           "864-move-object",
+          "865-fallthrough",
           "900-hello-plugin",
           "901-hello-ti-agent",
           "903-hello-tagging",
