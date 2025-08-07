@@ -765,10 +765,10 @@ int LiveInterval::FindFirstRegisterHint(
       size_t input_index = use.GetInputIndex();
       if (user->IsPhi()) {
         // If the phi has a register, try to use the same.
-        Location phi_location = user->GetLiveInterval()->ToLocation();
-        if (phi_location.IsRegisterKind()) {
-          DCHECK(SameRegisterKind(phi_location));
-          int reg = RegisterOrLowRegister(phi_location);
+        DCHECK(SameRegisterKind(*user->GetLiveInterval()));
+        DCHECK_EQ(HasHighInterval(), user->GetLiveInterval()->HasHighInterval());
+        if (user->GetLiveInterval()->HasRegister()) {
+          int reg = user->GetLiveInterval()->GetRegister();
           if (free_until[reg] >= use_position) {
             return reg;
           }
@@ -781,10 +781,13 @@ int LiveInterval::FindFirstRegisterHint(
             if (i == input_index) {
               continue;
             }
-            Location location = inputs[i]->GetLiveInterval()->GetLocationAt(
+            LiveInterval* sibling = inputs[i]->GetLiveInterval()->GetSiblingAt(
                 user->GetBlock()->GetPredecessors()[i]->GetLifetimeEnd() - 1);
-            if (location.IsRegisterKind()) {
-              int reg = RegisterOrLowRegister(location);
+            DCHECK(sibling != nullptr);
+            DCHECK(SameRegisterKind(*sibling));
+            DCHECK_EQ(HasHighInterval(), sibling->HasHighInterval());
+            if (sibling->HasRegister()) {
+              int reg = sibling->GetRegister();
               if (free_until[reg] >= use_position) {
                 return reg;
               }
@@ -823,10 +826,10 @@ int LiveInterval::FindHintAtDefinition() const {
       if (input_interval->GetEnd() == end) {
         // If the input dies at the end of the predecessor, we know its register can
         // be reused.
-        Location input_location = input_interval->ToLocation();
-        if (input_location.IsRegisterKind()) {
-          DCHECK(SameRegisterKind(input_location));
-          return RegisterOrLowRegister(input_location);
+        DCHECK(SameRegisterKind(*input_interval));
+        DCHECK_EQ(HasHighInterval(), input_interval->HasHighInterval());
+        if (input_interval->HasRegister()) {
+          return input_interval->GetRegister();
         }
       }
     }
@@ -840,10 +843,10 @@ int LiveInterval::FindHintAtDefinition() const {
       if (input_interval->GetEnd() == GetStart()) {
         // If the input dies at the start of this instruction, we know its register can
         // be reused.
-        Location location = input_interval->ToLocation();
-        if (location.IsRegisterKind()) {
-          DCHECK(SameRegisterKind(location));
-          return RegisterOrLowRegister(location);
+        DCHECK(SameRegisterKind(*input_interval));
+        DCHECK_EQ(HasHighInterval(), input_interval->HasHighInterval());
+        if (input_interval->HasRegister()) {
+          return input_interval->GetRegister();
         }
       }
     }
@@ -879,41 +882,6 @@ size_t LiveInterval::NumberOfSpillSlotsNeeded() const {
   }
   // Return number of needed spill slots based on type.
   return (type_ == DataType::Type::kInt64 || type_ == DataType::Type::kFloat64) ? 2 : 1;
-}
-
-Location LiveInterval::ToLocation() const {
-  DCHECK(!IsHighInterval());
-  if (HasRegister()) {
-    if (IsFloatingPoint()) {
-      if (HasHighInterval()) {
-        return Location::FpuRegisterPairLocation(GetRegister(), GetHighInterval()->GetRegister());
-      } else {
-        return Location::FpuRegisterLocation(GetRegister());
-      }
-    } else {
-      if (HasHighInterval()) {
-        return Location::RegisterPairLocation(GetRegister(), GetHighInterval()->GetRegister());
-      } else {
-        return Location::RegisterLocation(GetRegister());
-      }
-    }
-  } else {
-    HInstruction* defined_by = GetParent()->GetDefinedBy();
-    if (defined_by->IsConstant()) {
-      return defined_by->GetLocations()->Out();
-    } else if (GetParent()->HasSpillSlot()) {
-      return Location::StackSlotByNumOfSlots(NumberOfSpillSlotsNeeded(),
-                                             GetParent()->GetSpillSlot());
-    } else {
-      return Location();
-    }
-  }
-}
-
-Location LiveInterval::GetLocationAt(size_t position) {
-  LiveInterval* sibling = GetSiblingAt(position);
-  DCHECK(sibling != nullptr);
-  return sibling->ToLocation();
 }
 
 LiveInterval* LiveInterval::GetSiblingAt(size_t position) {
