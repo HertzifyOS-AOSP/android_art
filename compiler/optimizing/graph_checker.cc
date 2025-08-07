@@ -742,6 +742,16 @@ void GraphChecker::VisitInstruction(HInstruction* instruction) {
 void GraphChecker::VisitInvoke(HInvoke* invoke) {
   VisitInstruction(invoke);
 
+  size_t input_count = invoke->InputCount();
+  size_t num_args = invoke->GetNumberOfArguments();
+  if (input_count < num_args) {
+    AddError(StringPrintf("Invoke %s:%d has fewer inputs than arguments, %zu < %zu",
+                          invoke->DebugName(),
+                          invoke->GetId(),
+                          input_count,
+                          num_args));
+  }
+
   if (invoke->AlwaysThrows()) {
     if (!GetGraph()->HasAlwaysThrowingInvokes()) {
       AddError(
@@ -775,20 +785,28 @@ void GraphChecker::VisitInvokeStaticOrDirect(HInvokeStaticOrDirect* invoke) {
   VisitInvoke(invoke);
 
   if (invoke->IsStaticWithExplicitClinitCheck()) {
-    const HInstruction* last_input = invoke->GetInputs().back();
-    if (last_input == nullptr) {
+    auto inputs = invoke->GetInputs();
+    if (inputs.size() <= invoke->GetNumberOfArguments()) {
       AddError(StringPrintf("Static invoke %s:%d marked as having an explicit clinit check "
-                            "has a null pointer as last input.",
+                            "has no extra input.",
                             invoke->DebugName(),
                             invoke->GetId()));
-    } else if (!last_input->IsClinitCheck() && !last_input->IsLoadClass()) {
-      AddError(StringPrintf("Static invoke %s:%d marked as having an explicit clinit check "
-                            "has a last instruction (%s:%d) which is neither a clinit check "
-                            "nor a load class instruction.",
-                            invoke->DebugName(),
-                            invoke->GetId(),
-                            last_input->DebugName(),
-                            last_input->GetId()));
+    } else {
+      const HInstruction* last_input = inputs.back();
+      if (last_input == nullptr) {
+        AddError(StringPrintf("Static invoke %s:%d marked as having an explicit clinit check "
+                              "has a null pointer as last input.",
+                              invoke->DebugName(),
+                              invoke->GetId()));
+      } else if (!last_input->IsClinitCheck() && !last_input->IsLoadClass()) {
+        AddError(StringPrintf("Static invoke %s:%d marked as having an explicit clinit check "
+                              "has a last instruction (%s:%d) which is neither a clinit check "
+                              "nor a load class instruction.",
+                              invoke->DebugName(),
+                              invoke->GetId(),
+                              last_input->DebugName(),
+                              last_input->GetId()));
+      }
     }
   }
 }

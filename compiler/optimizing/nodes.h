@@ -2103,7 +2103,7 @@ IterationRange<HSTLInstructionIterator<InnerIter>> MakeSTLInstructionIteratorRan
 class HVariableInputSizeInstruction : public HInstruction {
  public:
   using HInstruction::GetInputRecords;  // Keep the const version visible.
-  ArrayRef<HUserRecord<HInstruction*>> GetInputRecords() override {
+  ArrayRef<HUserRecord<HInstruction*>> GetInputRecords() final {
     return ArrayRef<HUserRecord<HInstruction*>>(inputs_);
   }
 
@@ -4196,25 +4196,6 @@ class HInvokeStaticOrDirect final : public HInvoke {
 
   DispatchInfo GetDispatchInfo() const {
     return dispatch_info_;
-  }
-
-  using HInstruction::GetInputRecords;  // Keep the const version visible.
-  ArrayRef<HUserRecord<HInstruction*>> GetInputRecords() override {
-    ArrayRef<HUserRecord<HInstruction*>> input_records = HInvoke::GetInputRecords();
-    if (kIsDebugBuild && IsStaticWithExplicitClinitCheck()) {
-      DCHECK(!input_records.empty());
-      DCHECK_GT(input_records.size(), GetNumberOfArguments());
-      HInstruction* last_input = input_records.back().GetInstruction();
-      // Note: `last_input` may be null during arguments setup.
-      if (last_input != nullptr) {
-        // `last_input` is the last input of a static invoke marked as having
-        // an explicit clinit check. It must either be:
-        // - an art::HClinitCheck instruction, set by art::HGraphBuilder; or
-        // - an art::HLoadClass instruction, set by art::PrepareForRegisterAllocation.
-        DCHECK(last_input->IsClinitCheck() || last_input->IsLoadClass()) << last_input->DebugName();
-      }
-    }
-    return input_records;
   }
 
   bool CanDoImplicitNullCheckOn([[maybe_unused]] HInstruction* obj) const override {
