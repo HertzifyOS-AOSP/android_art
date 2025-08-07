@@ -867,7 +867,6 @@ void FastCompilerARM64::RecordPcInfo(uint32_t dex_pc) {
         }
 
         case Location::kRegister: {
-          int id = location.reg();
           stack_map_stream->AddDexRegisterEntry(Kind::kInRegister, location.reg());
           DCHECK(!compiler_options_.GetDebuggable());
           // Note: if we were using the fast compiler for debuggable, we would
@@ -983,7 +982,6 @@ bool FastCompilerARM64::EnsureHasFrame() {
   // Increment hotness. We use the ArtMethod's counter as we're not allocating a
   // `ProfilingInfo` object in the fast baseline compiler.
   if (!Runtime::Current()->IsAotCompiler()) {
-    uint64_t address = reinterpret_cast64<uint64_t>(method_);
     UseScratchRegisterScope temps(masm);
     Register counter = temps.AcquireW();
     vixl::aarch64::Label increment, done;

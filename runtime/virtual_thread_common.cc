@@ -132,7 +132,6 @@ bool VirtualThreadPark(ObjPtr<mirror::Object> v_context,
   }
 
   StackHandleScope<9> hs(self);
-  ClassLinker* cl = Runtime::Current()->GetClassLinker();
 
   Handle<mirror::Object> v_context_h = hs.NewHandle(v_context);
   Handle<mirror::Object> parked_states_h = hs.NewHandle(parked_states);
@@ -155,7 +154,6 @@ bool VirtualThreadPark(ObjPtr<mirror::Object> v_context,
 
   DCHECK(!Runtime::Current()->IsActiveTransaction());
 
-  Runtime* runtime = Runtime::Current();
   Handle<mirror::ObjectArray<mirror::Object>> frames_h =
       hs.NewHandle(mirror::ObjectArray<mirror::Object>::Alloc(
           self,

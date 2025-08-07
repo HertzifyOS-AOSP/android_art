@@ -916,7 +916,6 @@ static ObjPtr<mirror::CallSite> InvokeBootstrapMethod(Thread* self,
 
   // Check if this BSM is targeting a variable arity method. If so,
   // we'll need to collect the trailing arguments into an array.
-  Handle<mirror::Array> collector_arguments;
   int32_t collector_arguments_length;
   if (bsm->GetTargetMethod()->IsVarargs()) {
     int number_of_bsm_parameters = bsm->GetMethodType()->GetNumberOfPTypes();

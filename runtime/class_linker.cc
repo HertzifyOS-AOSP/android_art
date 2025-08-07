@@ -8618,7 +8618,6 @@ bool ClassLinker::LinkMethodsHelper<kPointerSize>::FinalizeIfTable(
     if (method_array == nullptr) {
       continue;
     }
-    size_t num_methods = method_array->GetLength();
     ObjPtr<mirror::Class> iface = iftable->GetInterface(i);
     for (ArtMethod& interface_method : iface->GetDeclaredMethods(kPointerSize)) {
       if (!interface_method.IsVirtual()) {
@@ -10668,7 +10667,6 @@ ObjPtr<mirror::MethodHandle> ClassLinker::ResolveMethodHandleForField(
     return nullptr;
   }
 
-  Handle<mirror::Class> constructor_class;
   Handle<mirror::Class> return_type;
   switch (handle_type) {
     case DexFile::MethodHandleType::kStaticPut: {

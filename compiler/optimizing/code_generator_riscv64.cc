@@ -5479,7 +5479,6 @@ void InstructionCodeGeneratorRISCV64::HandleBitManipulations(HBinaryOperation* i
 
   if (rs2_location.IsConstant()) {
     int64_t imm = CodeGenerator::GetInt64ValueOf(rs2_location.GetConstant());
-    DataType::Type type = instruction->GetResultType();
     uint32_t shamt = imm & kMaxLongShiftDistance;
     if (instruction->IsRiscv64BitSet()) {
       __ Bseti(rd, rs1, shamt);

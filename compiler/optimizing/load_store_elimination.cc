@@ -622,7 +622,6 @@ class LSEVisitor final : public CRTPGraphVisitor<LSEVisitor> {
       // We record only conversions that define sign-/zero-extension bits to store.
       while (value.NeedsConvertedLoopPhi() &&
              DataType::Size(value.GetLoopPhiConversionLoad()->GetType()) >= store_size) {
-        HInstruction* conversion_load = value.GetLoopPhiConversionLoad();
         ValueRecord* prev_record =
             loads_requiring_loop_phi_[value.GetLoopPhiConversionLoad()->GetId()];
         DCHECK(prev_record != nullptr);

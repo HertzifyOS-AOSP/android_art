@@ -959,7 +959,6 @@ HInstruction* HInliner::AddTypeGuard(HInstruction* receiver,
                                      Handle<mirror::Class> klass,
                                      HInstruction* invoke_instruction,
                                      bool with_deoptimization) {
-  ClassLinker* class_linker = caller_compilation_unit_.GetClassLinker();
   HInstanceFieldGet* receiver_class = BuildGetReceiverClass(
       receiver, invoke_instruction->GetDexPc());
   if (cursor != nullptr) {

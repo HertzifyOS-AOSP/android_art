@@ -4755,7 +4755,6 @@ void Thread::SetTlab(uint8_t* start, uint8_t* end, uint8_t* limit) {
 }
 
 void Thread::ResetTlab() {
-  gc::Heap* const heap = Runtime::Current()->GetHeap();
   SetTlab(nullptr, nullptr, nullptr);
 }
 
