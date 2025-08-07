@@ -176,12 +176,6 @@ class ThreadList {
   void RunEmptyCheckpoint()
       REQUIRES(!Locks::thread_list_lock_, !Locks::thread_suspend_count_lock_);
 
-  // Similar as above, but expects the mutator lock to be held, and will release
-  // it temporarily while all the checkpoints are being run.
-  void RunEmptyCheckpointWithMutatorLockHeld()
-      REQUIRES_SHARED(Locks::mutator_lock_)
-      REQUIRES(!Locks::thread_list_lock_, !Locks::thread_suspend_count_lock_);
-
   // Used to flip thread roots from from-space refs to to-space refs. Used only by the concurrent
   // moving collectors during a GC, and hence cannot be called from multiple threads concurrently.
   //

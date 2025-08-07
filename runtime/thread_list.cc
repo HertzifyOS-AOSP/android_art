@@ -475,29 +475,6 @@ size_t ThreadList::RunCheckpoint(Closure* checkpoint_function,
   return count;
 }
 
-void ThreadList::RunEmptyCheckpointWithMutatorLockHeld() {
-  Thread* self = Thread::Current();
-  if (Locks::mutator_lock_->IsExclusiveHeld(self)) {
-    // We do not need a checkpoint because no other thread is Runnable.
-    return;
-  }
-  DCHECK(Locks::mutator_lock_->IsSharedHeld(self));
-  // Use explicit state transitions or unlock/lock.
-  bool runnable = (self->GetState() == ThreadState::kRunnable);
-  if (runnable) {
-    self->TransitionFromRunnableToSuspended(ThreadState::kNative);
-  } else {
-    Locks::mutator_lock_->SharedUnlock(self);
-  }
-  DCHECK(!Locks::mutator_lock_->IsSharedHeld(self));
-  RunEmptyCheckpoint();
-  if (runnable) {
-    self->TransitionFromSuspendedToRunnable();
-  } else {
-    Locks::mutator_lock_->SharedLock(self);
-  }
-}
-
 void ThreadList::RunEmptyCheckpoint() {
   Thread* self = Thread::Current();
   Locks::mutator_lock_->AssertNotExclusiveHeld(self);

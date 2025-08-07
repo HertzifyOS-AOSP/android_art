@@ -509,7 +509,25 @@ void FaultManager::RemoveGeneratedCodeRange(const void* start, size_t size) {
     // and it's safe to release and re-acquire the mutator lock. Despite holding the
     // mutator lock as shared, the thread is not always marked as `Runnable`.
     // TODO: Clean up state transitions in different GC implementations. b/259440389
-    runtime->GetThreadList()->RunEmptyCheckpointWithMutatorLockHeld();
+    if (Locks::mutator_lock_->IsExclusiveHeld(self)) {
+      // We do not need a checkpoint because no other thread is Runnable.
+    } else {
+      DCHECK(Locks::mutator_lock_->IsSharedHeld(self));
+      // Use explicit state transitions or unlock/lock.
+      bool runnable = (self->GetState() == ThreadState::kRunnable);
+      if (runnable) {
+        self->TransitionFromRunnableToSuspended(ThreadState::kNative);
+      } else {
+        Locks::mutator_lock_->SharedUnlock(self);
+      }
+      DCHECK(!Locks::mutator_lock_->IsSharedHeld(self));
+      runtime->GetThreadList()->RunEmptyCheckpoint();
+      if (runnable) {
+        self->TransitionFromSuspendedToRunnable();
+      } else {
+        Locks::mutator_lock_->SharedLock(self);
+      }
+    }
   }
   FreeGeneratedCodeRange(range);
 }
