@@ -1712,9 +1712,6 @@ void TraceWriter::FlushBuffer(uintptr_t* method_trace_entries,
   // method id for each method. We do that by maintaining a map from id to method for each newly
   // seen method. trace_writer_lock_ is required to serialize these.
   MutexLock mu(Thread::Current(), trace_writer_lock_);
-  size_t current_index = 0;
-  uint8_t* buffer_ptr = buf_.get();
-  size_t buffer_size = buffer_size_;
 
   size_t num_entries = GetNumEntries(clock_source_);
   size_t num_records = (kPerThreadBufSize - current_offset) / num_entries;

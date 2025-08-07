@@ -565,6 +565,7 @@ bool FastCompilerARM64::ProcessInstructions() {
   DexInstructionIterator it = GetCodeItemAccessor().begin();
   DexInstructionIterator end = GetCodeItemAccessor().end();
   DCHECK(it != end);
+  bool flow_continues = false;
   do {
     DexInstructionPcPair pair = *it;
     ++it;
@@ -583,8 +584,10 @@ bool FastCompilerARM64::ProcessInstructions() {
     }
     vixl::aarch64::Label* label = GetLabelOf(pair.DexPc());
     if (label->IsLinked()) {
-      // Emulate a branch to this pc.
-      PrepareToBranch(pair.DexPc());
+      if (flow_continues) {
+        // Emulate a branch to this pc.
+        PrepareToBranch(pair.DexPc());
+      }
       // Set new masks based on all incoming edges.
       is_non_null_mask_ = is_non_null_masks_[pair.DexPc()];
       object_register_mask_ = object_register_masks_[pair.DexPc()];
@@ -624,6 +627,10 @@ bool FastCompilerARM64::ProcessInstructions() {
         << " " << pair.Inst().Name() << "@" << pair.DexPc();
 
     DCHECK(!HitUnimplemented()) << GetUnimplementedReason();
+
+    // For the next instruction, let it know if the previous instruction was
+    // flowing through.
+    flow_continues = pair.Inst().CanFlowThrough();
   } while (it != end);
   return true;
 }
@@ -867,7 +874,6 @@ void FastCompilerARM64::RecordPcInfo(uint32_t dex_pc) {
         }
 
         case Location::kRegister: {
-          int id = location.reg();
           stack_map_stream->AddDexRegisterEntry(Kind::kInRegister, location.reg());
           DCHECK(!compiler_options_.GetDebuggable());
           // Note: if we were using the fast compiler for debuggable, we would
@@ -983,7 +989,6 @@ bool FastCompilerARM64::EnsureHasFrame() {
   // Increment hotness. We use the ArtMethod's counter as we're not allocating a
   // `ProfilingInfo` object in the fast baseline compiler.
   if (!Runtime::Current()->IsAotCompiler()) {
-    uint64_t address = reinterpret_cast64<uint64_t>(method_);
     UseScratchRegisterScope temps(masm);
     Register counter = temps.AcquireW();
     vixl::aarch64::Label increment, done;

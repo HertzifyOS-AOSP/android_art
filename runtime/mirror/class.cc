@@ -2378,6 +2378,16 @@ size_t Class::GetProxyThrowsIndex(ArtMethod* method) REQUIRES_SHARED(Locks::muta
   return static_cast<size_t>(-1);
 }
 
+template <PointerSize kPointerSize>
+ArtMethod* Class::FindDeclaredClassMethodSlow(uint32_t dex_method_idx) {
+  for (ArtMethod& m : GetDeclaredMethods(kPointerSize)) {
+    if (m.GetDexMethodIndex() == dex_method_idx) {
+      return &m;
+    }
+  }
+  return nullptr;
+}
+
 
 }  // namespace mirror
 }  // namespace art

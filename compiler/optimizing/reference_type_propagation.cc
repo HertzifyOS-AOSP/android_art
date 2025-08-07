@@ -753,7 +753,6 @@ void ReferenceTypePropagation::RTPVisitor::VisitPhi(HPhi* phi) {
 void ReferenceTypePropagation::FixUpSelectType(HSelect* select, HandleCache* handle_cache) {
   ReferenceTypeInfo false_rti = select->GetFalseValue()->GetReferenceTypeInfo();
   ReferenceTypeInfo true_rti = select->GetTrueValue()->GetReferenceTypeInfo();
-  ReferenceTypeInfo rti = ReferenceTypeInfo::CreateInvalid();
   ScopedObjectAccess soa(Thread::Current());
   select->SetReferenceTypeInfo(MergeTypes(false_rti, true_rti, handle_cache));
 }

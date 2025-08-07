@@ -23,23 +23,15 @@ namespace art HIDDEN {
 
 namespace riscv64 {
 
-class InstructionSimplifierRiscv64Visitor final : public HGraphVisitor {
+class InstructionSimplifierRiscv64Visitor final
+    : public CRTPGraphVisitor<InstructionSimplifierRiscv64Visitor> {
  public:
   InstructionSimplifierRiscv64Visitor(HGraph* graph, OptimizingCompilerStats* stats)
-      : HGraphVisitor(graph), stats_(stats) {}
+      : CRTPGraphVisitor(graph), stats_(stats) {}
 
  private:
   void RecordSimplification() {
     MaybeRecordStat(stats_, MethodCompilationStat::kInstructionSimplificationsArch);
-  }
-
-  void VisitBasicBlock(HBasicBlock* block) override {
-    for (HInstructionIteratorPrefetchNext it(block->GetInstructions()); !it.Done(); it.Advance()) {
-      HInstruction* instruction = it.Current();
-      HInstruction* next = instruction->GetNext();
-      Dispatch(instruction);
-      DCHECK_IMPLIES(next != nullptr, next->IsInBlock()) << instruction->DebugName();
-    }
   }
 
   // Replace Add which has Shl with distance of 1 or 2 or 3 with Riscv64ShiftAdd
@@ -83,12 +75,34 @@ class InstructionSimplifierRiscv64Visitor final : public HGraphVisitor {
     return true;
   }
 
+  // Keep `ForwardVisit()` functions from base class visible except for those we replace below.
+  using CRTPGraphVisitor::ForwardVisit;
+
+  // Forward `Or` and `Xor` to `HandleOrXor()`.
+  static constexpr auto ForwardVisit(void (CRTPGraphVisitor::*visit)(HOr*)) {
+    DCHECK(visit == &CRTPGraphVisitor::VisitOr);
+    return &InstructionSimplifierRiscv64Visitor::HandleOrXor;
+  }
+  static constexpr auto ForwardVisit(void (CRTPGraphVisitor::*visit)(HXor*)) {
+    DCHECK(visit == &CRTPGraphVisitor::VisitXor);
+    return &InstructionSimplifierRiscv64Visitor::HandleOrXor;
+  }
+
+  void HandleOrXor(HBinaryOperation* bitwise_op) {
+    DCHECK(bitwise_op->IsOr() || bitwise_op->IsXor());
+    if (TryMergeNegatedInput(bitwise_op)) {
+      RecordSimplification();
+    } else if (TryOptimizeWithBitManipulation(bitwise_op)) {
+      RecordSimplification();
+    }
+  }
+
   // Replace code looking like
   //    SHL tmp, a, 1 or 2 or 3
   //    ADD dst, tmp, b
   // with
   //    Riscv64ShiftAdd dst, a, b
-  void VisitAdd(HAdd* add) override {
+  void VisitAdd(HAdd* add) {
     HInstruction* left = add->GetLeft();
     HInstruction* right = add->GetRight();
     if ((left->IsShl() && TryReplaceAddShlWithShiftAdd(add, left->AsShl(), right)) ||
@@ -285,7 +299,7 @@ class InstructionSimplifierRiscv64Visitor final : public HGraphVisitor {
     return true;
   }
 
-  void VisitAnd(HAnd* inst) override {
+  void VisitAnd(HAnd* inst) {
     if (TryOptimizeWithBitManipulation(inst)) {
       RecordSimplification();
     } else if (TryMergeNegatedInput(inst)) {
@@ -293,29 +307,15 @@ class InstructionSimplifierRiscv64Visitor final : public HGraphVisitor {
     }
   }
 
-  void VisitOr(HOr* inst) override {
-    if (TryMergeNegatedInput(inst)) {
-      RecordSimplification();
-    } else if (TryOptimizeWithBitManipulation(inst)) {
-      RecordSimplification();
-    }
-  }
-
-  void VisitXor(HXor* inst) override {
-    if (TryMergeNegatedInput(inst)) {
-      RecordSimplification();
-    } else if (TryOptimizeWithBitManipulation(inst)) {
-      RecordSimplification();
-    }
-  }
-
-  void VisitSub(HSub* inst) override {
+  void VisitSub(HSub* inst) {
     if (TryMergeWithAnd(inst)) {
       RecordSimplification();
     }
   }
 
   OptimizingCompilerStats* stats_ = nullptr;
+
+  template <typename T> friend class art::CRTPGraphVisitor;
 };
 
 bool InstructionSimplifierRiscv64::Run() {

@@ -98,6 +98,12 @@ class ShifterOperandMap {
   ScopedArenaHashMap<HInstruction*, HInstruction*> instruction_map_;
 };
 
+// Is an instruction before another one in reverse post order?
+//
+// Used to determine if an instruction was already visited, os shall be visited later
+// during reverse post order visit. Not applicable to Phis.
+bool IsBeforeInReversePostOrder(HGraph* graph, HInstruction* lhs, HInstruction* rhs);
+
 }  // namespace helpers
 
 bool TrySimpleMultiplyAccumulatePatterns(HMul* mul, InstructionSet isa);

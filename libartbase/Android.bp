@@ -156,7 +156,6 @@ cc_defaults {
             export_static_lib_headers: [
                 "art-aconfig-flags-lib",
                 "art-aconfig-rw-flags-lib",
-                "libaconfig_storage_read_api_cc",
                 "libcore-aconfig-flags-native-lib",
             ],
         },
@@ -174,7 +173,6 @@ cc_defaults {
             export_static_lib_headers: [
                 "art-aconfig-flags-lib",
                 "art-aconfig-rw-flags-lib",
-                "libaconfig_storage_read_api_cc",
                 "libcore-aconfig-flags-native-lib",
             ],
         },

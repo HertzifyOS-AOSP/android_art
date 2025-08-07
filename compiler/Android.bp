@@ -526,11 +526,13 @@ art_cc_defaults {
     codegen: {
         arm: {
             srcs: [
+                "optimizing/instruction_simplifier_arm_test.cc",
                 "utils/arm/managed_register_arm_test.cc",
             ],
         },
         arm64: {
             srcs: [
+                "optimizing/instruction_simplifier_arm64_test.cc",
                 "utils/arm64/managed_register_arm64_test.cc",
             ],
         },

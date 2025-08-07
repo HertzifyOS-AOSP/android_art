@@ -51,8 +51,6 @@ static constexpr size_t kMaxEntriesAfterFlush = kAlwaysOnTraceBufSize / 2;
 // bytes free space in the buffer.
 static constexpr size_t kMinBufSizeForEncodedData = kAlwaysOnTraceBufSize * kMaxBytesPerTraceEntry;
 
-static constexpr size_t kProfileMagicValue = 0x4C4F4D54;
-
 // TODO(mythria): 10 is a randomly chosen value. Tune it if required.
 static constexpr size_t kBufSizeForEncodedData = kMinBufSizeForEncodedData * 10;
 

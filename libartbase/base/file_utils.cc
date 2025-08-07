@@ -83,7 +83,6 @@ static constexpr const char* kAndroidDataDefaultPath = "/data";
 static constexpr const char* kAndroidExpandEnvVar = "ANDROID_EXPAND";
 static constexpr const char* kAndroidExpandDefaultPath = "/mnt/expand";
 static constexpr const char* kAndroidArtRootEnvVar = "ANDROID_ART_ROOT";
-static constexpr const char* kAndroidConscryptRootEnvVar = "ANDROID_CONSCRYPT_ROOT";
 static constexpr const char* kApexDefaultPath = "/apex/";
 static constexpr const char* kArtApexDataEnvVar = "ART_APEX_DATA";
 static constexpr const char* kBootImageStem = "boot";
