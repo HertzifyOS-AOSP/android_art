@@ -16,6 +16,7 @@
 
 package com.android.server.art;
 
+import static com.android.server.art.model.ValidationResult.FILENAME_MISMATCH;
 import static com.android.server.art.model.ValidationResult.INVALID_SDM_BAD_APK_SIGNATURE;
 import static com.android.server.art.model.ValidationResult.INVALID_SDM_BAD_SDM_SIGNATURE;
 import static com.android.server.art.model.ValidationResult.INVALID_SDM_INVALID_ISA;
@@ -41,6 +42,7 @@ import com.android.art.flags.Flags;
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.server.art.model.ValidationResult;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -65,6 +67,7 @@ public final class ArtManagedInstallFileHelper {
                     .stream()
                     .map(isa -> "." + isa + ArtConstants.SECURE_DEX_METADATA_FILE_EXT)
                     .toList();
+    private static final String APK_FILE_EXT = ".apk";
 
     /** @hide */
     @VisibleForTesting public static Injector sInjector = new Injector();
@@ -150,9 +153,10 @@ public final class ArtManagedInstallFileHelper {
         for (String path : paths) {
             if (path.endsWith(ArtConstants.SECURE_DEX_METADATA_FILE_EXT)) {
                 results.add(validateSdmFile(path));
-            } else if (path.endsWith(ArtConstants.DEX_METADATA_FILE_EXT)
-                    || path.endsWith(ArtConstants.PROFILE_FILE_EXT)) {
-                results.add(new ValidationResult(path, RESULT_ACCEPTED));
+            } else if (path.endsWith(ArtConstants.DEX_METADATA_FILE_EXT)) {
+                results.add(validateDmFile(path));
+            } else if (path.endsWith(ArtConstants.PROFILE_FILE_EXT)) {
+                results.add(validateProfFile(path));
             } else {
                 results.add(new ValidationResult(path, RESULT_UNRECOGNIZED, UNRECOGNIZED_PATH,
                         String.format(
@@ -167,13 +171,21 @@ public final class ArtManagedInstallFileHelper {
         String apkPath = null;
         for (String suffix : SDM_SUFFIXES) {
             if (path.endsWith(suffix)) {
-                apkPath = path.substring(0, path.length() - suffix.length()) + ".apk";
+                apkPath = path.substring(0, path.length() - suffix.length()) + APK_FILE_EXT;
             }
         }
         if (apkPath == null) {
             return new ValidationResult(path, RESULT_SHOULD_DELETE_AND_CONTINUE,
                     INVALID_SDM_INVALID_ISA,
                     String.format("Missing or invalid instruction set name in SDM filename '%s'",
+                            Paths.get(path).getFileName()));
+        }
+
+        // Such an error would be detected by `getVerifiedSigningInfo` below too, but we can give a
+        // more informative error message if we check for it here.
+        if (!sInjector.exists(apkPath)) {
+            return new ValidationResult(path, RESULT_SHOULD_DELETE_AND_CONTINUE, FILENAME_MISMATCH,
+                    String.format("SDM filename '%s' does not correspond to any APK",
                             Paths.get(path).getFileName()));
         }
 
@@ -214,6 +226,28 @@ public final class ArtManagedInstallFileHelper {
         return new ValidationResult(path, RESULT_ACCEPTED);
     }
 
+    private static @NonNull ValidationResult validateDmFile(@NonNull String path) {
+        String apkPath = Utils.replaceFileExtension(path, APK_FILE_EXT);
+        if (!sInjector.exists(apkPath)) {
+            return new ValidationResult(path, RESULT_SHOULD_DELETE_AND_CONTINUE, FILENAME_MISMATCH,
+                    String.format("DM filename '%s' does not correspond to any APK",
+                            Paths.get(path).getFileName()));
+        }
+
+        return new ValidationResult(path, RESULT_ACCEPTED);
+    }
+
+    private static @NonNull ValidationResult validateProfFile(@NonNull String path) {
+        String apkPath = path.substring(0, path.length() - ArtConstants.PROFILE_FILE_EXT.length());
+        if (!apkPath.endsWith(APK_FILE_EXT) || !sInjector.exists(apkPath)) {
+            return new ValidationResult(path, RESULT_SHOULD_DELETE_AND_CONTINUE, FILENAME_MISMATCH,
+                    String.format("Profile filename '%s' does not correspond to any APK",
+                            Paths.get(path).getFileName()));
+        }
+
+        return new ValidationResult(path, RESULT_ACCEPTED);
+    }
+
     /**
      * Injector pattern for testing purpose.
      *
@@ -227,6 +261,10 @@ public final class ArtManagedInstallFileHelper {
                 /* @AppSigningSchemeVersion */ int minAppSigningSchemeVersion)
                 throws SigningInfoException {
             return PackageManager.getVerifiedSigningInfo(path, minAppSigningSchemeVersion);
+        }
+
+        public boolean exists(@NonNull String path) {
+            return Files.exists(Paths.get(path));
         }
     }
 }

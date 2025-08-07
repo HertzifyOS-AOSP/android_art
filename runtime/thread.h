@@ -2154,7 +2154,7 @@ class EXPORT Thread {
   // when StrictMode events are traced for the current thread.
   static bool (*is_sensitive_thread_hook_)();
   // Stores the jit sensitive thread (which for now is the UI thread).
-  static Thread* jit_sensitive_thread_;
+  LIBART_PROTECTED static Thread* jit_sensitive_thread_;
 
   static constexpr uint32_t kMakeVisiblyInitializedCounterTriggerCount = 128;
 

@@ -78,6 +78,9 @@ public class ValidationResult {
     @VisibleForTesting public static final String UNRECOGNIZED_PATH = "UNRECOGNIZED_PATH";
 
     /** @hide */
+    @VisibleForTesting public static final String FILENAME_MISMATCH = "FILENAME_MISMATCH";
+
+    /** @hide */
     @VisibleForTesting
     public static final String INVALID_SDM_INVALID_ISA = "INVALID_SDM_INVALID_ISA";
 

@@ -1450,34 +1450,26 @@ bool OptimizingCompiler::JitCompile(Thread* self,
       /*verified_method=*/ nullptr,
       dex_cache,
       compiling_class);
-  {
-    // Go to native so that we don't block GC during compilation.
-    ScopedThreadSuspension sts(self, ThreadState::kNative);
-    if (com::android::art::flags::fast_baseline_compiler() &&
-        compilation_kind == CompilationKind::kBaseline &&
-        !compiler_options.GetDebuggable()) {
+  if (compilation_kind == CompilationKind::kFast) {
+    if (!compiler_options.GetDebuggable()) {
+      // Go to native so that we don't block GC during compilation.
+      ScopedThreadSuspension sts(self, ThreadState::kNative);
       fast_compiler = FastCompiler::Compile(method,
                                             &allocator,
                                             &arena_stack,
                                             &handles,
                                             compiler_options,
                                             dex_compilation_unit);
-    }
-    if (fast_compiler == nullptr) {
-      codegen.reset(
-          TryCompile(&allocator,
-                     &arena_stack,
-                     dex_compilation_unit,
-                     method,
-                     compilation_kind,
-                     &handles));
-      if (codegen.get() == nullptr) {
+      if (fast_compiler == nullptr) {
         return false;
       }
+    } else {
+      return false;
     }
   }
 
   if (fast_compiler != nullptr) {
+    // TODO: Try to share this code with the baseline / optimized case.
     ArrayRef<const uint8_t> reserved_code;
     ArrayRef<const uint8_t> reserved_data;
     ScopedArenaVector<uint8_t> stack_maps = fast_compiler->BuildStackMaps();
@@ -1535,6 +1527,21 @@ bool OptimizingCompiler::JitCompile(Thread* self,
     }
     VLOG(jit) << "Fast compiled " << method->PrettyMethod();
   } else {
+    {
+      // Go to native so that we don't block GC during compilation.
+      ScopedThreadSuspension sts(self, ThreadState::kNative);
+      codegen.reset(
+          TryCompile(&allocator,
+                     &arena_stack,
+                     dex_compilation_unit,
+                     method,
+                     compilation_kind,
+                     &handles));
+      if (codegen.get() == nullptr) {
+        return false;
+      }
+    }
+
     ScopedArenaVector<uint8_t> stack_map = codegen->BuildStackMaps(code_item);
     ArrayRef<const uint8_t> reserved_code;
     ArrayRef<const uint8_t> reserved_data;

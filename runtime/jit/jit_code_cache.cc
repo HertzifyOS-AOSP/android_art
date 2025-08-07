@@ -266,6 +266,7 @@ JitCodeCache::JitCodeCache()
       collection_in_progress_(false),
       garbage_collect_code_(true),
       number_of_baseline_compilations_(0),
+      number_of_fast_compilations_(0),
       number_of_optimized_compilations_(0),
       number_of_osr_compilations_(0),
       number_of_collections_(0),
@@ -723,6 +724,9 @@ bool JitCodeCache::Commit(Thread* self,
     switch (compilation_kind) {
       case CompilationKind::kOsr:
         number_of_osr_compilations_++;
+        break;
+      case CompilationKind::kFast:
+        number_of_fast_compilations_++;
         break;
       case CompilationKind::kBaseline:
         number_of_baseline_compilations_++;
@@ -1647,14 +1651,20 @@ bool JitCodeCache::NotifyCompilationOf(ArtMethod* method,
                                        Thread* self,
                                        CompilationKind compilation_kind,
                                        bool prejit) {
-  const void* existing_entry_point = method->GetEntryPointFromQuickCompiledCode();
-  if (compilation_kind == CompilationKind::kBaseline && ContainsPc(existing_entry_point)) {
-    // The existing entry point is either already baseline, or optimized. No
-    // need to compile.
-    VLOG(jit) << "Not compiling "
-              << method->PrettyMethod()
-              << " baseline, because it has already been compiled";
-    return false;
+  if (compilation_kind != CompilationKind::kOsr) {
+    const void* existing_entry_point = method->GetEntryPointFromQuickCompiledCode();
+    if (ContainsPc(existing_entry_point)) {
+      CompilationKind existing_kind = CodeInfo::GetCompilationKind(
+          OatQuickMethodHeader::FromEntryPoint(existing_entry_point)->GetOptimizedCodeInfoPtr());
+      if (static_cast<size_t>(existing_kind >= compilation_kind)) {
+        // The existing entry point is either already baseline, or optimized. No
+        // need to compile.
+        VLOG(jit) << "Not compiling "
+                  << method->PrettyMethod() << " " << compilation_kind
+                  << " because it has already been compiled " << existing_kind;
+        return false;
+      }
+    }
   }
 
   if (method->NeedsClinitCheckBeforeCall() && !prejit) {
@@ -1858,6 +1868,7 @@ void JitCodeCache::Dump(std::ostream& os) {
      << "Current number of JIT JNI stub entries: " << jni_stubs_map_.size() << "\n"
      << "Current number of JIT code cache entries: " << method_code_map_.size() << "\n"
      << "Total number of JIT baseline compilations: " << number_of_baseline_compilations_ << "\n"
+     << "Total number of JIT fast compilations: " << number_of_fast_compilations_ << "\n"
      << "Total number of JIT optimized compilations: " << number_of_optimized_compilations_ << "\n"
      << "Total number of JIT compilations for on stack replacement: "
         << number_of_osr_compilations_ << "\n"
@@ -1917,6 +1928,7 @@ void JitCodeCache::PostForkChildAction(bool is_system_server, bool is_zygote) {
 
   // Reset all statistics to be specific to this process.
   number_of_baseline_compilations_ = 0;
+  number_of_fast_compilations_ = 0;
   number_of_optimized_compilations_ = 0;
   number_of_osr_compilations_ = 0;
   number_of_collections_ = 0;

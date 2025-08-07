@@ -399,6 +399,10 @@ END \name
     cbz w2, 3f
     add x2, x2, #-1
     strh w2, [x0, #ART_METHOD_HOTNESS_COUNT_OFFSET]
+#if FAST_COMPILER_SUPPORTED
+    tst w2, #(FAST_COMPILER_FREQUENCY_CHECK - 1)
+    b.eq 5f
+#endif
 1:
     DO_SUSPEND_CHECK continue_label=2f
 2:
@@ -412,6 +416,20 @@ END \name
     mov x2, xFP
     bl nterp_hot_method
     b 2b
+#if FAST_COMPILER_SUPPORTED
+5:
+#if __has_feature(hwaddress_sanitizer)
+    adrp x1, :pg_hi21_nc:_ZN3art6Thread21jit_sensitive_thread_E
+#else
+    adrp x1, _ZN3art6Thread21jit_sensitive_thread_E
+#endif
+    // We quickly want compiled code for the sensitive thread.
+    ldr x1, [x1, #:lo12:_ZN3art6Thread21jit_sensitive_thread_E]
+    cmp x1, x19
+    b.ne 1b
+    bl nterp_try_fast_compile
+    b 1b
+#endif
 .endm
 
 .macro SPILL_ALL_CALLEE_SAVES
@@ -1897,6 +1915,7 @@ NTERP_TRAMPOLINE nterp_get_class, NterpGetClass
 NTERP_TRAMPOLINE nterp_allocate_object, NterpAllocateObject
 NTERP_TRAMPOLINE nterp_get_method, NterpGetMethod
 NTERP_TRAMPOLINE nterp_hot_method, NterpHotMethod
+NTERP_TRAMPOLINE nterp_try_fast_compile, NterpTryFastCompile
 NTERP_TRAMPOLINE nterp_load_object, NterpLoadObject
 
 ENTRY nterp_deliver_pending_exception

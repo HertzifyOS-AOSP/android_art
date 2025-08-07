@@ -185,6 +185,19 @@ JitCompiler::~JitCompiler() {
   }
 }
 
+static const char* GetTimingLoggerMessage(CompilationKind compilation_kind) {
+  switch (compilation_kind) {
+    case CompilationKind::kOsr:
+      return "Compiling OSR";
+    case CompilationKind::kOptimized:
+      return "Compiling optimized";
+    case CompilationKind::kBaseline:
+      return "Compiling baseline";
+    case CompilationKind::kFast:
+      return "Compiling fast";
+  }
+}
+
 bool JitCompiler::CompileMethod(
     Thread* self, JitMemoryRegion* region, ArtMethod* method, CompilationKind compilation_kind) {
   SCOPED_TRACE << "JIT compiling "
@@ -204,12 +217,7 @@ bool JitCompiler::CompileMethod(
   bool success = false;
   Jit* jit = runtime->GetJit();
   {
-    TimingLogger::ScopedTiming t2(compilation_kind == CompilationKind::kOsr
-                                      ? "Compiling OSR"
-                                      : compilation_kind == CompilationKind::kOptimized
-                                          ? "Compiling optimized"
-                                          : "Compiling baseline",
-                                  &logger);
+    TimingLogger::ScopedTiming t2(GetTimingLoggerMessage(compilation_kind), &logger);
     JitCodeCache* const code_cache = jit->GetCodeCache();
     metrics::AutoTimer timer{runtime->GetMetrics()->JitMethodCompileTotalTime()};
     success = compiler_->JitCompile(
