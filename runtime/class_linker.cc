@@ -4930,6 +4930,20 @@ ObjPtr<mirror::Class> ClassLinker::CreateArrayClass(Thread* self,
     if (component_type == nullptr || Runtime::Current()->IsAotCompiler()) {
       DCHECK(self->IsExceptionPending());
       return nullptr;
+    } else if (!component_type->IsErroneousUnresolved()) {
+      // FindClass failed, but subsequent LookupClass returned a class that is not erroneous and
+      // unresolved. This might happen in few cases when classes are loaded by multiple threads:
+      // * if current thread is a runtime thread and there is a custom class loader in the chain
+      // * if there is a custom class loader that fails to load a class but succeeds later
+      // * if more dex files are registered in between FindClass and LookupClass calls
+      // In any of those cases the class returned from LookupClass might be temporary and should
+      // not be used as component class without waiting for resolution, which might fail and
+      // require further checks.
+      //
+      // The initial call to FindClass failed for a reason other than loading an erroneous class,
+      // it is ok to fail array class creation.
+      DCHECK(self->IsExceptionPending());
+      return nullptr;
     } else {
       self->ClearException();
     }

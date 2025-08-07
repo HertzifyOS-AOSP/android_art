@@ -1068,7 +1068,8 @@
           "2267-class-implements-itself",
           "2276-const-method-type-gc-cleanup",
           "2281-method-handle-invoke-static-class-unload",
-          "2286-invokevirtual-invokeexact"
+          "2286-invokevirtual-invokeexact",
+          "2287-no-temp-component-class"
         ],
         "variant": "jvm",
         "bug": "b/73888836",
