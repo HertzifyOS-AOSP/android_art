@@ -24,13 +24,14 @@
 #include "android-base/logging.h"
 #include "android-base/macros.h"
 #include "android-base/stringprintf.h"
-
 #include "assume_value_options.h"
 #include "assume_value_signatures.h"
 #include "base/macros.h"
 #include "cmdline_parser.h"
 #include "com_android_art_rw_flags.h"
 #include "compiler_options.h"
+
+using ::android::base::GetBoolProperty;
 
 namespace art HIDDEN {
 
@@ -162,10 +163,13 @@ inline bool ReadCompilerOptions(Base& map, CompilerOptions* options, std::string
 
   map.AssignIfExists(Base::AssumeValueOpts, &options->assume_value_options_);
 
-  if (map.Exists(Base::AllowProfileCode) &&
-      com::android::art::rw::flags::enable_profile_code_rw()) {
-    options->enable_profile_code_ = true;
-  }
+  // If the option isn't explicitly set, use the system property. Mostly used for tests.
+  // Other uses are expected to set the required value.
+  bool build_enabled = map.Exists(Base::AllowProfileCode)
+      ? *map.Get(Base::AllowProfileCode)
+      : GetBoolProperty("dalvik.vm.allow_profile_code", false);
+  options->enable_profile_code_ =
+      com::android::art::rw::flags::enable_profile_code_rw() && build_enabled;
 
   return true;
 }
@@ -308,8 +312,9 @@ NO_INLINE void AddCompilerOptionsArgumentParserOptions(Builder& b) {
                     "E.g.: --assume-value=Landroid/os/Build$VERSION;->SDK_INT:23")
           .IntoKey(Map::AssumeValueOpts)
 
-      .Define("--allow-profile-code")
+      .Define({"--allow-profile-code", "--no-allow-profile-code"})
           .WithHelp("Generate code for supporting low overhead tracing")
+          .WithValues({true, false})
           .IntoKey(Map::AllowProfileCode)
 
       // Obsolete flags

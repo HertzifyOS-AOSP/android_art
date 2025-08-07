@@ -1941,8 +1941,11 @@ void Artd::AddCompilerConfigFlags(const std::string& instruction_set,
         ART_FORMAT("--assume-value={}:{}", AssumeValueSignatures::kSdkInt.AsKey(), sdk_version));
   }
 
-  args.AddIf(props_->GetBool("dalvik.vm.allow_profile_code", /*default_value=*/false),
-             "--allow-profile-code");
+  if (props_->GetBool("dalvik.vm.allow_profile_code", /*default_value=*/false)) {
+    args.Add("--allow-profile-code");
+  } else {
+    args.Add("--no-allow-profile-code");
+  }
 }
 
 void Artd::AddPerfConfigFlags(PriorityClass priority_class,

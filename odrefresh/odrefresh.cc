@@ -432,8 +432,11 @@ void AddDex2OatCommonOptions(/*inout*/ CmdlineBuilder& args,
   // added to the oat header.
   args.Add("--avoid-storing-invocation");
 
-  args.AddIf(system_properties.GetBool("dalvik.vm.allow_profile_code", /*default_value=*/false),
-             "--allow-profile-code");
+  if (system_properties.GetBool("dalvik.vm.allow_profile_code", /*default_value=*/false)) {
+    args.Add("--allow-profile-code");
+  } else {
+    args.Add("--no-allow-profile-code");
+  }
 }
 
 bool IsCpuSetSpecValid(const std::string& cpu_set) {
