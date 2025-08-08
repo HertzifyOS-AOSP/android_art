@@ -77,10 +77,6 @@ class RegisterAllocatorLinearScan : public RegisterAllocator {
   // the interval and assign the register to the first part.
   void CheckForFixedOutput(HInstruction* instruction, bool will_call);
 
-  // Add all applicable safepoints to a live interval.
-  // Currently depends on instruction processing order.
-  void AddSafepointsFor(HInstruction* instruction);
-
   // Collect all live intervals associated with the temporary locations
   // needed by an instruction.
   void CheckForTempLiveIntervals(HInstruction* instruction, bool will_call);

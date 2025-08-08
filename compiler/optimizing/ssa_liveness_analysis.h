@@ -225,45 +225,6 @@ inline IterationRange<Iterator> FindMatchingUseRange(Iterator first,
   return MakeIterationRange(begin, end);
 }
 
-class SafepointPosition : public ArenaObject<kArenaAllocSsaLiveness>,
-                          public IntrusiveForwardListNode<SafepointPosition> {
- public:
-  explicit SafepointPosition(HInstruction* instruction)
-      : instruction_(instruction) {}
-
-  static size_t ComputePosition(HInstruction* instruction) {
-    // We special case instructions emitted at use site, as their
-    // safepoint position needs to be at their use.
-    if (instruction->IsEmittedAtUseSite()) {
-      // Currently only applies to implicit null checks, which are emitted
-      // at the next instruction.
-      DCHECK(instruction->IsNullCheck()) << instruction->DebugName();
-      return instruction->GetLifetimePosition() + kLivenessPositionsPerInstruction;
-    } else {
-      return instruction->GetLifetimePosition();
-    }
-  }
-
-  size_t GetPosition() const {
-    return ComputePosition(instruction_);
-  }
-
-  LocationSummary* GetLocations() const {
-    return instruction_->GetLocations();
-  }
-
-  HInstruction* GetInstruction() const {
-    return instruction_;
-  }
-
- private:
-  HInstruction* const instruction_;
-
-  DISALLOW_COPY_AND_ASSIGN(SafepointPosition);
-};
-
-using SafepointPositionList = IntrusiveForwardList<SafepointPosition>;
-
 /**
  * An interval is a list of disjoint live ranges where an instruction is live.
  * Each instruction that has uses gets an interval.
@@ -572,11 +533,20 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
     return defined_by_;
   }
 
-  bool HasWillCallSafepoint() const {
-    return std::any_of(
-        safepoints_.begin(),
-        safepoints_.end(),
-        [](const SafepointPosition& safepoint) { return safepoint.GetLocations()->WillCall(); });
+  bool HasWillCallSafepoint(ArrayRef<HInstruction* const> safepoints) const {
+    bool result = false;
+    ForCoveredSafepoints(
+        safepoints,
+        GetParent()->GetNumSafepointsAfter(),
+        [&result](HInstruction* safepoint) ALWAYS_INLINE {
+          if (safepoint->GetLocations()->WillCall()) {
+            result = true;
+            return false;
+          } else {
+            return true;  // Continue iterating.
+          }
+        });
+    return result;
   }
 
   /**
@@ -637,6 +607,10 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
   bool SameRegisterKind(Location other) const;
   bool SameRegisterKind(const LiveInterval& other) const {
     return IsFloatingPoint() == other.IsFloatingPoint();
+  }
+
+  LiveInterval* GetHighOrLowInterval() {
+    return high_or_low_interval_;
   }
 
   bool HasHighInterval() const {
@@ -786,19 +760,6 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
     UNREACHABLE();
   }
 
-  SafepointPosition* CreateSafepointPosition(HInstruction* instruction) {
-    return new (allocator_) SafepointPosition(instruction);
-  }
-
-  void SetSafepointPositions(SafepointPositionList&& list) {
-    DCHECK(safepoints_.empty());
-    safepoints_.swap(list);
-  }
-
-  const SafepointPositionList& GetSafepoints() const {
-    return safepoints_;
-  }
-
   // Resets the starting point for range-searching queries to the first range.
   // Intervals must be reset prior to starting a new linear scan over them.
   void ResetSearchCache() {
@@ -842,6 +803,56 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
     return hint_phi_interval_;
   }
 
+  void SetNumSafepointsAfter(size_t num_safepoints_after) {
+    DCHECK(!IsSplit());
+    num_safepoints_after_ = num_safepoints_after;
+  }
+
+  size_t GetNumSafepointsAfter() const {
+    DCHECK(!IsSplit());
+    return num_safepoints_after_;
+  }
+
+  // Call `fn()` for all covered safepoints. Stop if the `fn()` returns false.
+  //
+  // The `remiaining_safepoints` arguments specifies how many of the `safepoints`
+  // we need to process. It can be `GetParent()->GetNumSafepointsAfter()` or less
+  // if some of the safepoints are known to be before this `LiveInterval`. This
+  // function returns the updated number of remaining safepoints to process for
+  // the next sibling, except when the iteration is aborted by `fn()` returning
+  // false and remaining safepoint count is reported as zero.
+  template <typename Function>
+  size_t ForCoveredSafepoints(ArrayRef<HInstruction* const> safepoints,
+                              size_t remaining_safepoints,
+                              Function&& fn) const ALWAYS_INLINE {
+    DCHECK_LE(remaining_safepoints, GetParent()->GetNumSafepointsAfter());
+    LiveRange* range = GetFirstRange();
+    DCHECK(range != nullptr);
+    DCHECK_IMPLIES(
+        remaining_safepoints < GetParent()->GetNumSafepointsAfter(),
+        ComputeSafepointPosition(safepoints[remaining_safepoints]) < range->GetStart());
+    for (; remaining_safepoints != 0u; --remaining_safepoints) {
+      HInstruction* safepoint = safepoints[remaining_safepoints - 1u];
+      size_t safepoint_position = ComputeSafepointPosition(safepoint);
+      // Safepoints are ordered by lifetime position in decreasing order.
+      DCHECK_IMPLIES(
+          remaining_safepoints < safepoints.size(),
+          safepoint_position >= ComputeSafepointPosition(safepoints[remaining_safepoints]));
+      while (range->GetEnd() <= safepoint_position) {
+        range = range->GetNext();
+        if (range == nullptr) {
+          return remaining_safepoints;
+        }
+      }
+      if (range->GetStart() <= safepoint_position) {
+        if (!fn(safepoint)) {
+          return 0u;
+        }
+      }
+    }
+    return 0u;
+  }
+
  private:
   LiveInterval(ScopedArenaAllocator* allocator,
                DataType::Type type,
@@ -854,7 +865,7 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
         first_range_(nullptr),
         last_range_(nullptr),
         range_search_start_(nullptr),
-        safepoints_(),
+        num_safepoints_after_(0u),
         uses_(),
         env_uses_(),
         next_sibling_(nullptr),
@@ -909,6 +920,19 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
     return false;
   }
 
+  static size_t ComputeSafepointPosition(HInstruction* instruction) {
+    // We special case instructions emitted at use site, as their
+    // safepoint position needs to be at their use.
+    if (instruction->IsEmittedAtUseSite()) {
+      // Currently only applies to implicit null checks, which are emitted
+      // at the next instruction.
+      DCHECK(instruction->IsNullCheck()) << instruction->DebugName();
+      return instruction->GetLifetimePosition() + kLivenessPositionsPerInstruction;
+    } else {
+      return instruction->GetLifetimePosition();
+    }
+  }
+
   void AddBackEdgeUses(const HBasicBlock& block_at_use);
 
   ScopedArenaAllocator* const allocator_;
@@ -922,8 +946,7 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
   // used to optimize range-searching queries.
   LiveRange* range_search_start_;
 
-  // Safepoints where this interval is live.
-  SafepointPositionList safepoints_;
+  size_t num_safepoints_after_;
 
   // Uses of this interval. Only the parent interval keeps these lists.
   UsePositionList uses_;
