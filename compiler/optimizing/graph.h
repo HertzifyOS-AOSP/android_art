@@ -405,6 +405,8 @@ class HGraph : public ArenaObject<kArenaAllocGraph> {
   void SetUsefulOptimizing() { useful_optimizing_ = true; }
   bool IsUsefulOptimizing() const { return useful_optimizing_; }
 
+  size_t CountNumberOfInstructions();
+
  private:
   static const size_t kDefaultNumberOfBlocks = 8u;
 
