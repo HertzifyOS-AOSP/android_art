@@ -630,12 +630,6 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
     return type_ == DataType::Type::kFloat32 || type_ == DataType::Type::kFloat64;
   }
 
-  // Converts the location of the interval to a `Location` object.
-  Location ToLocation() const;
-
-  // Returns the location of the interval following its siblings at `position`.
-  Location GetLocationAt(size_t position);
-
   // Finds the sibling that is defined at `position`.
   LiveInterval* GetSiblingAt(size_t position);
 
