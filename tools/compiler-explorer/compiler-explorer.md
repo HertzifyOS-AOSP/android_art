@@ -68,6 +68,7 @@ This doc describes how to run a local instance of Compiler Explorer
     mkdir $COMPILER_EXPLORER_DIR/compilers/d8-local
     cp out/host/linux-x86/framework/r8.jar $COMPILER_EXPLORER_DIR/compilers/d8-local
     chmod +x $COMPILER_EXPLORER_DIR/compilers/d8-local/r8.jar
+    unzip $COMPILER_EXPLORER_DIR/compilers/d8-local/r8.jar r8-version.properties -d $COMPILER_EXPLORER_DIR/compilers/d8-local/
     mkdir $COMPILER_EXPLORER_DIR/compilers/baksmali-local
     cp out/host/linux-x86/framework/smali-baksmali.jar $COMPILER_EXPLORER_DIR/compilers/baksmali-local
     ```
