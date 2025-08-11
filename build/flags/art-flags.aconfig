@@ -196,3 +196,12 @@ flag {
   is_fixed_read_only: true
   is_exported: false
 }
+
+flag {
+  name: "package_last_used_api"
+  namespace: "art_cloud"
+  description: "Flag for the API that returns the last time the package was used"
+  bug: "437843184"
+  is_fixed_read_only: true
+  is_exported: true
+}

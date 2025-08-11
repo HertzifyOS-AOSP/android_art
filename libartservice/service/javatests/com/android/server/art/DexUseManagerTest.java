@@ -358,7 +358,7 @@ public class DexUseManagerTest {
         assertThat(mDexUseManager.getPrimaryDexLoaders(OWNING_PKG_NAME, SPLIT_APK))
                 .containsExactly(DexLoader.create(OWNING_PKG_NAME, false /* isolatedProcess */));
 
-        assertThat(mDexUseManager.getPackageLastUsedAtMs(OWNING_PKG_NAME)).isEqualTo(2000l);
+        assertThat(mDexUseManager.getPackageLastUsedAtMillis(OWNING_PKG_NAME)).isEqualTo(2000l);
     }
 
     @Test
@@ -597,7 +597,7 @@ public class DexUseManagerTest {
                         DexContainerFileUseInfo.create(
                                 mCeDir + "/baz.apk", mUserHandle, Set.of(OWNING_PKG_NAME)));
 
-        assertThat(mDexUseManager.getPackageLastUsedAtMs(OWNING_PKG_NAME)).isEqualTo(2000l);
+        assertThat(mDexUseManager.getPackageLastUsedAtMillis(OWNING_PKG_NAME)).isEqualTo(2000l);
     }
 
     @Test

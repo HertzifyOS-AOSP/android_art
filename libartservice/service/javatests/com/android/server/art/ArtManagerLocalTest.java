@@ -266,7 +266,7 @@ public class ArtManagerLocalTest {
                 .thenReturn(List.of(UserHandle.of(0), UserHandle.of(1)));
 
         // All packages are by default recently used.
-        lenient().when(mDexUseManager.getPackageLastUsedAtMs(any())).thenReturn(RECENT_TIME_MS);
+        lenient().when(mDexUseManager.getPackageLastUsedAtMillis(any())).thenReturn(RECENT_TIME_MS);
         mPkg1SecondaryDexInfo1 = createSecondaryDexInfo("/data/user/0/foo/1.apk", UserHandle.of(0));
         mPkg1SecondaryDexInfoNotFound =
                 createSecondaryDexInfo("/data/user/0/foo/not_found.apk", UserHandle.of(0));
@@ -682,7 +682,7 @@ public class ArtManagerLocalTest {
     public void testDexoptPackages() throws Exception {
         var dexoptResult = DexoptResult.create();
         var cancellationSignal = new CancellationSignal();
-        when(mDexUseManager.getPackageLastUsedAtMs(PKG_NAME_2)).thenReturn(CURRENT_TIME_MS);
+        when(mDexUseManager.getPackageLastUsedAtMillis(PKG_NAME_2)).thenReturn(CURRENT_TIME_MS);
         simulateStorageLow();
 
         // It should use the default package list and params. The list is sorted by last active
@@ -708,7 +708,7 @@ public class ArtManagerLocalTest {
         // The package is recently installed but hasn't been used.
         PackageUserState userState = mPkgState1.getStateForUser(UserHandle.of(1));
         when(userState.getFirstInstallTimeMillis()).thenReturn(RECENT_TIME_MS);
-        when(mDexUseManager.getPackageLastUsedAtMs(PKG_NAME_1)).thenReturn(0l);
+        when(mDexUseManager.getPackageLastUsedAtMillis(PKG_NAME_1)).thenReturn(0l);
         simulateStorageLow();
 
         var result = DexoptResult.create();
@@ -735,7 +735,7 @@ public class ArtManagerLocalTest {
         // PKG_NAME_1 is neither recently installed nor recently used.
         PackageUserState userState = mPkgState1.getStateForUser(UserHandle.of(1));
         when(userState.getFirstInstallTimeMillis()).thenReturn(NOT_RECENT_TIME_MS);
-        when(mDexUseManager.getPackageLastUsedAtMs(PKG_NAME_1)).thenReturn(NOT_RECENT_TIME_MS);
+        when(mDexUseManager.getPackageLastUsedAtMillis(PKG_NAME_1)).thenReturn(NOT_RECENT_TIME_MS);
         simulateStorageLow();
 
         var mainResult = DexoptResult.create();
@@ -767,7 +767,7 @@ public class ArtManagerLocalTest {
         // PKG_NAME_1 is neither recently installed nor recently used.
         PackageUserState userState = mPkgState1.getStateForUser(UserHandle.of(1));
         when(userState.getFirstInstallTimeMillis()).thenReturn(NOT_RECENT_TIME_MS);
-        when(mDexUseManager.getPackageLastUsedAtMs(PKG_NAME_1)).thenReturn(NOT_RECENT_TIME_MS);
+        when(mDexUseManager.getPackageLastUsedAtMillis(PKG_NAME_1)).thenReturn(NOT_RECENT_TIME_MS);
 
         var result = DexoptResult.create();
         var cancellationSignal = new CancellationSignal();
@@ -793,7 +793,7 @@ public class ArtManagerLocalTest {
         // On first-boot all packages haven't been used and first install time is
         // 0 which simulates case of system time being advanced by
         // AlarmManagerService after package installation
-        lenient().when(mDexUseManager.getPackageLastUsedAtMs(any())).thenReturn(0l);
+        lenient().when(mDexUseManager.getPackageLastUsedAtMillis(any())).thenReturn(0l);
 
         var result = DexoptResult.create();
         var cancellationSignal = new CancellationSignal();
@@ -834,7 +834,7 @@ public class ArtManagerLocalTest {
         PackageUserState userState = mPkgState1.getStateForUser(UserHandle.of(1));
         lenient().when(userState.getFirstInstallTimeMillis()).thenReturn(NOT_RECENT_TIME_MS);
         lenient()
-                .when(mDexUseManager.getPackageLastUsedAtMs(PKG_NAME_1))
+                .when(mDexUseManager.getPackageLastUsedAtMillis(PKG_NAME_1))
                 .thenReturn(NOT_RECENT_TIME_MS);
         simulateStorageLow();
 
@@ -856,7 +856,7 @@ public class ArtManagerLocalTest {
         // PKG_NAME_1 is neither recently installed nor recently used.
         PackageUserState userState = mPkgState1.getStateForUser(UserHandle.of(1));
         when(userState.getFirstInstallTimeMillis()).thenReturn(NOT_RECENT_TIME_MS);
-        when(mDexUseManager.getPackageLastUsedAtMs(PKG_NAME_1)).thenReturn(NOT_RECENT_TIME_MS);
+        when(mDexUseManager.getPackageLastUsedAtMillis(PKG_NAME_1)).thenReturn(NOT_RECENT_TIME_MS);
         simulateStorageLow();
 
         var params = new DexoptParams.Builder("bg-dexopt").build();

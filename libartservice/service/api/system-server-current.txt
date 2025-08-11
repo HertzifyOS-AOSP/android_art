@@ -65,6 +65,7 @@ package com.android.server.art {
 
   public class DexUseManagerLocal {
     method @NonNull public static com.android.server.art.DexUseManagerLocal createInstance(@NonNull android.content.Context);
+    method @FlaggedApi("com.android.art.flags.package_last_used_api") public long getPackageLastUsedAtMillis(@NonNull String);
     method @NonNull public java.util.List<com.android.server.art.model.DexContainerFileUseInfo> getSecondaryDexContainerFileUseInfo(@NonNull String);
     method public void notifyDexContainersLoaded(@NonNull com.android.server.pm.PackageManagerLocal.FilteredSnapshot, @NonNull String, @NonNull java.util.Map<java.lang.String,java.lang.String>);
     method public void systemReady();
