@@ -26,13 +26,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size);
 
 namespace art {
 
-// Forward declaration for the friend statement below.
-namespace fuzzer {
-ALWAYS_INLINE std::unique_ptr<StandardDexFile> VerifyDexFile(const uint8_t* data,
-                                                             size_t size,
-                                                             const std::string& location);
-}  // namespace fuzzer
-
 class OatDexFile;
 
 // Standard dex file. This is the format that is packaged in APKs and produced by tools.
@@ -136,14 +129,11 @@ class StandardDexFile : public DexFile {
 
   friend class DexFileLoader;
   friend class DexFileVerifierTest;
+  friend class FuzzerCorpusTest;  // for constructor
 
   ART_FRIEND_TEST(ClassLinkerTest, RegisterDexFileName);  // for constructor
   friend class OptimizingUnitTestHelper;  // for constructor
   friend int ::LLVMFuzzerTestOneInput(const uint8_t*, size_t);  // for constructor
-  friend ALWAYS_INLINE std::unique_ptr<StandardDexFile> fuzzer::VerifyDexFile(
-      const uint8_t* data,
-      size_t size,
-      const std::string& location);  // for constructor
 
   DISALLOW_COPY_AND_ASSIGN(StandardDexFile);
 };
