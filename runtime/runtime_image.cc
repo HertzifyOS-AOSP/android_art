@@ -1130,6 +1130,8 @@ class RuntimeImageHelper {
     // Create the fake OatHeader to store the dependencies of the image.
     SafeMap<std::string, std::string> key_value_store;
     Runtime* runtime = Runtime::Current();
+    // For runtime images, there is no oat code so we don't need to add
+    // kEnableProfileCode here. We also omit the check when loading the images.
     key_value_store.Put(OatHeader::kApexVersionsKey, runtime->GetApexVersions());
     key_value_store.Put(OatHeader::kBootClassPathKey,
                         android::base::Join(runtime->GetBootClassPathLocations(), ':'));

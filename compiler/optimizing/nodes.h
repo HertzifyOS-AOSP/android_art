@@ -1369,22 +1369,40 @@ class HInstruction : public ArenaObject<kArenaAllocInstruction> {
 
   virtual ArrayRef<HUserRecord<HInstruction*>> GetInputRecords() = 0;
 
-  ArrayRef<const HUserRecord<HInstruction*>> GetInputRecords() const {
-    // One virtual method is enough, just const_cast<> and then re-add the const.
-    return ArrayRef<const HUserRecord<HInstruction*>>(
-        const_cast<HInstruction*>(this)->GetInputRecords());
+  // As a workaround for clang++'s lack of devirtualization during inlining we redefine helpers
+  // that wrap `GetInputRecords()` in each class that provides a `final` override. b/413244085
+#define DEFINE_GET_INPUT_RECORDS_HELPERS(InstructionType)                             \
+  ArrayRef<const HUserRecord<HInstruction*>> GetInputRecords() const {                \
+    /* One virtual method is enough, just const_cast<> and then re-add the const. */  \
+    return ArrayRef<const HUserRecord<HInstruction*>>(                                \
+        const_cast<InstructionType*>(this)->GetInputRecords());                       \
+  }                                                                                   \
+                                                                                      \
+  HInputsRef GetInputs() {                                                            \
+    return MakeTransformArrayRef(GetInputRecords(), HInputExtractor());               \
+  }                                                                                   \
+                                                                                      \
+  HConstInputsRef GetInputs() const {                                                 \
+    return MakeTransformArrayRef(GetInputRecords(), HInputExtractor());               \
+  }                                                                                   \
+                                                                                      \
+  size_t InputCount() const { return GetInputRecords().size(); }                      \
+  HInstruction* InputAt(size_t i) const { return InputRecordAt(i).GetInstruction(); } \
+                                                                                      \
+  const HUserRecord<HInstruction*> InputRecordAt(size_t i) const {                    \
+    return GetInputRecords()[i];                                                      \
+  }                                                                                   \
+                                                                                      \
+  void SetRawInputRecordAt(size_t index, const HUserRecord<HInstruction*>& input) {   \
+    ArrayRef<HUserRecord<HInstruction*>> input_records = GetInputRecords();           \
+    input_records[index] = input;                                                     \
+  }                                                                                   \
+                                                                                      \
+  void SetRawInputAt(size_t index, HInstruction* input) {                             \
+    SetRawInputRecordAt(index, HUserRecord<HInstruction*>(input));                    \
   }
 
-  HInputsRef GetInputs() {
-    return MakeTransformArrayRef(GetInputRecords(), HInputExtractor());
-  }
-
-  HConstInputsRef GetInputs() const {
-    return MakeTransformArrayRef(GetInputRecords(), HInputExtractor());
-  }
-
-  size_t InputCount() const { return GetInputRecords().size(); }
-  HInstruction* InputAt(size_t i) const { return InputRecordAt(i).GetInstruction(); }
+  DEFINE_GET_INPUT_RECORDS_HELPERS(HInstruction);
 
   bool HasInput(HInstruction* input) const {
     for (const HInstruction* i : GetInputs()) {
@@ -1393,10 +1411,6 @@ class HInstruction : public ArenaObject<kArenaAllocInstruction> {
       }
     }
     return false;
-  }
-
-  void SetRawInputAt(size_t index, HInstruction* input) {
-    SetRawInputRecordAt(index, HUserRecord<HInstruction*>(input));
   }
 
   virtual const char* DebugName() const = 0;
@@ -1807,15 +1821,6 @@ class HInstruction : public ArenaObject<kArenaAllocInstruction> {
 
   using TypeField = BitField<DataType::Type, kFieldType, kFieldTypeSize>;
 
-  const HUserRecord<HInstruction*> InputRecordAt(size_t i) const {
-    return GetInputRecords()[i];
-  }
-
-  void SetRawInputRecordAt(size_t index, const HUserRecord<HInstruction*>& input) {
-    ArrayRef<HUserRecord<HInstruction*>> input_records = GetInputRecords();
-    input_records[index] = input;
-  }
-
   uint32_t GetPackedFields() const {
     return packed_fields_;
   }
@@ -2102,10 +2107,10 @@ IterationRange<HSTLInstructionIterator<InnerIter>> MakeSTLInstructionIteratorRan
 
 class HVariableInputSizeInstruction : public HInstruction {
  public:
-  using HInstruction::GetInputRecords;  // Keep the const version visible.
   ArrayRef<HUserRecord<HInstruction*>> GetInputRecords() final {
     return ArrayRef<HUserRecord<HInstruction*>>(inputs_);
   }
+  DEFINE_GET_INPUT_RECORDS_HELPERS(HVariableInputSizeInstruction);
 
   void AddInput(HInstruction* input);
   void InsertInputAt(size_t index, HInstruction* input);
@@ -2149,10 +2154,10 @@ class HExpression : public Base {
 
   virtual ~HExpression() {}
 
-  using HInstruction::GetInputRecords;  // Keep the const version visible.
   ArrayRef<HUserRecord<HInstruction*>> GetInputRecords() final {
     return ArrayRef<HUserRecord<HInstruction*>>(inputs_);
   }
+  DEFINE_GET_INPUT_RECORDS_HELPERS(HExpression);
 
  protected:
   DEFAULT_COPY_CONSTRUCTOR(Expression);
@@ -2173,10 +2178,10 @@ class HExpression<0, Base> : public Base {
 
   virtual ~HExpression() {}
 
-  using HInstruction::GetInputRecords;  // Keep the const version visible.
   ArrayRef<HUserRecord<HInstruction*>> GetInputRecords() final {
     return ArrayRef<HUserRecord<HInstruction*>>();
   }
+  DEFINE_GET_INPUT_RECORDS_HELPERS(HExpression);
 
  protected:
   DEFAULT_COPY_CONSTRUCTOR(Expression);
@@ -6033,11 +6038,11 @@ class HLoadClass final : public HInstruction {
 
   void AddSpecialInput(HInstruction* special_input);
 
-  using HInstruction::GetInputRecords;  // Keep the const version visible.
   ArrayRef<HUserRecord<HInstruction*>> GetInputRecords() final {
     return ArrayRef<HUserRecord<HInstruction*>>(
         &special_input_, (special_input_.GetInstruction() != nullptr) ? 1u : 0u);
   }
+  DEFINE_GET_INPUT_RECORDS_HELPERS(HLoadClass);
 
   Handle<mirror::Class> GetClass() const {
     return klass_;
@@ -6227,11 +6232,11 @@ class HLoadString final : public HInstruction {
 
   void AddSpecialInput(HInstruction* special_input);
 
-  using HInstruction::GetInputRecords;  // Keep the const version visible.
   ArrayRef<HUserRecord<HInstruction*>> GetInputRecords() final {
     return ArrayRef<HUserRecord<HInstruction*>>(
         &special_input_, (special_input_.GetInstruction() != nullptr) ? 1u : 0u);
   }
+  DEFINE_GET_INPUT_RECORDS_HELPERS(HLoadString);
 
   DECLARE_INSTRUCTION(LoadString);
 
@@ -6305,11 +6310,11 @@ class HLoadMethodHandle final : public HInstruction {
         dex_file_(dex_file) {
   }
 
-  using HInstruction::GetInputRecords;  // Keep the const version visible.
   ArrayRef<HUserRecord<HInstruction*>> GetInputRecords() final {
     return ArrayRef<HUserRecord<HInstruction*>>(
         &special_input_, (special_input_.GetInstruction() != nullptr) ? 1u : 0u);
   }
+  DEFINE_GET_INPUT_RECORDS_HELPERS(HLoadMethodHandle);
 
   bool IsClonable() const override { return true; }
 
@@ -6366,11 +6371,11 @@ class HLoadMethodType final : public HInstruction {
     SetPackedField<LoadKindField>(LoadKind::kRuntimeCall);
   }
 
-  using HInstruction::GetInputRecords;  // Keep the const version visible.
   ArrayRef<HUserRecord<HInstruction*>> GetInputRecords() final {
     return ArrayRef<HUserRecord<HInstruction*>>(
         &special_input_, (special_input_.GetInstruction() != nullptr) ? 1u : 0u);
   }
+  DEFINE_GET_INPUT_RECORDS_HELPERS(HLoadMethodType);
 
   bool IsClonable() const override { return true; }
 

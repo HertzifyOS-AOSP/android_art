@@ -319,6 +319,8 @@ class RegisterAllocatorLinearScan::LinearScan {
 
   // Temporary array, allocated ahead of time for simplicity.
   size_t* registers_array_;
+
+  ArrayRef<HInstruction* const> safepoints_;
 };
 
 RegisterAllocatorLinearScan::RegisterAllocatorLinearScan(ScopedArenaAllocator* allocator,
@@ -485,7 +487,8 @@ RegisterAllocatorLinearScan::LinearScan::LinearScan(
       inactive_(allocator->Adapter(kArenaAllocRegisterAllocator)),
       instructions_from_positions_(register_allocator->liveness_.GetInstructionsFromPositions()),
       registers_array_(
-          allocator->AllocArray<size_t>(number_of_registers_, kArenaAllocRegisterAllocator)) {
+          allocator->AllocArray<size_t>(number_of_registers_, kArenaAllocRegisterAllocator)),
+      safepoints_(register_allocator->safepoints_) {
   // Add intervals representing groups of physical registers blocked for calls,
   // catch blocks and irreducible loop headers.
   LiveInterval* block_registers_intervals[] = {
@@ -538,13 +541,16 @@ void RegisterAllocatorLinearScan::ProcessInstruction(HInstruction* instruction) 
     block_registers_for_call_interval_->AddRange(position, position + kLivenessPositionsToBlock);
   }
   CheckForTempLiveIntervals(instruction, will_call);
+  size_t num_safepoints_after = safepoints_.size();
   CheckForSafepoint(instruction);
   CheckForFixedInputs(instruction, will_call);
 
   LiveInterval* current = instruction->GetLiveInterval();
-  if (current == nullptr)
+  if (current == nullptr) {
     return;
+  }
 
+  current->SetNumSafepointsAfter(num_safepoints_after);
   const bool core_register = !DataType::IsFloatingPointType(instruction->GetType());
   ScopedArenaVector<LiveInterval*>& unhandled =
       core_register ? unhandled_core_intervals_ : unhandled_fp_intervals_;
@@ -555,7 +561,6 @@ void RegisterAllocatorLinearScan::ProcessInstruction(HInstruction* instruction) 
     current->AddHighInterval();
   }
 
-  AddSafepointsFor(instruction);
   current->ResetSearchCache();
   CheckForFixedOutput(instruction, will_call);
 
@@ -654,35 +659,6 @@ void RegisterAllocatorLinearScan::CheckForFixedInputs(HInstruction* instruction,
       codegen_->AddAllocatedRegister(input.ToHigh());
     }
   }
-}
-
-void RegisterAllocatorLinearScan::AddSafepointsFor(HInstruction* instruction) {
-  LiveInterval* current = instruction->GetLiveInterval();
-  SafepointPositionList list;
-  auto before = list.before_begin();
-  for (size_t safepoint_index = safepoints_.size(); safepoint_index > 0; --safepoint_index) {
-    HInstruction* safepoint = safepoints_[safepoint_index - 1u];
-    size_t safepoint_position = SafepointPosition::ComputePosition(safepoint);
-
-    // Test that safepoints are ordered in the optimal way.
-    DCHECK(safepoint_index == safepoints_.size() ||
-           safepoints_[safepoint_index]->GetLifetimePosition() < safepoint_position);
-
-    if (safepoint_position == current->GetStart()) {
-      // The safepoint is for this instruction, so the location of the instruction
-      // does not need to be saved.
-      DCHECK_EQ(safepoint_index, safepoints_.size());
-      DCHECK_EQ(safepoint, instruction);
-      continue;
-    } else if (current->IsDeadAt(safepoint_position)) {
-      break;
-    } else if (!current->Covers(safepoint_position)) {
-      // Hole in the interval.
-      continue;
-    }
-    before = list.insert_after(before, *current->CreateSafepointPosition(safepoint));
-  }
-  current->SetSafepointPositions(std::move(list));
 }
 
 void RegisterAllocatorLinearScan::CheckForFixedOutput(HInstruction* instruction, bool will_call) {
@@ -1218,7 +1194,7 @@ int RegisterAllocatorLinearScan::LinearScan::FindAvailableRegister(ArrayRef<size
   // We special case intervals that do not span a safepoint to try to find a caller-save
   // register if one is available. We iterate from 0 to the number of registers,
   // so if there are caller-save registers available at the end, we continue the iteration.
-  bool prefers_caller_save = !current->HasWillCallSafepoint();
+  bool prefers_caller_save_checked = false;
   int reg = kNoRegister;
   for (size_t i : Range(number_of_registers_)) {
     if (IsBlocked(i)) {
@@ -1228,7 +1204,12 @@ int RegisterAllocatorLinearScan::LinearScan::FindAvailableRegister(ArrayRef<size
 
     // Best case: we found a register fully available.
     if (next_use[i] == kMaxLifetimePosition) {
-      if (prefers_caller_save && !IsCallerSaveRegister(i)) {
+      // If we have previously checked that we prefer a caller-save register for this interval,
+      // the `!HasWillCallSafepoint()` must be true, otherwise we would have left the loop.
+      DCHECK_IMPLIES(prefers_caller_save_checked, !current->HasWillCallSafepoint(safepoints_));
+      if (!IsCallerSaveRegister(i) &&
+          (prefers_caller_save_checked || !current->HasWillCallSafepoint(safepoints_))) {
+        prefers_caller_save_checked = true;
         // We can get shorter encodings on some platforms by using
         // small register numbers. So only update the candidate if the previous
         // one was not available for the whole method.
@@ -1237,11 +1218,10 @@ int RegisterAllocatorLinearScan::LinearScan::FindAvailableRegister(ArrayRef<size
         }
         // Continue the iteration in the hope of finding a caller save register.
         continue;
-      } else {
-        reg = i;
-        // We know the register is good enough. Return it.
-        break;
       }
+      // We know the register is good enough. Return it.
+      reg = i;
+      break;
     }
 
     // If we had no register before, take this one as a reference.

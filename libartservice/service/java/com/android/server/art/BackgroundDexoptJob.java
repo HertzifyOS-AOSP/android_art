@@ -44,9 +44,11 @@ import com.android.server.art.model.Config;
 import com.android.server.art.model.DexoptResult;
 import com.android.server.art.model.OperationProgress;
 import com.android.server.pm.PackageManagerLocal;
+import android.os.Environment;
 
 import com.google.auto.value.AutoValue;
 
+import java.io.File;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -259,6 +261,10 @@ public class BackgroundDexoptJob implements ArtServiceJobInterface {
                 long freedBytes = mInjector.getArtManagerLocal().cleanup(snapshot);
                 AsLog.i(String.format("Freed %d bytes", freedBytes));
             }
+            // Clean up files for legacy dexopt.
+            new File(Environment.getDataDirectory(), "system/package-cstats.list").delete();
+            new File(Environment.getDataDirectory(), "system/package-dex-usage.list").delete();
+            // TODO(b/258223472): Also delete "package-dcl.list" and "package-usage.list".
         }
         return CompletedResult.create(dexoptResultByPass, durationMsByPass);
     }

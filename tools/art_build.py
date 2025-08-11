@@ -104,6 +104,11 @@ ART_TARGET_PLATFORM_LIBS_WITH_FULL_PATH: List[str] = [
 ]
 
 
+def using_thin_manifest():
+  """Returns true if the source tree is checked out from a thin manifest."""
+  return not os.path.isdir("frameworks/base")
+
+
 def run_subprocess(
     command: List[str],
     cwd: Optional[str] = None,
@@ -154,6 +159,8 @@ def run_subprocess(
     else:
       print("  (Stdout and stderr from the subprocess should have already")
       print("   printed to the console above.)")
+    sys.exit(1)
+  except KeyboardInterrupt:
     sys.exit(1)
   except Exception as e:
     print(f"An unexpected error occurred during subprocess execution: {e}")
@@ -228,12 +235,6 @@ def get_android_build_vars() -> BuildVarsDict:
       vars_to_get=REQUIRED_BUILD_VARS + OPTIONAL_BUILD_VARS
   )
 
-  print(
-      "Executing build variable retrieval command in Android root "
-      f"({os.getcwd()}):"
-  )
-  print(f"  $ {shlex.join(command_list)}")
-
   process_result = run_subprocess(command_list, capture_stdout=True)
   parsed_vars: BuildVarsDict = _parse_dumpvars_output(process_result.stdout)
 
@@ -257,7 +258,6 @@ def extract_from_apex(apex_name: str, build_vars: BuildVarsDict):
   host_out = build_vars.get("HOST_OUT")
   target_out = build_vars.get("TARGET_OUT")
 
-  print(f"Extracting from apex: {apex_name}")
   apex_root = os.path.join(target_out, "apex")
   apex_input_file = os.path.join(apex_root, f"{apex_name}.apex")
   apex_out_dir = os.path.join(apex_root, apex_name)
@@ -286,6 +286,7 @@ def extract_from_apex(apex_name: str, build_vars: BuildVarsDict):
       apex_input_file,
       apex_out_dir,
   ]
+  print(f"$ {shlex.join(deapexer_command)}")
   run_subprocess(deapexer_command)
 
   host_apex_out_dir = os.path.join(host_out, apex_name)
@@ -295,9 +296,12 @@ def extract_from_apex(apex_name: str, build_vars: BuildVarsDict):
   etc_src = os.path.join(apex_out_dir, "etc")
   etc_dest = os.path.join(host_apex_out_dir, "etc")
   if os.path.exists(etc_src):
-    shutil.copytree(etc_src, etc_dest, dirs_exist_ok=True)
+    shutil.copytree(
+        etc_src, etc_dest, dirs_exist_ok=True, copy_function=perform_copy
+    )
   else:
     print(f"No 'etc' directory found in extracted {apex_name}.")
+    sys.exit(1)
 
 
 def perform_copy(source_path: str, target_path: str) -> None:
@@ -323,6 +327,7 @@ def perform_copy(source_path: str, target_path: str) -> None:
     target_dir: str = os.path.dirname(target_path)
     os.makedirs(target_dir, exist_ok=True)
 
+    print(f"$ cp {source_path} {target_path}")
     shutil.copy(source_path, target_path)
 
   except Exception as e:
@@ -411,7 +416,7 @@ def generate_simulator_profile_action(build_vars: BuildVarsDict):
   # Add the final reference profile file argument
   profmand_command.append(f"--reference-profile-file={reference_profile_file}")
 
-  print(f"  $ {shlex.join(profmand_command)}")
+  print(f"$ {shlex.join(profmand_command)}")
   run_subprocess(profmand_command)
 
 
@@ -464,7 +469,7 @@ def generate_simulator_boot_image_action(build_vars: BuildVarsDict):
       "--core-only=true",
       f'--instruction-set={build_vars["TARGET_ARCH"]}',
   ]
-  print(f"  $ {shlex.join(command)}")
+  print(f"$ {shlex.join(command)}")
   run_subprocess(command)
 
 
@@ -831,32 +836,42 @@ class Builder:
             make_targets=all_boot_image_make_targets,
         )
     )
-    # HOST_I18N_DATA
-    self.add_target(
-        Target(
-            name="extract-host-i18n-data",
-            action=host_i18n_data_action,
-            make_targets=[I18N_APEX, "deapexer", "debugfs", "fsck.erofs"],
-        )
-    )
-    # HOST_TZDATA_DATA
-    self.add_target(
-        Target(
-            name="extract-host-tzdata-data",
-            action=host_tzdata_data_action,
-            make_targets=[TZDATA_APEX, "deapexer", "debugfs", "fsck.erofs"],
-        )
-    )
+
+    build_art_host_dependencies = [
+        "art_host_dependencies",
+        "host_core_img_outs",
+    ]
+    if using_thin_manifest():
+      # These dependencies are only necessary when building on the thin manifest
+      # where prebuilts are used for many libraries. In a full platform tree
+      # their source variants will ensure these files get built. Also, doing
+      # this in a full platform tree tends to overwrite the built files in the
+      # post-build actions, which can make the next incremental build invalidate
+      # a lot of other targets and hence do excessive rebuilding.
+      # HOST_I18N_DATA
+      self.add_target(
+          Target(
+              name="extract-host-i18n-data",
+              action=host_i18n_data_action,
+              make_targets=[I18N_APEX, "deapexer", "debugfs", "fsck.erofs"],
+          )
+      )
+      build_art_host_dependencies.append("extract-host-i18n-data")
+      # HOST_TZDATA_DATA
+      self.add_target(
+          Target(
+              name="extract-host-tzdata-data",
+              action=host_tzdata_data_action,
+              make_targets=[TZDATA_APEX, "deapexer", "debugfs", "fsck.erofs"],
+          )
+      )
+      build_art_host_dependencies.append("extract-host-tzdata-data")
+
     self.add_target(
         Target(
             name="build-art-host",
             make_targets=["art-script"],
-            dependencies=[
-                "art_host_dependencies",
-                "host_core_img_outs",
-                "extract-host-i18n-data",
-                "extract-host-tzdata-data",
-            ],
+            dependencies=build_art_host_dependencies,
         )
     )
     # build-art-host-gtests depends on build-art-host  and
@@ -865,7 +880,7 @@ class Builder:
     self.add_target(
         Target(
             name="build-art-host-gtests",
-            dependencies=["build-art-host", "extract-host-i18n-data"],
+            dependencies=["build-art-host"],
         )
     )
     # build-art-host-run-tests
@@ -873,7 +888,7 @@ class Builder:
     self.add_target(
         Target(
             name="build-art-host-run-tests",
-            dependencies=["build-art-host", "extract-host-i18n-data"],
+            dependencies=["build-art-host"],
             make_targets=(
                 art_test_host_run_test_deps
                 + ["art-run-test-host-data", "art-run-test-jvm-data"]
@@ -1112,14 +1127,8 @@ class Builder:
           "TARGET_BUILD_UNBUNDLED",
       ]:
         if key in env_for_make:
-          print_env_parts.append(f"{key}={shlex.quote(env_for_make[key])}")
-
-      print_cmd_str = " ".join(print_env_parts)
-      if print_cmd_str:
-        print_cmd_str += " "
-      print_cmd_str += " ".join(shlex.quote(arg) for arg in make_command)
-
-      print(f"Running make command: {print_cmd_str}")
+          print_env_parts.append(f"{key}={env_for_make[key]}")
+      print(f"$ {shlex.join(print_env_parts + make_command)}")
 
       run_subprocess(make_command, env=env_for_make)
     else:
@@ -1150,7 +1159,6 @@ def _setup_env_and_get_primary_build_vars(
   os.environ["ANDROID_BUILD_TOP"] = actual_android_root
   try:
     os.chdir(actual_android_root)
-    print(f"Info: Changed CWD to: {actual_android_root}")
   except Exception as e:
     print(f"Error: Could not change CWD to {actual_android_root}: {e}")
     sys.exit(1)
@@ -1170,15 +1178,14 @@ def _setup_env_and_get_primary_build_vars(
     print(error_msg_part2)
     sys.exit(1)
 
-  frameworks_base_dir_path = "frameworks/base"
-  if not os.path.isdir(frameworks_base_dir_path):
+  if using_thin_manifest():
     # This is often necessary for reduced manifest branches (e.g.,
     # master-art) to allow them to build successfully when certain
     # framework dependencies are not present in the source tree.
-    print(f"Info: '{frameworks_base_dir_path}' directory not found.")
     print(
-        "      Setting SOONG_ALLOW_MISSING_DEPENDENCIES=true and "
-        "TARGET_BUILD_UNBUNDLED=true for this session."
+        "Info: Using thin manifest - setting"
+        " SOONG_ALLOW_MISSING_DEPENDENCIES=true and"
+        " TARGET_BUILD_UNBUNDLED=true."
     )
     os.environ["SOONG_ALLOW_MISSING_DEPENDENCIES"] = "true"
     os.environ["TARGET_BUILD_UNBUNDLED"] = "true"

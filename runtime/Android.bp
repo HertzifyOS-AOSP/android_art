@@ -1205,6 +1205,7 @@ art_cc_defaults {
     ],
     static_libs: [
         "libgmock",
+        "libart_fuzzerd-common",
     ],
     header_libs: [
         "art_cmdlineparser_headers", // For parsed_options_test.

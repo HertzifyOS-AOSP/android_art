@@ -594,16 +594,6 @@ LiveInterval* LiveInterval::SplitAt(size_t position) {
 
   LiveInterval* new_interval = new (allocator_) LiveInterval(allocator_, type_);
 
-  SafepointPositionList::const_iterator before = safepoints_.before_begin();
-  for (auto it = safepoints_.begin(), end = safepoints_.end(); it != end; ++it) {
-    if (it->GetPosition() >= position) {
-      break;
-    }
-    before = it;
-  }
-  new_interval->safepoints_.splice_after(
-      new_interval->safepoints_.before_begin(), safepoints_, before, safepoints_.end());
-
   new_interval->next_sibling_ = next_sibling_;
   next_sibling_ = new_interval;
   new_interval->parent_ = parent_;

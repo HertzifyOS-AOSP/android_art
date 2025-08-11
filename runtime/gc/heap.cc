@@ -275,6 +275,7 @@ Heap::Heap(size_t initial_size,
            size_t min_free,
            size_t max_free,
            double target_utilization,
+           bool enable_time_based_gc_trigger,
            size_t memory_gc_cost_factor,
            double foreground_heap_growth_multiplier,
            size_t stop_for_native_allocs,
@@ -390,6 +391,7 @@ Heap::Heap(size_t initial_size,
       min_free_(min_free),
       max_free_(max_free),
       target_utilization_(target_utilization),
+      enable_time_based_gc_trigger_(enable_time_based_gc_trigger),
       memory_gc_cost_factor_(memory_gc_cost_factor),
       foreground_heap_growth_multiplier_(foreground_heap_growth_multiplier),
       stop_for_native_allocs_(stop_for_native_allocs),
@@ -3886,7 +3888,7 @@ void Heap::GrowForUtilization(collector::GarbageCollector* collector_ran,
 
     if (IsGcConcurrent()) {
       if (com::android::art::rw::flags::enable_time_based_gc_triggering() &&
-          memory_gc_cost_factor_ != 0) {
+          enable_time_based_gc_trigger_) {
         uint64_t expected_gc_cost_ms = NsToMs(current_gc_iteration_.GetThreadCpuTimeNs());
         uint64_t memory_gc_cost_factor_kb = memory_gc_cost_factor_ / KB;
         time_based_gc_threshold_ = 100 * expected_gc_cost_ms * memory_gc_cost_factor_kb;

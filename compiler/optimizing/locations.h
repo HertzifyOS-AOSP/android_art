@@ -516,6 +516,10 @@ class RegisterSet : public ValueObject {
     return floating_point_registers_;
   }
 
+  static uint32_t RegisterSet::* GetRegisterFieldAccessor(bool fp) {
+    return fp ? &RegisterSet::floating_point_registers_ : &RegisterSet::core_registers_;
+  }
+
  private:
   RegisterSet() : core_registers_(0), floating_point_registers_(0) {}
   RegisterSet(uint32_t core, uint32_t fp) : core_registers_(core), floating_point_registers_(fp) {}
@@ -701,11 +705,6 @@ class LocationSummary : public ArenaObject<kArenaAllocLocationSummary> {
   bool RegisterContainsObject(uint32_t reg_id) {
     DCHECK(CanCall());
     return RegisterSet::Contains(call_data_->register_mask, reg_id);
-  }
-
-  void AddLiveRegister(Location location) {
-    DCHECK(CanCall());
-    call_data_->live_registers.Add(location);
   }
 
   BitVector* GetStackMask() const {

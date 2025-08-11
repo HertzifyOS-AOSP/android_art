@@ -72,6 +72,7 @@
 #include "oat_file-inl.h"
 #include "oat_file_manager.h"
 #include "runtime-inl.h"
+#include "trace_common.h"
 #include "vdex_file.h"
 #include "verifier/verifier_deps.h"
 
@@ -1936,6 +1937,8 @@ class OatFileBackedByVdex final : public OatFileBase {
     store.Put(OatHeader::kCompilationReasonKey, reason);
     store.Put(OatHeader::kConcurrentCopying,
               gUseReadBarrier ? OatHeader::kTrueValue : OatHeader::kFalseValue);
+    store.Put(OatHeader::kEnableProfileCodeKey,
+              ShouldEnableProfileCode() ? OatHeader::kTrueValue : OatHeader::kFalseValue);
     if (context != nullptr) {
       store.Put(OatHeader::kClassPathKey, context->EncodeContextForOatFile(""));
     }
