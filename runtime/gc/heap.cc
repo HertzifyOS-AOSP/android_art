@@ -3889,6 +3889,12 @@ void Heap::GrowForUtilization(collector::GarbageCollector* collector_ran,
     if (IsGcConcurrent()) {
       if (com::android::art::rw::flags::enable_time_based_gc_triggering() &&
           enable_time_based_gc_trigger_) {
+        // Time based GC triggering isn't based on target footprint. Set a
+        // generous value for target footprint as a fallback to ensure we
+        // start concurrent GC before running out of heap and provide
+        // reasonable values for use in things like GetTotalMemory.
+        SetIdealFootprint(std::numeric_limits<size_t>::max());
+
         uint64_t expected_gc_cost_ms = NsToMs(current_gc_iteration_.GetThreadCpuTimeNs());
         uint64_t memory_gc_cost_factor_kb = memory_gc_cost_factor_ / KB;
         time_based_gc_threshold_ = 100 * expected_gc_cost_ms * memory_gc_cost_factor_kb;
