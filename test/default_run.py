@@ -932,9 +932,11 @@ def default_run(ctx, args, **kwargs):
   # Note: this is required as envsetup right now exports detect_leaks=0.
   RUN_TEST_ASAN_OPTIONS = ""
 
+  if HOST:
+    # TODO(b/438495566): Tolerate same-size ODR violations on host from libz
+    # being both statically linked and loaded dynamically through libz-host.so.
+    RUN_TEST_ASAN_OPTIONS = "detect_odr_violation=1:"
   # Multiple shutdown leaks. b/38341789
-  if RUN_TEST_ASAN_OPTIONS != "":
-    RUN_TEST_ASAN_OPTIONS = f"{RUN_TEST_ASAN_OPTIONS}:"
   RUN_TEST_ASAN_OPTIONS = f"{RUN_TEST_ASAN_OPTIONS}detect_leaks=0"
 
   assert not args.external_log_tags, "Deprecated: use --android-log-tags=*:v"

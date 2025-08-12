@@ -328,10 +328,8 @@ cc_defaults {
         android: {
             shared_libs: ["libz"],
         },
-        // Link libz dynamically on host to avoid odr-violation errors in ASAN
-        // builds, because the LLVM runtime may load libz-host.so dynamically.
         not_windows: {
-            shared_libs: ["libz"],
+            whole_static_libs: ["libz"],
         },
         windows: {
             whole_static_libs: ["libz"],
