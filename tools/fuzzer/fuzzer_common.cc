@@ -156,7 +156,7 @@ ALWAYS_INLINE bool VerifyClasses(jobject class_loader, const StandardDexFile* de
     MutableHandle<mirror::DexCache> h_dex_cache(scope.NewHandle<mirror::DexCache>(nullptr));
     MutableHandle<mirror::ClassLoader> h_dex_cache_class_loader = scope.NewHandle(h_loader.Get());
 
-    for (ClassAccessor accessor : dex_file->GetClasses()) {
+    for (const ClassAccessor& accessor : dex_file->GetClasses()) {
       h_klass.Assign(
           class_linker->FindClass(soa.Self(), *dex_file, accessor.GetClassIdx(), h_loader));
       // Ignore classes that couldn't be loaded since we are looking for crashes during
@@ -167,27 +167,41 @@ ALWAYS_INLINE bool VerifyClasses(jobject class_loader, const StandardDexFile* de
         soa.Self()->ClearException();
         continue;
       }
+      if (&h_klass->GetDexFile() != dex_file) {
+        // Skip a duplicate class (as the resolved class is from another dex file). This can happen
+        // e.g. if we have a class named "sun.misc.Unsafe" in fuzz.dex.
+        continue;
+      }
+
       h_dex_cache.Assign(h_klass->GetDexCache());
 
       // The class loader from the class's dex cache is different from the dex file's class loader
       // for boot image classes e.g. java.util.AbstractCollection.
       h_dex_cache_class_loader.Assign(h_klass->GetDexCache()->GetClassLoader());
-      std::string error_msg;
-      verifier::FailureKind failure =
-          verifier::ClassVerifier::VerifyClass(soa.Self(),
-                                               /* verifier_deps= */ nullptr,
-                                               h_dex_cache->GetDexFile(),
-                                               h_klass,
-                                               h_dex_cache,
-                                               h_dex_cache_class_loader,
-                                               *h_klass->GetClassDef(),
-                                               runtime->GetCompilerCallbacks(),
-                                               verifier::HardFailLogMode::kLogWarning,
-                                               /* api_level= */ 0,
-                                               &error_msg);
-      if (failure != verifier::FailureKind::kNoFailure) {
+
+      CHECK(h_klass->IsResolved()) << h_klass->PrettyClass();
+      verifier::FailureKind failure_kind =
+          class_linker->VerifyClass(soa.Self(),
+                                    /* verifier_deps= */ nullptr,
+                                    h_klass,
+                                    // Don't abort on verification errors.
+                                    verifier::HardFailLogMode::kLogWarning);
+
+      DCHECK_EQ(h_klass->IsErroneous(), failure_kind == verifier::FailureKind::kHardFailure);
+      if (failure_kind == verifier::FailureKind::kHardFailure) {
         passed_class_verification = false;
+        // ClassLinker::VerifyClass throws, so we clear it before we continue.
+        CHECK(soa.Self()->IsExceptionPending());
+        soa.Self()->ClearException();
       }
+
+      CHECK(h_klass->ShouldVerifyAtRuntime() ||
+            h_klass->IsVerifiedNeedsAccessChecks() ||
+            h_klass->IsVerified() ||
+            h_klass->IsErroneous())
+          << h_klass->PrettyDescriptor() << ": state=" << h_klass->GetStatus();
+
+      soa.Self()->AssertNoPendingException();
     }
   }
 
