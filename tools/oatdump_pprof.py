@@ -22,6 +22,7 @@ import re
 import subprocess
 import sys
 
+# BEGIN profile_pb2 import
 try:
   import profile_pb2
 except ImportError:
@@ -33,6 +34,7 @@ except ImportError:
     import_path = os.getcwd() + '/system/extras/simpleperf/scripts'
   sys.path.append(import_path)
   import profile_pb2
+# END profile_pb2 import
 
 # Common file extensions for OAT/ODEX files.
 OAT_FILE_EXTENSIONS = (
