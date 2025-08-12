@@ -1227,6 +1227,10 @@ art_cc_test {
             ],
         },
     },
+    // These gtests run in debug mode
+    static_libs: [
+        "libart_fuzzerd-common",
+    ],
 }
 
 // Standalone version of ART gtest `art_runtime_tests`, not bundled with the ART APEX on target.
@@ -1242,6 +1246,10 @@ art_cc_test {
             required: ["dex2oat"],
         },
     },
+    // Standalone gtests run in release mode
+    static_libs: [
+        "libart_fuzzer-common",
+    ],
     // Some tests are currently failing (observed on
     // `aosp_cf_x86_64_phone-userdebug`); use a special test configuration for
     // `art_standalone_runtime_tests` to filter them out for now.
