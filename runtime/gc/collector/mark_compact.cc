@@ -4669,6 +4669,12 @@ void MarkCompact::ConcurrentlyProcessMovingPage(uint8_t* fault_page,
         // SIGBUS handler. But it's safe as the GC thread is holding the lock for
         // entire compaction phase ensuring that bitmap accessed don't get modified.
         FakeMutexLock mu(*Locks::heap_bitmap_lock_);
+        // Avoid using MOVE ioctl when we are not using a src page from the from-space.
+        // This helps reduce vma (anon_vma to be precise) lock contention in the kernel,
+        // which is likely to occur during the initial stage of compaction phase as quite
+        // a few mutator and GC threads could simultaneously cause userfaults. This is
+        // also not useful from memory perspective as we are not recycling free pages.
+        bool use_move_ioctl = use_move_ioctl_;
         if (fault_page < black_dense_end_) {
           if (use_generational_) {
             UpdateNonMovingPage</*kSetupForGenerational=*/true, /*kObjInBlackDense=*/true>(
@@ -4693,6 +4699,8 @@ void MarkCompact::ConcurrentlyProcessMovingPage(uint8_t* fault_page,
               uint8_t* free_page = GetFreePagesForMapping(gPageSize, /*atomic=*/true);
               if (free_page != nullptr) {
                 buf = free_page + from_space_slide_diff_;
+              } else {
+                use_move_ioctl = false;
               }
             }
             // The page has to be compacted.
@@ -4725,6 +4733,7 @@ void MarkCompact::ConcurrentlyProcessMovingPage(uint8_t* fault_page,
                            pre_compact_page,
                            buf,
                            /*needs_memset_zero=*/true);
+            use_move_ioctl = false;
           }
         }
         // Nobody else would simultaneously modify this page's state so an
@@ -4735,7 +4744,7 @@ void MarkCompact::ConcurrentlyProcessMovingPage(uint8_t* fault_page,
         // to immediately map the page, so that info is not needed.
         moving_pages_status_[page_idx].store(static_cast<uint8_t>(PageState::kProcessedAndMapping),
                                              std::memory_order_release);
-        if (use_move_ioctl_) {
+        if (use_move_ioctl) {
           MoveIoctl(fault_page, buf, gPageSize, tolerate_enoent);
         } else {
           CopyIoctl(fault_page, buf, gPageSize, /*return_on_contention=*/false, tolerate_enoent);

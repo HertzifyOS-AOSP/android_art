@@ -15,11 +15,15 @@
  */
 
 import dalvik.system.VMRuntime;
+
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.function.Consumer;
+
+import sun.misc.Unsafe;
 
 public class ChildClass {
   enum PrimitiveType {
@@ -577,4 +581,22 @@ public class ChildClass {
 
   private static native void registerCorePlatformJniApiCallers(Class targetClass);
   private static native void registerAppJniApiCallers(Class targetClass);
+
+  // Check a few real symbols that HiddenApiSdk28AppTest depends on being inaccessible from platform
+  // to core-platform, to avoid false negatives. Only called when ChildClass is in the platform
+  // domain.
+  public static void checkNonCorePlatformApis() {
+    try {
+      Field f = Byte.class.getDeclaredField("value");
+      throw new RuntimeException("Expected java.lang.Byte.value to be inaccessible from platform");
+    } catch (NoSuchFieldException expected) {
+    }
+    try {
+      Method m =
+          Unsafe.class.getDeclaredMethod("getAndAddInt", Object.class, Long.class, Integer.class);
+      throw new RuntimeException(
+          "Expected sun.misc.Unsafe.getAndAddInt to be inaccessible from platform");
+    } catch (NoSuchMethodException expected) {
+    }
+  }
 }
