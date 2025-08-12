@@ -298,14 +298,12 @@ void HConstantFoldingVisitor::PropagateValue(HBasicBlock* starting_block,
     uses_before = variable->GetUses().SizeSlow();
   }
 
-  if (!variable->GetUses().HasExactlyOneElement()) {
-    HConstant* c = std::holds_alternative<HConstant*>(constant)
-                       ? std::get<HConstant*>(constant)
-                       : GetGraph()->GetIntConstant(std::get<bool>(constant) ? 1 : 0);
-    variable->ReplaceUsesDominatedBy(starting_block->GetFirstInstruction(),
-                                     c,
-                                     /* strictly_dominated= */ false);
-  }
+  HConstant* c = std::holds_alternative<HConstant*>(constant)
+                     ? std::get<HConstant*>(constant)
+                     : GetGraph()->GetIntConstant(std::get<bool>(constant) ? 1 : 0);
+  variable->ReplaceUsesDominatedBy(starting_block->GetFirstInstruction(),
+                                   c,
+                                   /* strictly_dominated= */ false);
 
   if (recording_stats) {
     uses_after = variable->GetUses().SizeSlow();
@@ -332,19 +330,17 @@ void HConstantFoldingVisitor::VisitIf(HIf* inst) {
   // } else {
   //   and here false
   // }
-  PropagateValue(inst->IfTrueSuccessor(), if_input, true);
-  PropagateValue(inst->IfFalseSuccessor(), if_input, false);
+  if (!if_input->GetUses().HasExactlyOneElement()) {
+    PropagateValue(inst->IfTrueSuccessor(), if_input, true);
+    PropagateValue(inst->IfFalseSuccessor(), if_input, false);
+  }
 
   // If the input is a condition, we can propagate the information of the condition itself.
-  if (!if_input->IsCondition()) {
+  // We want either `==` or `!=`, since we cannot make assumptions for other conditions e.g. `>`.
+  if (!if_input->IsEqual() && !if_input->IsNotEqual()) {
     return;
   }
   HCondition* condition = if_input->AsCondition();
-
-  // We want either `==` or `!=`, since we cannot make assumptions for other conditions e.g. `>`
-  if (!condition->IsEqual() && !condition->IsNotEqual()) {
-    return;
-  }
 
   HInstruction* left = condition->GetLeft();
   HInstruction* right = condition->GetRight();
@@ -401,23 +397,25 @@ void HConstantFoldingVisitor::VisitIf(HIf* inst) {
     DCHECK(!DataType::IsFloatingPointType(constant->GetType()));
   }
 
-  // From this block forward we want to replace the SSA value. We use `starting_block` and not the
-  // `if` block as we want to update one of the branches but not the other.
-  HBasicBlock* starting_block =
-      condition->IsEqual() ? inst->IfTrueSuccessor() : inst->IfFalseSuccessor();
+  if (!variable->GetUses().HasExactlyOneElement()) {
+    // From this block forward we want to replace the SSA value. We use `starting_block`
+    // and not the `if` block as we want to update one of the branches but not the other.
+    HBasicBlock* starting_block =
+        condition->IsEqual() ? inst->IfTrueSuccessor() : inst->IfFalseSuccessor();
 
-  PropagateValue(starting_block, variable, constant);
+    PropagateValue(starting_block, variable, constant);
 
-  // Special case for booleans since they have only two values so we know what to propagate in the
-  // other branch. However, sometimes our boolean values are not compared to 0 or 1. In those cases
-  // we cannot make an assumption for the `else` branch.
-  if (variable->GetType() == DataType::Type::kBool &&
-      constant->IsIntConstant() &&
-      (constant->AsIntConstant()->IsTrue() || constant->AsIntConstant()->IsFalse())) {
-    HBasicBlock* other_starting_block =
-        condition->IsEqual() ? inst->IfFalseSuccessor() : inst->IfTrueSuccessor();
-    DCHECK_NE(other_starting_block, starting_block);
-    PropagateValue(other_starting_block, variable, !constant->AsIntConstant()->IsTrue());
+    // Special case for booleans since they have only two values so we know what to propagate
+    // in the other branch. However, sometimes our boolean values are not compared to 0 or 1.
+    // In those cases we cannot make an assumption for the `else` branch.
+    if (variable->GetType() == DataType::Type::kBool &&
+        constant->IsIntConstant() &&
+        (constant->AsIntConstant()->IsTrue() || constant->AsIntConstant()->IsFalse())) {
+      HBasicBlock* other_starting_block =
+          condition->IsEqual() ? inst->IfFalseSuccessor() : inst->IfTrueSuccessor();
+      DCHECK_NE(other_starting_block, starting_block);
+      PropagateValue(other_starting_block, variable, !constant->AsIntConstant()->IsTrue());
+    }
   }
 }
 
