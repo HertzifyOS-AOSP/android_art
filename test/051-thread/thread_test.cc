@@ -19,6 +19,7 @@
 #include "scoped_thread_state_change-inl.h"
 #include "thread-inl.h"
 
+#include "com_android_libcore.h"
 #include <errno.h>
 #include <sstream>
 #include <string.h>
@@ -29,6 +30,16 @@ namespace art {
 extern "C" JNIEXPORT jint JNICALL Java_Main_getNativePriority(JNIEnv* env,
                                                               [[maybe_unused]] jclass clazz) {
   return Thread::ForEnv(env)->GetNativePriority();
+}
+
+
+extern "C" JNIEXPORT jint JNICALL Java_Main_haveNicenessApis([[maybe_unused]] JNIEnv* env,
+                                                             [[maybe_unused]] jclass clazz) {
+  if (com::android::libcore::niceness_apis()) {
+    return JNI_TRUE;
+  } else {
+    return JNI_FALSE;
+  }
 }
 
 extern "C" JNIEXPORT jboolean JNICALL Java_Main_supportsThreadPriorities(
@@ -49,7 +60,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_Main_supportsThreadPriorities(
     // Had no effect.
     return JNI_FALSE;
   } else {
-    // Assum3e it did the right thing.
+    // Assume it did the right thing.
     return JNI_TRUE;
   }
 }

@@ -127,6 +127,12 @@ enum ThreadPriority {
   kMaxThreadPriority = 10,
 };
 
+// Posix "niceness" values.
+enum ThreadNiceness {
+  kMinNiceness = -20,
+  kMaxNiceness = 19,
+};
+
 enum class ThreadFlag : uint32_t {
   // If set, implies that suspend_count_ > 0 and the Thread should enter the safepoint handler.
   kSuspendRequest = 1u << 0,
@@ -649,7 +655,11 @@ class EXPORT Thread {
   /*
    * Convert Java priority to Posix niceness using palette information.
    */
-  static int PriorityToNiceness(int priority) { return GetPriorityMap()[priority]; }
+  static int PriorityToNiceness(int priority) {
+    DCHECK_GE(priority, kMinThreadPriority);
+    DCHECK_LE(priority, kMaxThreadPriority);
+    return GetPriorityMap()[priority];
+  }
 
   /*
    * Convert Posix niceness to the closest Java priority using palette information.
@@ -1832,13 +1842,13 @@ class EXPORT Thread {
 
   void CreatePeer(const char* name, bool as_daemon, jobject thread_group);
 
-  template<bool kTransactionActive>
+  template <bool kTransactionActive>
   static void InitPeer(ObjPtr<mirror::Object> peer,
                        bool as_daemon,
                        ObjPtr<mirror::Object> thread_group,
                        ObjPtr<mirror::String> thread_name,
-                       jint thread_priority)
-      REQUIRES_SHARED(Locks::mutator_lock_);
+                       jint thread_priority,
+                       jint thread_niceness) REQUIRES_SHARED(Locks::mutator_lock_);
 
   // Avoid use, callers should use SetState.
   // Used only by `Thread` destructor and stack trace collection in semi-space GC (currently
