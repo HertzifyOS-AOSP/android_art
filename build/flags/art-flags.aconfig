@@ -48,6 +48,19 @@ flag {
   }
 }
 
+# Flag for better handling of `Location::kNoOutputOverlap` in the register allocator.
+flag {
+  name: "reg_alloc_no_output_overlap"
+  namespace: "art_performance"
+  description: "Flag to control `Location::kNoOutputOverlap` handling in register allocator"
+  bug: "438388740"
+  is_fixed_read_only: true
+  is_exported: false
+  metadata {
+      purpose: PURPOSE_BUGFIX
+  }
+}
+
 flag {
   name: "test"
   namespace: "art_mainline"
