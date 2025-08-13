@@ -3425,11 +3425,12 @@ bool Runtime::GetOatFilesExecutable() const {
   return !IsAotCompiler() && !IsSystemServerProfiled();
 }
 
-void Runtime::MadviseFileForRange(size_t madvise_size_limit_bytes,
-                                  size_t map_size_bytes,
-                                  const uint8_t* map_begin,
-                                  const uint8_t* map_end,
-                                  const std::string& file_name) {
+size_t Runtime::MadviseFileForRange(size_t madvise_size_limit_bytes,
+                                    size_t map_size_bytes,
+                                    const uint8_t* map_begin,
+                                    const uint8_t* map_end,
+                                    const std::string& file_name) {
+  // TODO(b/359932564): Fix map_size_bytes adjustment to account for map_begin alignment.
   map_begin = AlignDown(map_begin, gPageSize);
   map_size_bytes = RoundUp(map_size_bytes, gPageSize);
 #ifdef ART_TARGET_ANDROID
@@ -3443,7 +3444,7 @@ void Runtime::MadviseFileForRange(size_t madvise_size_limit_bytes,
   if (accurate_process_state_at_startup) {
     const Runtime* runtime = Runtime::Current();
     if (runtime != nullptr && !runtime->InJankPerceptibleProcessState()) {
-      return;
+      return 0;
     }
   }
 #endif  // ART_TARGET_ANDROID
@@ -3451,13 +3452,10 @@ void Runtime::MadviseFileForRange(size_t madvise_size_limit_bytes,
   // Ideal blockTransferSize for madvising files (128KiB)
   static constexpr size_t kIdealIoTransferSizeBytes = 128*1024;
 
+  size_t madvised_bytes = 0;
   size_t target_size_bytes = std::min<size_t>(map_size_bytes, madvise_size_limit_bytes);
-
   if (target_size_bytes > 0) {
-    ScopedTrace madvising_trace("madvising "
-                                + file_name
-                                + " size="
-                                + std::to_string(target_size_bytes));
+    SCOPED_TRACE << "madvising " << file_name << " size=" << target_size_bytes;
 
     // Based on requested size (target_size_bytes)
     const uint8_t* target_pos = map_begin + target_size_bytes;
@@ -3487,8 +3485,13 @@ void Runtime::MadviseFileForRange(size_t madvise_size_limit_bytes,
                    << ": " << strerror(errno);
         break;
       }
+      madvised_bytes += madvise_length;
     }
   }
+
+  DCHECK_LE(madvised_bytes, madvise_size_limit_bytes)
+      << "Madvise should not have advised more than the requested size.";
+  return madvised_bytes;
 }
 
 // Return whether a boot image has a profile. This means we'll need to pre-JIT
