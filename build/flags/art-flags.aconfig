@@ -61,6 +61,16 @@ flag {
   }
 }
 
+# Flag for making `const-string` interns weak.
+flag {
+  name: "weak_const_string"
+  namespace: "art_performance"
+  description: "Flag to control whether `const-string` interns are strong or weak"
+  bug: "117621117"
+  is_fixed_read_only: true
+  is_exported: false
+}
+
 flag {
   name: "test"
   namespace: "art_mainline"
