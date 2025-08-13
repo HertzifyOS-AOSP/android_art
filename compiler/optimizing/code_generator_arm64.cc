@@ -1352,7 +1352,18 @@ void InstructionCodeGeneratorARM64::VisitMethodEntryHook(HMethodEntryHook* instr
 }
 
 void CodeGeneratorARM64::MaybeRecordTraceEvent(bool is_method_entry) {
+  // This threshold is chosen arbitrarily. There was no thorough experimentation
+  // to arrive at this number.
+  static constexpr int kSmallFunctionThreshold = 16;
   if (!GetCompilerOptions().EnableProfileCode()) {
+    return;
+  }
+
+  HGraph* graph = GetGraph();
+  // Don't instrument methods that are unlikely to be long running
+  if (!graph->HasLoops() &&
+      !graph->HasMonitorOperations() &&
+      graph->CountNumberOfInstructions() <= kSmallFunctionThreshold) {
     return;
   }
 

@@ -479,6 +479,13 @@ inline bool Heap::IsOutOfMemoryOnAllocation([[maybe_unused]] AllocatorType alloc
 inline Heap::NeedGc Heap::ShouldConcurrentGCForJava(size_t new_num_bytes_allocated) {
   if (com::android::art::rw::flags::enable_time_based_gc_triggering()) {
     if (time_based_gc_threshold_ != 0) {
+      if (new_num_bytes_allocated >= concurrent_start_bytes_) {
+        // Time based gc triggering sets concurrent_start_bytes_ for use as a
+        // last resort to ensure we start GC before running out of heap
+        // entirely.
+        return kNeedGc;
+      }
+
       size_t bytes_allocated_since_last_gc_kb =
           (new_num_bytes_allocated - num_bytes_alive_after_gc_) / KB;
       uint64_t time_since_last_gc_ms = NsToMs(NanoTime() - last_gc_start_time_);

@@ -37,6 +37,17 @@ int32_t HGraph::AllocateInstructionId() {
   return current_instruction_id_++;
 }
 
+size_t HGraph::CountNumberOfInstructions() {
+  size_t number_of_instructions = 0;
+  for (HBasicBlock* block : GetReversePostOrderSkipEntryBlock()) {
+    for (HInstructionIteratorPrefetchNext instr_it(block->GetInstructions()); !instr_it.Done();
+         instr_it.Advance()) {
+      ++number_of_instructions;
+    }
+  }
+  return number_of_instructions;
+}
+
 // Register a back edge; if the block was not a loop header before the call,
 // associate a newly created loop info with it.
 void AddBackEdge(HBasicBlock* block, HBasicBlock* back_edge) {
