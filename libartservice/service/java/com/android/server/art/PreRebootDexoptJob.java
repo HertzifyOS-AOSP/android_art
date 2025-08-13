@@ -617,13 +617,21 @@ public class PreRebootDexoptJob implements ArtServiceJobInterface {
 
     @GuardedBy("this")
     private void resetLocked() {
-        mInjector.getStatsReporter().delete();
+        PreRebootStagedFilesStatus status = null;
         try {
-            if (mInjector.getArtd().checkPreRebootStagedFilesStatus() != null) {
+            status = mInjector.getArtd().checkPreRebootStagedFilesStatus();
+            if (status != null) {
                 mInjector.getArtd().cleanUpPreRebootStagedFiles();
             }
         } catch (ServiceSpecificException | RemoteException e) {
             AsLog.e("Failed to clean up obsolete Pre-reboot staged files", e);
+        } finally {
+            var statsAfterRebootSession = mInjector.getStatsReporter().new AfterRebootSession();
+            statsAfterRebootSession.recordArtifactsEndStatus(
+                    PreRebootStatsReporter.END_STATUS_SUPERSEDED,
+                    status != null ? mInjector.getCurrentTimeMillis() - status.createdAtMillis : 0);
+            // Usually does nothing, unless there are pending stats to report.
+            statsAfterRebootSession.report();
         }
     }
 

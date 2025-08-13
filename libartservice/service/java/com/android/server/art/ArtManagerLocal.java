@@ -943,12 +943,16 @@ public final class ArtManagerLocal {
             if ((bootReason.equals(ReasonMapping.REASON_BOOT_AFTER_OTA)
                         || bootReason.equals(ReasonMapping.REASON_BOOT_AFTER_MAINLINE_UPDATE))) {
                 if (SdkLevel.isAtLeastV()) {
+                    var statsAfterRebootSession =
+                            mInjector.getPreRebootStatsReporter().new AfterRebootSession();
                     try (var pin = mInjector.createArtdPin()) {
                         PreRebootStagedFilesStatus status =
                                 mInjector.getArtd().checkPreRebootStagedFilesStatus();
                         if (status == null) {
                             // Pre-reboot Dexopt was not enabled or enabled but not started, or
                             // artifacts were unexpectedly lost for whatever reason.
+                            statsAfterRebootSession.recordArtifactsEndStatus(
+                                    PreRebootStatsReporter.END_STATUS_MISSING, 0 /* ageMillis */);
                             AsLog.d("commitPreRebootStagedFiles missing staged files");
                         } else if (!status.isCommittable) {
                             // The staged files were created for a different platform build or
@@ -972,6 +976,9 @@ public final class ArtManagerLocal {
                             // In this case, we shouldn't commit the staged files. Moreover, because
                             // the artifacts are no longer relevant (in the example above, the
                             // artifacts are for an old Mainline version), we should clean them up.
+                            statsAfterRebootSession.recordArtifactsEndStatus(
+                                    PreRebootStatsReporter.END_STATUS_OBSOLETE,
+                                    mInjector.getCurrentTimeMillis() - status.createdAtMillis);
                             AsLog.i("Staged files discarded: " + status.reason);
                             mInjector.getArtd().cleanUpPreRebootStagedFiles();
                         } else {
@@ -981,16 +988,28 @@ public final class ArtManagerLocal {
                             // because apps will start using them as soon as the package manager is
                             // initialized. We need to wait until boot complete to commit files for
                             // secondary dex files because they are not decrypted before then.
+                            statsAfterRebootSession.recordArtifactsEndStatus(
+                                    PreRebootStatsReporter.END_STATUS_COMMITTED,
+                                    mInjector.getCurrentTimeMillis() - status.createdAtMillis);
                             mShouldCommitPreRebootStagedFiles = true;
-                            mStatsAfterRebootSession =
-                                    mInjector.getPreRebootStatsReporter().new AfterRebootSession();
+                            // The stats reporting will be deferred to `systemReady`.
+                            mStatsAfterRebootSession = statsAfterRebootSession;
                             mInjector.getArtd().deletePreRebootStagedMetadata();
                             commitPreRebootStagedFiles(snapshot, false /* forSecondary */);
                         }
                     } catch (ServiceSpecificException e) {
+                        statsAfterRebootSession.recordArtifactsEndStatus(
+                                PreRebootStatsReporter.END_STATUS_ERROR, 0 /* ageMillis */);
                         AsLog.e("Failed to check Pre-reboot staged files status", e);
                     } catch (RemoteException e) {
+                        statsAfterRebootSession.recordArtifactsEndStatus(
+                                PreRebootStatsReporter.END_STATUS_ERROR, 0 /* ageMillis */);
                         Utils.logArtdException(e);
+                    } finally {
+                        if (mStatsAfterRebootSession == null) {
+                            // Report stats right away if not deferred.
+                            statsAfterRebootSession.reportAsync();
+                        }
                     }
                 }
 
@@ -1263,6 +1282,14 @@ public final class ArtManagerLocal {
                         mInjector.getPreRebootDexoptJob().checkStagedFilesAge();
                 if (stagedFilesAge != null && !stagedFilesAge.isExpired()) {
                     keepPreRebootStagedFiles = true;
+                } else {
+                    var statsAfterRebootSession =
+                            mInjector.getPreRebootStatsReporter().new AfterRebootSession();
+                    statsAfterRebootSession.recordArtifactsEndStatus(
+                            PreRebootStatsReporter.END_STATUS_EXPIRED,
+                            stagedFilesAge != null ? stagedFilesAge.age().toMillis() : 0);
+                    // Usually does nothing, unless there are pending stats to report.
+                    statsAfterRebootSession.reportAsync();
                 }
             }
             return mInjector.getArtd().cleanup(profilesToKeep, artifactsToKeep, vdexFilesToKeep,

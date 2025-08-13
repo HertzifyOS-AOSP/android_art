@@ -52,6 +52,7 @@ import com.android.server.art.prereboot.PreRebootDriver;
 import com.android.server.art.prereboot.PreRebootDriver.PreRebootResult;
 import com.android.server.art.prereboot.PreRebootStatsReporter;
 import com.android.server.art.proto.PreRebootStats.Status;
+import com.android.server.art.testing.PreRebootStatsReporterHarness;
 import com.android.server.art.testing.StaticMockitoRule;
 import com.android.server.art.testing.TestingUtils;
 
@@ -62,7 +63,6 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnitRunner;
 
-import java.io.File;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Semaphore;
@@ -86,13 +86,15 @@ public class PreRebootDexoptJobTest {
     @Mock private BackgroundDexoptJobService mJobService;
     @Mock private IArtd mArtd;
     @Mock private UpdateEngine mUpdateEngine;
-    @Mock private PreRebootStatsReporter.Injector mPreRebootStatsReporterInjector;
     private PreRebootDexoptJob mPreRebootDexoptJob;
     private JobInfo mJobInfo;
     private JobParameters mJobParameters;
+    private PreRebootStatsReporterHarness mPreRebootStatsReporterHarness;
 
     @Before
     public void setUp() throws Exception {
+        mPreRebootStatsReporterHarness = new PreRebootStatsReporterHarness();
+
         // By default, the job is enabled by a build-time flag.
         lenient()
                 .when(SystemProperties.getBoolean(eq("pm.dexopt.disable_bg_dexopt"), anyBoolean()))
@@ -109,17 +111,10 @@ public class PreRebootDexoptJobTest {
         lenient().when(mInjector.getPreRebootDriver()).thenReturn(mPreRebootDriver);
         lenient()
                 .when(mInjector.getStatsReporter())
-                .thenAnswer(
-                        invocation -> new PreRebootStatsReporter(mPreRebootStatsReporterInjector));
+                .thenReturn(mPreRebootStatsReporterHarness.createStatsReporter());
         lenient().when(mInjector.getArtd()).thenReturn(mArtd);
         lenient().when(mInjector.getUpdateEngine()).thenReturn(mUpdateEngine);
         lenient().when(mInjector.getCurrentTimeMillis()).thenReturn(CURRENT_TIME_MS);
-
-        File tempFile = File.createTempFile("pre-reboot-stats", ".pb");
-        tempFile.deleteOnExit();
-        lenient()
-                .when(mPreRebootStatsReporterInjector.getFilename())
-                .thenReturn(tempFile.getAbsolutePath());
 
         lenient().when(mJobScheduler.schedule(any())).thenAnswer(invocation -> {
             mJobInfo = invocation.<JobInfo>getArgument(0);
@@ -163,6 +158,9 @@ public class PreRebootDexoptJobTest {
         assertThat(mJobInfo.isRequireDeviceIdle()).isTrue();
         assertThat(mJobInfo.isRequireCharging()).isTrue();
         assertThat(mJobInfo.isRequireBatteryNotLow()).isTrue();
+
+        mPreRebootStatsReporterHarness.recordFakeAfterRebootDataAndReport();
+        mPreRebootStatsReporterHarness.verifyJobStats(Status.STATUS_SCHEDULED);
     }
 
     @Test
@@ -174,6 +172,9 @@ public class PreRebootDexoptJobTest {
                 .isEqualTo(ArtFlags.SCHEDULE_DISABLED_BY_SYSPROP);
 
         verify(mJobScheduler, never()).schedule(any());
+
+        mPreRebootStatsReporterHarness.recordFakeAfterRebootDataAndReport();
+        mPreRebootStatsReporterHarness.verifyJobStats(Status.STATUS_NOT_SCHEDULED_DISABLED);
     }
 
     @Test
@@ -186,6 +187,9 @@ public class PreRebootDexoptJobTest {
 
         assertThat(future).isNull();
         verify(mPreRebootDriver, never()).run(any(), anyBoolean(), any());
+
+        mPreRebootStatsReporterHarness.recordFakeAfterRebootDataAndReport();
+        mPreRebootStatsReporterHarness.verifyJobStats(Status.STATUS_NOT_SCHEDULED_DISABLED);
     }
 
     @Test
@@ -197,6 +201,9 @@ public class PreRebootDexoptJobTest {
                 .isEqualTo(ArtFlags.SCHEDULE_DISABLED_BY_SYSPROP);
 
         verify(mJobScheduler, never()).schedule(any());
+
+        mPreRebootStatsReporterHarness.recordFakeAfterRebootDataAndReport();
+        mPreRebootStatsReporterHarness.verifyJobStats(Status.STATUS_NOT_SCHEDULED_DISABLED);
     }
 
     @Test
@@ -209,6 +216,9 @@ public class PreRebootDexoptJobTest {
 
         assertThat(future).isNull();
         verify(mPreRebootDriver, never()).run(any(), anyBoolean(), any());
+
+        mPreRebootStatsReporterHarness.recordFakeAfterRebootDataAndReport();
+        mPreRebootStatsReporterHarness.verifyJobStats(Status.STATUS_NOT_SCHEDULED_DISABLED);
     }
 
     @Test
@@ -225,6 +235,9 @@ public class PreRebootDexoptJobTest {
                 .isEqualTo(ArtFlags.SCHEDULE_SUCCESS);
 
         verify(mJobScheduler).schedule(any());
+
+        mPreRebootStatsReporterHarness.recordFakeAfterRebootDataAndReport();
+        mPreRebootStatsReporterHarness.verifyJobStats(Status.STATUS_SCHEDULED);
     }
 
     @Test
@@ -244,6 +257,9 @@ public class PreRebootDexoptJobTest {
                 .isEqualTo(ArtFlags.SCHEDULE_DISABLED_BY_SYSPROP);
 
         verify(mJobScheduler, never()).schedule(any());
+
+        mPreRebootStatsReporterHarness.recordFakeAfterRebootDataAndReport();
+        mPreRebootStatsReporterHarness.verifyJobStats(Status.STATUS_NOT_SCHEDULED_DISABLED);
     }
 
     @Test
@@ -266,6 +282,9 @@ public class PreRebootDexoptJobTest {
         assertThat(jobStarted.tryAcquire(TIMEOUT_SEC, TimeUnit.SECONDS)).isTrue();
 
         mPreRebootDexoptJob.waitForRunningJob();
+
+        mPreRebootStatsReporterHarness.recordFakeAfterRebootDataAndReport();
+        mPreRebootStatsReporterHarness.verifyJobStats(Status.STATUS_FINISHED);
     }
 
     @Test
@@ -297,6 +316,9 @@ public class PreRebootDexoptJobTest {
                 mPreRebootDexoptJob.onUpdateReadyStartNow("_b" /* otaSlot */, isUpdateEngineReady);
 
         Utils.getFuture(future);
+
+        mPreRebootStatsReporterHarness.recordFakeAfterRebootDataAndReport();
+        mPreRebootStatsReporterHarness.verifyJobStats(Status.STATUS_FINISHED);
     }
 
     @Test
@@ -338,6 +360,9 @@ public class PreRebootDexoptJobTest {
         // Check that `onStopJob` is really blocking. If it wasn't, the check below might still pass
         // due to a race, but we would have a flaky test.
         assertThat(jobExited.tryAcquire()).isTrue();
+
+        mPreRebootStatsReporterHarness.recordFakeAfterRebootDataAndReport();
+        mPreRebootStatsReporterHarness.verifyJobStats(Status.STATUS_FINISHED);
     }
 
     @Test
@@ -359,6 +384,9 @@ public class PreRebootDexoptJobTest {
         // Check that `cancelGiven` is really blocking. If it wasn't, the check below might still
         // pass due to a race, but we would have a flaky test.
         assertThat(jobExited.tryAcquire()).isTrue();
+
+        mPreRebootStatsReporterHarness.recordFakeAfterRebootDataAndReport();
+        mPreRebootStatsReporterHarness.verifyJobStats(Status.STATUS_FINISHED);
     }
 
     @Test
@@ -418,6 +446,22 @@ public class PreRebootDexoptJobTest {
     @Test(expected = IllegalStateException.class)
     public void testUpdateOtaSlotOtaBogusSlot() {
         mPreRebootDexoptJob.onUpdateReadyImpl("_bogus" /* otaSlot */);
+    }
+
+    @Test
+    public void testStatsReportingForSuperseded() throws Exception {
+        mPreRebootDexoptJob.onUpdateReadyImpl(null /* otaSlot */);
+
+        when(mArtd.checkPreRebootStagedFilesStatus())
+                .thenReturn(TestingUtils.createPreRebootStagedFilesStatus(
+                        false /* isCommittable */, 200 /* createdAtMillis */));
+        when(mInjector.getCurrentTimeMillis()).thenReturn(800l);
+
+        mPreRebootDexoptJob.onUpdateReadyImpl("_a" /* otaSlot */);
+
+        mPreRebootStatsReporterHarness.verifyArtifactsStats(
+                PreRebootStatsReporter.END_STATUS_SUPERSEDED, 600 /* ageMillis */);
+        mPreRebootStatsReporterHarness.verifyTimes(1);
     }
 
     /**

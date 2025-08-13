@@ -90,6 +90,7 @@ import com.android.server.art.model.DexoptResult;
 import com.android.server.art.model.DexoptStatus;
 import com.android.server.art.prereboot.PreRebootStatsReporter;
 import com.android.server.art.proto.DexMetadataConfig;
+import com.android.server.art.testing.PreRebootStatsReporterHarness;
 import com.android.server.art.testing.StaticMockitoRule;
 import com.android.server.art.testing.TestDataHelper.PackageStateBuilder;
 import com.android.server.art.testing.TestingUtils;
@@ -164,7 +165,6 @@ public class ArtManagerLocalTest {
     @Mock private DexMetadataHelper.Injector mDexMetadataHelperInjector;
     @Mock private Context mContext;
     @Mock private PreRebootDexoptJob mPreRebootDexoptJob;
-    @Mock private PreRebootStatsReporter.Injector mPreRebootStatsReporterInjector;
     @Mock private ActivityManager mActivityManager;
     @Mock private BackgroundDexoptJob mBackgroundDexoptJob;
     private PackageState mPkgState1;
@@ -174,6 +174,7 @@ public class ArtManagerLocalTest {
     private Config mConfig;
     private DexMetadataHelper mDexMetadataHelper;
     private Map<String, Set<BroadcastReceiver>> mBroadcastReceivers = new HashMap<>();
+    private PreRebootStatsReporterHarness mPreRebootStatsReporterHarness;
 
     // True if the artifacts should be in dalvik-cache.
     @Parameter(0) public boolean mIsInDalvikCache;
@@ -191,6 +192,7 @@ public class ArtManagerLocalTest {
     public void setUp() throws Exception {
         mConfig = new Config();
         mDexMetadataHelper = new DexMetadataHelper(mDexMetadataHelperInjector);
+        mPreRebootStatsReporterHarness = new PreRebootStatsReporterHarness();
 
         // Use `lenient()` to suppress `UnnecessaryStubbingException` thrown by the strict stubs.
         // These are the default test setups. They may or may not be used depending on the code path
@@ -215,8 +217,7 @@ public class ArtManagerLocalTest {
         lenient().when(mInjector.getPreRebootDexoptJob()).thenReturn(mPreRebootDexoptJob);
         lenient()
                 .when(mInjector.getPreRebootStatsReporter())
-                .thenAnswer(
-                        invocation -> new PreRebootStatsReporter(mPreRebootStatsReporterInjector));
+                .thenReturn(mPreRebootStatsReporterHarness.createStatsReporter());
         lenient().when(mInjector.getActivityManager()).thenReturn(mActivityManager);
         lenient().when(mInjector.getBackgroundDexoptJob()).thenReturn(mBackgroundDexoptJob);
 
@@ -348,13 +349,16 @@ public class ArtManagerLocalTest {
                 .when(mContext)
                 .unregisterReceiver(any());
 
-        File tempFile = File.createTempFile("pre-reboot-stats", ".pb");
-        tempFile.deleteOnExit();
+        mPreRebootStatsReporterHarness.recordFakePreRebootData();
         lenient()
-                .when(mPreRebootStatsReporterInjector.getFilename())
-                .thenReturn(tempFile.getAbsolutePath());
+                .when(mPreRebootStatsReporterHarness.getInjector().getPackageManagerLocal())
+                .thenReturn(mPackageManagerLocal);
 
         mArtManagerLocal = new ArtManagerLocal(mInjector);
+
+        lenient()
+                .when(mPreRebootStatsReporterHarness.getInjector().getArtManagerLocal())
+                .thenReturn(mArtManagerLocal);
     }
 
     @Test
@@ -1296,13 +1300,17 @@ public class ArtManagerLocalTest {
         when(mPreRebootDexoptJob.checkStagedFilesAge())
                 .thenReturn(new StagedFilesAge(Duration.ZERO /* age */, false /* isExpired */));
         testCleanup(true /* keepPreRebootStagedFiles */);
+        mPreRebootStatsReporterHarness.verifyTimes(0);
     }
 
     @Test
     public void testCleanupRemovePreRebootStagedFiles() throws Exception {
         when(mPreRebootDexoptJob.checkStagedFilesAge())
-                .thenReturn(new StagedFilesAge(Duration.ZERO /* age */, true /* isExpired */));
+                .thenReturn(new StagedFilesAge(
+                        Duration.ofMillis(1200) /* age */, true /* isExpired */));
         testCleanup(false /* keepPreRebootStagedFiles */);
+        mPreRebootStatsReporterHarness.verifyArtifactsStats(
+                PreRebootStatsReporter.END_STATUS_EXPIRED, 1200 /* ageMillis */);
     }
 
     private void testCleanup(boolean keepPreRebootStagedFiles) throws Exception {
@@ -1668,6 +1676,7 @@ public class ArtManagerLocalTest {
         when(mArtd.checkPreRebootStagedFilesStatus())
                 .thenReturn(TestingUtils.createPreRebootStagedFilesStatus(
                         true /* isCommittable */, 200 /* createdAtMillis */));
+        when(mInjector.getCurrentTimeMillis()).thenReturn(800l);
 
         mArtManagerLocal.onBoot(ReasonMapping.REASON_BOOT_AFTER_OTA,
                 null /* progressCallbackExecutor */, null /* progressCallback */);
@@ -1695,6 +1704,9 @@ public class ArtManagerLocalTest {
                                         PKG_NAME_1, "split_0.split"))));
         verify(mArtd, times(1)).commitPreRebootStagedFiles(any(), any());
 
+        // The stats reporting should be deferred.
+        mPreRebootStatsReporterHarness.verifyTimes(0);
+
         mArtManagerLocal.systemReady();
 
         // It should not commit anything on system ready.
@@ -1710,6 +1722,9 @@ public class ArtManagerLocalTest {
                         AidlUtils.buildProfilePathForSecondaryRefAsInput(
                                 "/data/user/0/foo/1.apk"))));
         verify(mArtd, times(2)).commitPreRebootStagedFiles(any(), any());
+
+        mPreRebootStatsReporterHarness.verifyArtifactsStats(
+                PreRebootStatsReporter.END_STATUS_COMMITTED, 600 /* ageMillis */);
     }
 
     @Test
@@ -1721,11 +1736,17 @@ public class ArtManagerLocalTest {
         mArtManagerLocal.onBoot(ReasonMapping.REASON_BOOT_AFTER_OTA,
                 null /* progressCallbackExecutor */, null /* progressCallback */);
 
+        mPreRebootStatsReporterHarness.verifyArtifactsStats(
+                PreRebootStatsReporter.END_STATUS_MISSING, 0 /* ageMillis */);
+
         mArtManagerLocal.systemReady();
         simulateBroadcast(Intent.ACTION_BOOT_COMPLETED);
 
         verify(mContext, never()).registerReceiver(any(), any());
         verify(mArtd, never()).commitPreRebootStagedFiles(any(), any());
+
+        // No more reporting since before.
+        mPreRebootStatsReporterHarness.verifyTimes(1);
     }
 
     @Test
@@ -1735,17 +1756,23 @@ public class ArtManagerLocalTest {
         when(mArtd.checkPreRebootStagedFilesStatus())
                 .thenReturn(TestingUtils.createPreRebootStagedFilesStatus(
                         false /* isCommittable */, 200 /* createdAtMillis */));
+        when(mInjector.getCurrentTimeMillis()).thenReturn(800l);
 
         mArtManagerLocal.onBoot(ReasonMapping.REASON_BOOT_AFTER_OTA,
                 null /* progressCallbackExecutor */, null /* progressCallback */);
 
         verify(mArtd).cleanUpPreRebootStagedFiles();
+        mPreRebootStatsReporterHarness.verifyArtifactsStats(
+                PreRebootStatsReporter.END_STATUS_OBSOLETE, 600 /* ageMillis */);
 
         mArtManagerLocal.systemReady();
         simulateBroadcast(Intent.ACTION_BOOT_COMPLETED);
 
         verify(mContext, never()).registerReceiver(any(), any());
         verify(mArtd, never()).commitPreRebootStagedFiles(any(), any());
+
+        // No more reporting since before.
+        mPreRebootStatsReporterHarness.verifyTimes(1);
     }
 
     @Test
@@ -1754,6 +1781,7 @@ public class ArtManagerLocalTest {
 
         verify(mContext, never()).registerReceiver(any(), any());
         verify(mArtd, never()).commitPreRebootStagedFiles(any(), any());
+        mPreRebootStatsReporterHarness.verifyTimes(0);
     }
 
     @Test
