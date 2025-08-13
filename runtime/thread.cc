@@ -655,13 +655,9 @@ void* Thread::CreateCallback(void* arg) {
     self->DeleteJPeer(self->GetJniEnv());
     self->SetThreadName(self->GetThreadName()->ToModifiedUtf8().c_str());
 
-    // Java priority is inherited at the point at which the Java thread is
-    // created. That uses the stored `priority` value. However niceness can be changed before
-    // starting the thread. So use the niceness value to set the actual OS priority.
-    // The priority value stored in the peer is needed to set the priority of children of self,
-    // but does not determine our own priority (though this distinction very rarely matters).
-    int niceness = self->GetCachedNiceness();
-    self->SetNativePriority(NicenessToPriority(niceness), niceness);
+    // Use priority rather than niceness field to enable Android S workaround.
+    ArtField* priorityField = WellKnownClasses::java_lang_Thread_priority;
+    self->SetNativePriority(priorityField->GetInt(self->tlsPtr_.opeer));
 
     runtime->GetRuntimeCallbacks()->ThreadStart(self);
 
@@ -1252,7 +1248,6 @@ void Thread::CreatePeer(const char* name, bool as_daemon, jobject thread_group) 
     return;
   }
   jint thread_niceness = GetNativeNiceness();
-  jint thread_priority = NicenessToPriority(thread_niceness);
 
   DCHECK(WellKnownClasses::java_lang_Thread->IsInitialized());
   Handle<mirror::Object> peer =
@@ -1264,7 +1259,7 @@ void Thread::CreatePeer(const char* name, bool as_daemon, jobject thread_group) 
   tlsPtr_.opeer = peer.Get();
   tlsPtr_.current_peer = peer.Get();
   WellKnownClasses::java_lang_Thread_init->InvokeInstance<'V', 'L', 'L', 'I', 'Z'>(
-      self, peer.Get(), thr_group.Get(), thread_name.Get(), thread_priority, as_daemon);
+      self, peer.Get(), thr_group.Get(), thread_name.Get(), thread_niceness, as_daemon);
   if (self->IsExceptionPending()) {
     return;
   }
@@ -1278,19 +1273,10 @@ void Thread::CreatePeer(const char* name, bool as_daemon, jobject thread_group) 
     // available (in the compiler, in tests), we manually assign the
     // fields the constructor should have set.
     if (runtime->IsActiveTransaction()) {
-      InitPeer<true>(tlsPtr_.opeer,
-                     as_daemon,
-                     thr_group.Get(),
-                     thread_name.Get(),
-                     thread_priority,
-                     thread_niceness);
+      InitPeer<true>(tlsPtr_.opeer, as_daemon, thr_group.Get(), thread_name.Get(), thread_niceness);
     } else {
-      InitPeer<false>(tlsPtr_.opeer,
-                      as_daemon,
-                      thr_group.Get(),
-                      thread_name.Get(),
-                      thread_priority,
-                      thread_niceness);
+      InitPeer<false>(
+          tlsPtr_.opeer, as_daemon, thr_group.Get(), thread_name.Get(), thread_niceness);
     }
     peer_thread_name.Assign(GetThreadName());
   }
@@ -1338,19 +1324,9 @@ ObjPtr<mirror::Object> Thread::CreateCompileTimePeer(const char* name,
   // available (in the compiler, in tests), we manually assign the
   // fields the constructor should have set.
   if (runtime->IsActiveTransaction()) {
-    InitPeer<true>(peer.Get(),
-                   as_daemon,
-                   thr_group.Get(),
-                   thread_name.Get(),
-                   kNormThreadPriority,
-                   thread_niceness);
+    InitPeer<true>(peer.Get(), as_daemon, thr_group.Get(), thread_name.Get(), thread_niceness);
   } else {
-    InitPeer<false>(peer.Get(),
-                    as_daemon,
-                    thr_group.Get(),
-                    thread_name.Get(),
-                    kNormThreadPriority,
-                    thread_niceness);
+    InitPeer<false>(peer.Get(), as_daemon, thr_group.Get(), thread_name.Get(), thread_niceness);
   }
 
   return peer.Get();
@@ -1361,16 +1337,14 @@ void Thread::InitPeer(ObjPtr<mirror::Object> peer,
                       bool as_daemon,
                       ObjPtr<mirror::Object> thread_group,
                       ObjPtr<mirror::String> thread_name,
-                      jint thread_priority,
                       jint thread_niceness) {
   WellKnownClasses::java_lang_Thread_daemon->SetBoolean<kTransactionActive>(peer,
       static_cast<uint8_t>(as_daemon ? 1u : 0u));
   WellKnownClasses::java_lang_Thread_group->SetObject<kTransactionActive>(peer, thread_group);
   WellKnownClasses::java_lang_Thread_name->SetObject<kTransactionActive>(peer, thread_name);
-  // Setting niceness and priority here is partially redundant. But this is unlikely to be a hot
-  // path.
-  WellKnownClasses::java_lang_Thread_priority->SetInt<kTransactionActive>(peer, thread_priority);
   WellKnownClasses::java_lang_Thread_niceness->SetInt<kTransactionActive>(peer, thread_niceness);
+  WellKnownClasses::java_lang_Thread_priority->SetInt<kTransactionActive>(
+      peer, NicenessToPriority(thread_niceness));
 }
 
 void Thread::SetCachedThreadName(const char* name) {
@@ -5166,12 +5140,6 @@ int Thread::GetNativeNiceness() const {
 }
 
 void Thread::SetNativePriority(int new_priority, int new_niceness) {
-  if (kIsDebugBuild && Thread::Current() == this && GetPeer() != nullptr &&
-      GetCachedNiceness() != new_niceness) {
-    // We do this in some tests, but it should not normally happen.
-    // We test only for self == this, to avoid middle-of-thread-flip issues.
-    LOG(VERBOSE) << "Setting priority to unexpected value " << new_niceness;
-  }
   if (canSetPriority) {
     if (UNLIKELY(NeedSWorkaround())) {
       palette_status_t status = PaletteSchedSetPriority(GetTid(), new_priority);
@@ -5225,7 +5193,6 @@ int Thread::GetCachedNiceness() const {
   // TODO: Possibly consider inlining again. A straightforward move to thread-inl.h requires
   // additional includes there to get GetInt() defined, which then result in build failures for
   // other uses of that file.
-  DCHECK_EQ(this, Thread::Current());
   mirror::Object* peer = GetPeer();
   if (peer == nullptr) {
     return 0;
