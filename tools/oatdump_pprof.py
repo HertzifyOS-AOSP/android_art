@@ -336,6 +336,43 @@ def get_oat_files_for_process(process_identifier):
   return list(oat_files)
 
 
+def ensure_adb_root():
+  """Ensures adb connection has root access.
+
+  Raises:
+    subprocess.CalledProcessError: If an adb command fails.
+    FileNotFoundError: If 'adb' command is not found.
+    SystemExit: If root access cannot be obtained.
+  """
+  try:
+    # Attempt to restart adbd as root. This command will block until adbd restarts.
+    run_command('adb root')
+    # Wait for the device to reconnect after adb root.
+    run_command('adb wait-for-device')
+    # Verify root access by checking the user ID.
+    result_id = run_command('adb shell id -u')
+    if result_id != '0':
+      sys.stderr.write(
+          'Error: Failed to get root access via adb. Please ensure your device'
+          ' is rooted or adbd can be restarted as root.\n'
+      )
+      sys.exit(1)
+  except subprocess.CalledProcessError as e:
+    command = e.cmd if isinstance(e.cmd, str) else ' '.join(e.cmd)
+    sys.stderr.write(
+        f'Error: adb command failed during root check. Is adb installed and'
+        f' device connected?\n'
+    )
+    sys.stderr.write(f'Command: {command}\n')
+    sys.stderr.write(f'Stderr: {e.stderr}\n')
+    sys.exit(1)
+  except FileNotFoundError:
+    sys.stderr.write(
+        "Error: 'adb' command not found. Please ensure adb is in your PATH.\n"
+    )
+    sys.exit(1)
+
+
 def main(argv):
   parser = argparse.ArgumentParser(
       description='Generate a pprof report from Android OAT files.'
@@ -363,13 +400,15 @@ def main(argv):
 
   oat_files = []
   is_host = False
-  if args.package:
-    oat_files = get_oat_files_for_package(args.package)
-  elif args.process:
-    oat_files = get_oat_files_for_process(args.process)
-  elif args.oatdump_file:
+  if args.oatdump_file:
     oat_files = [args.oatdump_file]
     is_host = True
+  else:
+    ensure_adb_root()
+    if args.package:
+      oat_files = get_oat_files_for_package(args.package)
+    elif args.process:
+      oat_files = get_oat_files_for_process(args.process)
 
   if not oat_files:
     sys.stderr.write('Error: Could not find any OAT/ODEX files to process.\n')
@@ -388,6 +427,8 @@ def main(argv):
     generate_pprof_report(parsed_data, args.output, sys.argv)
     print('Done.')
     print(f'Report saved to: {os.path.abspath(args.output)}')
+    print(f'Tip: To upload to pprof web UI, run:')
+    print(f'pprof -flame {os.path.abspath(args.output)}')
 
 
 if __name__ == '__main__':
