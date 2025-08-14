@@ -1354,7 +1354,7 @@ void InstructionCodeGeneratorARM64::VisitMethodEntryHook(HMethodEntryHook* instr
 void CodeGeneratorARM64::MaybeRecordTraceEvent(bool is_method_entry) {
   // This threshold is chosen arbitrarily. There was no thorough experimentation
   // to arrive at this number.
-  static constexpr int kSmallFunctionThreshold = 16;
+  static constexpr int kSmallFunctionThreshold = 32;
   if (!GetCompilerOptions().EnableProfileCode()) {
     return;
   }
