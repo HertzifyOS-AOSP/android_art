@@ -1997,6 +1997,7 @@ class Dex2Oat final {
                         timings_,
                         &compiler_options_->image_classes_);
     driver_->CompileAll(class_loader, dex_files, timings_);
+    driver_->PostCompile(dex_files, timings_);
     driver_->FreeThreadPools();
     return class_loader;
   }

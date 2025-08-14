@@ -10235,7 +10235,9 @@ ObjPtr<mirror::String> ClassLinker::DoResolveString(dex::StringIndex string_idx,
   const DexFile& dex_file = *dex_cache->GetDexFile();
   uint32_t utf16_length;
   const char* utf8_data = dex_file.GetStringDataAndUtf16Length(string_idx, &utf16_length);
-  ObjPtr<mirror::String> string = intern_table_->InternStrong(utf16_length, utf8_data);
+  ObjPtr<mirror::String> string = com::android::art::flags::weak_const_string()
+      ? intern_table_->InternWeak(utf16_length, utf8_data)
+      : intern_table_->InternStrong(utf16_length, utf8_data);
   if (string != nullptr) {
     dex_cache->SetResolvedString(string_idx, string);
   }
