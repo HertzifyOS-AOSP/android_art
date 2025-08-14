@@ -124,7 +124,7 @@ class InternTable {
       REQUIRES_SHARED(Locks::mutator_lock_) REQUIRES(!Roles::uninterruptible_);
 
   // Interns a potentially new string in the 'strong' table. May cause thread suspension.
-  EXPORT ObjPtr<mirror::String> InternStrong(ObjPtr<mirror::String> s)
+  ObjPtr<mirror::String> InternStrong(ObjPtr<mirror::String> s)
       REQUIRES_SHARED(Locks::mutator_lock_) REQUIRES(!Roles::uninterruptible_);
 
   // Interns a potentially new string in the 'weak' table. May cause thread suspension.
@@ -132,8 +132,8 @@ class InternTable {
       REQUIRES_SHARED(Locks::mutator_lock_) REQUIRES(!Roles::uninterruptible_);
 
   // Interns a potentially new string in the 'weak' table. May cause thread suspension.
-  ObjPtr<mirror::String> InternWeak(ObjPtr<mirror::String> s) REQUIRES_SHARED(Locks::mutator_lock_)
-      REQUIRES(!Roles::uninterruptible_);
+  EXPORT ObjPtr<mirror::String> InternWeak(ObjPtr<mirror::String> s)
+      REQUIRES_SHARED(Locks::mutator_lock_) REQUIRES(!Roles::uninterruptible_);
 
   void SweepInternTableWeaks(IsMarkedVisitor* visitor) REQUIRES_SHARED(Locks::mutator_lock_)
       REQUIRES(!Locks::intern_table_lock_);

@@ -765,8 +765,7 @@ art::mirror::DexCache* Redefiner::ClassRedefinition::CreateNewDexCache(
     driver_->self_->AssertPendingOOMException();
     return nullptr;
   }
-  // FIXME: Use `InternWeak()` as we do for all `DexCache`s in `ClassLinker`.
-  location.Assign(cl->GetInternTable()->InternStrong(location.Get()));
+  location.Assign(cl->GetInternTable()->InternWeak(location.Get()));
   art::WriterMutexLock mu(driver_->self_, *art::Locks::dex_lock_);
   cache->SetLocation(location.Get());
   cache->Initialize(dex_file_.get(), loader.Get());
