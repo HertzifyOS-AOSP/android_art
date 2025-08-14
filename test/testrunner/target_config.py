@@ -235,29 +235,25 @@ target_config = {
     # Android.gtest.mk to enable leak detection again during the test runs.
     # b/37751350
 
-    # TODO(b/438495566): Use detect_odr_violation=1 below to tolerate ODR
-    # violations from libz being both statically linked and loaded dynamically
-    # through libz-host.so.
-
     'art-gtest-asan': {
         'make' : 'test-art-host-gtest',
         'env': {
             'SANITIZE_HOST' : 'address',
-            'ASAN_OPTIONS' : 'detect_leaks=0:detect_odr_violation=1'
+            'ASAN_OPTIONS' : 'detect_leaks=0'
         }
     },
     'art-gtest-asan32': {
         'make' : 'test-art-host-gtest32',
         'env': {
             'SANITIZE_HOST' : 'address',
-            'ASAN_OPTIONS' : 'detect_leaks=0:detect_odr_violation=1'
+            'ASAN_OPTIONS' : 'detect_leaks=0'
         }
     },
     'art-gtest-asan64': {
         'make' : 'test-art-host-gtest64',
         'env': {
             'SANITIZE_HOST' : 'address',
-            'ASAN_OPTIONS' : 'detect_leaks=0:detect_odr_violation=1'
+            'ASAN_OPTIONS' : 'detect_leaks=0'
         }
     },
     'art-asan': {
@@ -268,7 +264,7 @@ target_config = {
                       '--speed-profile'],
         'env': {
             'SANITIZE_HOST' : 'address',
-            'ASAN_OPTIONS' : 'detect_leaks=0:detect_odr_violation=1'
+            'ASAN_OPTIONS' : 'detect_leaks=0'
         }
     },
     'art-gtest-heap-poisoning': {
@@ -277,7 +273,7 @@ target_config = {
             'ART_HEAP_POISONING' : 'true',
             'ART_USE_READ_BARRIER' : 'false',
             'SANITIZE_HOST' : 'address',
-            'ASAN_OPTIONS' : 'detect_leaks=0:detect_odr_violation=1'
+            'ASAN_OPTIONS' : 'detect_leaks=0'
         }
     },
 }
