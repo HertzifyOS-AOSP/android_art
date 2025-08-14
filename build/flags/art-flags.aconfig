@@ -48,6 +48,29 @@ flag {
   }
 }
 
+# Flag for better handling of `Location::kNoOutputOverlap` in the register allocator.
+flag {
+  name: "reg_alloc_no_output_overlap"
+  namespace: "art_performance"
+  description: "Flag to control `Location::kNoOutputOverlap` handling in register allocator"
+  bug: "438388740"
+  is_fixed_read_only: true
+  is_exported: false
+  metadata {
+      purpose: PURPOSE_BUGFIX
+  }
+}
+
+# Flag for making `const-string` interns weak.
+flag {
+  name: "weak_const_string"
+  namespace: "art_performance"
+  description: "Flag to control whether `const-string` interns are strong or weak"
+  bug: "117621117"
+  is_fixed_read_only: true
+  is_exported: false
+}
+
 flag {
   name: "test"
   namespace: "art_mainline"
@@ -172,4 +195,13 @@ flag {
   bug: "377676642"
   is_fixed_read_only: true
   is_exported: false
+}
+
+flag {
+  name: "package_last_used_api"
+  namespace: "art_cloud"
+  description: "Flag for the API that returns the last time the package was used"
+  bug: "437843184"
+  is_fixed_read_only: true
+  is_exported: true
 }

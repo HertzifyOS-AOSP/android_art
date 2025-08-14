@@ -393,7 +393,7 @@ public final class Utils {
 
     public static long getPackageLastActiveTime(@NonNull PackageState pkgState,
             @NonNull DexUseManagerLocal dexUseManager, @NonNull UserManager userManager) {
-        long lastUsedAtMs = dexUseManager.getPackageLastUsedAtMs(pkgState.getPackageName());
+        long lastUsedAtMs = dexUseManager.getPackageLastUsedAtMillis(pkgState.getPackageName());
         // The time where the last user installed the package the first time.
         long lastFirstInstallTimeMs =
                 userManager.getUserHandles(true /* excludeDying */)

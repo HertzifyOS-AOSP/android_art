@@ -933,8 +933,6 @@ def default_run(ctx, args, **kwargs):
   RUN_TEST_ASAN_OPTIONS = ""
 
   # Multiple shutdown leaks. b/38341789
-  if RUN_TEST_ASAN_OPTIONS != "":
-    RUN_TEST_ASAN_OPTIONS = f"{RUN_TEST_ASAN_OPTIONS}:"
   RUN_TEST_ASAN_OPTIONS = f"{RUN_TEST_ASAN_OPTIONS}detect_leaks=0"
 
   assert not args.external_log_tags, "Deprecated: use --android-log-tags=*:v"
