@@ -1144,9 +1144,9 @@ CodeGeneratorX86::CodeGeneratorX86(HGraph* graph,
                     kNumberOfCpuRegisters,
                     kNumberOfXmmRegisters,
                     kNumberOfRegisterPairs,
-                    ComputeRegisterMask(kCoreCalleeSaves, arraysize(kCoreCalleeSaves))
-                        | (1 << kFakeReturnRegister),
-                    0,
+                    ComputeRegisterMask(kCoreCalleeSaves, arraysize(kCoreCalleeSaves)) |
+                        (1 << kFakeReturnRegister),
+                    0u,
                     compiler_options,
                     stats,
                     ArrayRef<const bool>(detail::kIsIntrinsicUnimplemented)),
@@ -1174,13 +1174,15 @@ CodeGeneratorX86::CodeGeneratorX86(HGraph* graph,
       fixups_to_jump_tables_(graph->GetAllocator()->Adapter(kArenaAllocCodeGenerator)),
       method_address_offset_(std::less<uint32_t>(),
                              graph->GetAllocator()->Adapter(kArenaAllocCodeGenerator)) {
+  SetupBlockedRegisters();
   // Use a fake return address register to mimic Quick.
   AddAllocatedRegister(Location::RegisterLocation(kFakeReturnRegister));
 }
 
-void CodeGeneratorX86::SetupBlockedRegisters() const {
+inline void CodeGeneratorX86::SetupBlockedRegisters() {
   // Stack register is always reserved.
-  blocked_core_registers_[ESP] = true;
+  blocked_core_registers_ = 1u << ESP;
+  DCHECK_EQ(blocked_fpu_registers_, 0u);
 }
 
 InstructionCodeGeneratorX86::InstructionCodeGeneratorX86(HGraph* graph, CodeGeneratorX86* codegen)

@@ -735,7 +735,7 @@ class CodeGeneratorARM64 : public CodeGenerator {
 
   // Register allocation.
 
-  void SetupBlockedRegisters() const override;
+  void SetupBlockedRegisters();
 
   size_t SaveCoreRegister(size_t stack_index, uint32_t reg_id) override;
   size_t RestoreCoreRegister(size_t stack_index, uint32_t reg_id) override;

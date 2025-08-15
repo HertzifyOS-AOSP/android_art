@@ -6062,6 +6062,7 @@ CodeGeneratorRISCV64::CodeGeneratorRISCV64(HGraph* graph,
                           graph->GetAllocator()->Adapter(kArenaAllocCodeGenerator)),
       jit_class_patches_(TypeReferenceValueComparator(),
                          graph->GetAllocator()->Adapter(kArenaAllocCodeGenerator)) {
+  SetupBlockedRegisters();
   // Always mark the RA register to be saved.
   AddAllocatedRegister(Location::RegisterLocation(RA));
 }
@@ -6473,27 +6474,19 @@ void CodeGeneratorRISCV64::AddLocationAsTemp(Location location, LocationSummary*
   }
 }
 
-void CodeGeneratorRISCV64::SetupBlockedRegisters() const {
-  // ZERO, GP, SP, RA, TP and TR(S1) are reserved and can't be allocated.
-  blocked_core_registers_[Zero] = true;
-  blocked_core_registers_[GP] = true;
-  blocked_core_registers_[SP] = true;
-  blocked_core_registers_[RA] = true;
-  blocked_core_registers_[TP] = true;
-  blocked_core_registers_[TR] = true;  // ART Thread register.
-
-  // TMP(T6), TMP2(T5) and FTMP(FT11) are used as temporary/scratch registers.
-  blocked_core_registers_[TMP] = true;
-  blocked_core_registers_[TMP2] = true;
-  blocked_fpu_registers_[FTMP] = true;
+inline void CodeGeneratorRISCV64::SetupBlockedRegisters() {
+  blocked_core_registers_ =
+      // ZERO, GP, SP, RA, TP and TR(S1, ART Thread register) are reserved and can't be allocated.
+      (1u << Zero) | (1u << GP) | (1u << SP) | (1u << RA) | (1u << TP) | (1u << TR) |
+      // TMP(T6) and TMP2(T5) are used as temporary/scratch registers.
+      (1u << TMP) | (1u << TMP2);
+  blocked_fpu_registers_ = 1u << FTMP;  // FTMP(FT11) is used as temporary/scratch register.
 
   if (GetGraph()->IsDebuggable()) {
     // Stubs do not save callee-save floating point registers. If the graph
     // is debuggable, we need to deal with these registers differently. For
     // now, just block them.
-    for (size_t i = 0; i < arraysize(kFpuCalleeSaves); ++i) {
-      blocked_fpu_registers_[kFpuCalleeSaves[i]] = true;
-    }
+    blocked_fpu_registers_ |= ComputeRegisterMask(kFpuCalleeSaves, arraysize(kFpuCalleeSaves));
   }
 }
 

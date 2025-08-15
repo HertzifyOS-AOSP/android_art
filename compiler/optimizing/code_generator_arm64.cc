@@ -1054,8 +1054,8 @@ CodeGeneratorARM64::CodeGeneratorARM64(HGraph* graph,
                     kNumberOfAllocatableRegisters,
                     kNumberOfAllocatableFPRegisters,
                     kNumberOfAllocatableRegisterPairs,
-                    callee_saved_core_registers.GetList(),
-                    callee_saved_fp_registers.GetList(),
+                    dchecked_integral_cast<uint32_t>(callee_saved_core_registers.GetList()),
+                    dchecked_integral_cast<uint32_t>(callee_saved_fp_registers.GetList()),
                     compiler_options,
                     stats,
                     ArrayRef<const bool>(detail::kIsIntrinsicUnimplemented)),
@@ -1086,6 +1086,7 @@ CodeGeneratorARM64::CodeGeneratorARM64(HGraph* graph,
       jit_patches_(&assembler_, graph->GetAllocator()),
       jit_baker_read_barrier_slow_paths_(std::less<uint32_t>(),
                                          graph->GetAllocator()->Adapter(kArenaAllocCodeGenerator)) {
+  SetupBlockedRegisters();
   // Save the link register (containing the return address) to mimic Quick.
   AddAllocatedRegister(LocationFrom(lr));
 
@@ -1685,11 +1686,12 @@ void CodeGeneratorARM64::CheckGCCardIsValid(Register object) {
   __ Bind(&done);
 }
 
-void CodeGeneratorARM64::SetupBlockedRegisters() const {
+inline void CodeGeneratorARM64::SetupBlockedRegisters() {
   // Blocked core registers:
   //      lr        : Runtime reserved.
-  //      tr        : Runtime reserved.
-  //      mr        : Runtime reserved.
+  //      tr (x19)  : Runtime reserved.
+  //      mr (x20)  : Runtime reserved.
+  //      x21       : Runtime reserved for implicit suspend check.
   //      ip1       : VIXL core temp.
   //      ip0       : VIXL core temp.
   //      x18       : Platform register.
@@ -1698,25 +1700,17 @@ void CodeGeneratorARM64::SetupBlockedRegisters() const {
   //      d31       : VIXL fp temp.
   CPURegList reserved_core_registers = vixl_reserved_core_registers;
   reserved_core_registers.Combine(runtime_reserved_core_registers);
-  while (!reserved_core_registers.IsEmpty()) {
-    blocked_core_registers_[reserved_core_registers.PopLowestIndex().GetCode()] = true;
-  }
-  blocked_core_registers_[X18] = true;
+  reserved_core_registers.Combine(vixl::aarch64::x18);
+  blocked_core_registers_ = dchecked_integral_cast<uint32_t>(reserved_core_registers.GetList());
 
   CPURegList reserved_fp_registers = vixl_reserved_fp_registers;
-  while (!reserved_fp_registers.IsEmpty()) {
-    blocked_fpu_registers_[reserved_fp_registers.PopLowestIndex().GetCode()] = true;
-  }
-
   if (GetGraph()->IsDebuggable()) {
     // Stubs do not save callee-save floating point registers. If the graph
     // is debuggable, we need to deal with these registers differently. For
     // now, just block them.
-    CPURegList reserved_fp_registers_debuggable = callee_saved_fp_registers;
-    while (!reserved_fp_registers_debuggable.IsEmpty()) {
-      blocked_fpu_registers_[reserved_fp_registers_debuggable.PopLowestIndex().GetCode()] = true;
-    }
+    reserved_fp_registers.Combine(callee_saved_fp_registers);
   }
+  blocked_fpu_registers_ = dchecked_integral_cast<uint32_t>(reserved_fp_registers.GetList());
 }
 
 size_t CodeGeneratorARM64::SaveCoreRegister(size_t stack_index, uint32_t reg_id) {

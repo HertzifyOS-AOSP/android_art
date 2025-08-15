@@ -1631,6 +1631,7 @@ CodeGeneratorX86_64::CodeGeneratorX86_64(HGraph* graph,
       jit_class_patches_(graph->GetAllocator()->Adapter(kArenaAllocCodeGenerator)),
       jit_method_type_patches_(graph->GetAllocator()->Adapter(kArenaAllocCodeGenerator)),
       fixups_to_jump_tables_(graph->GetAllocator()->Adapter(kArenaAllocCodeGenerator)) {
+  SetupBlockedRegisters();
   AddAllocatedRegister(Location::RegisterLocation(kFakeReturnRegister));
 }
 
@@ -1640,12 +1641,10 @@ InstructionCodeGeneratorX86_64::InstructionCodeGeneratorX86_64(HGraph* graph,
         assembler_(codegen->GetAssembler()),
         codegen_(codegen) {}
 
-void CodeGeneratorX86_64::SetupBlockedRegisters() const {
-  // Stack register is always reserved.
-  blocked_core_registers_[RSP] = true;
-
-  // Block the register used as TMP.
-  blocked_core_registers_[TMP] = true;
+inline void CodeGeneratorX86_64::SetupBlockedRegisters() {
+  // Stack register is always reserved. Block the register used as TMP.
+  blocked_core_registers_ = (1u << RSP) | (1u << TMP);
+  DCHECK_EQ(blocked_fpu_registers_, 0u);
 }
 
 static dwarf::Reg DWARFReg(Register reg) {

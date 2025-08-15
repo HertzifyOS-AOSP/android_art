@@ -485,7 +485,7 @@ class CodeGeneratorX86 : public CodeGenerator {
     return GetLabelOf(block)->Position();
   }
 
-  void SetupBlockedRegisters() const override;
+  void SetupBlockedRegisters();
 
   void DumpCoreRegister(std::ostream& stream, int reg) const override;
   void DumpFloatingPointRegister(std::ostream& stream, int reg) const override;

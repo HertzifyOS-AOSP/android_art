@@ -483,7 +483,7 @@ class CodeGeneratorRISCV64 : public CodeGenerator {
 
   void MaybeGenerateInlineCacheCheck(HInstruction* instruction, XRegister klass);
 
-  void SetupBlockedRegisters() const override;
+  void SetupBlockedRegisters();
 
   size_t SaveCoreRegister(size_t stack_index, uint32_t reg_id) override;
   size_t RestoreCoreRegister(size_t stack_index, uint32_t reg_id) override;
