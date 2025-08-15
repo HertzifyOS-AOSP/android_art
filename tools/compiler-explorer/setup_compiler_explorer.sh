@@ -35,7 +35,7 @@ echo "Running from Android source tree: $PWD"
 # Determine default instruction sets based on lunch target's TARGET_ARCH.
 # This needs to be done early so show_help can display the correct default.
 LUNCH_TARGET_ARCH_VAR=$(build/soong/soong_ui.bash --dumpvars-mode --vars=TARGET_ARCH)
-LUNCH_TARGET_ARCH=$(echo "$LUNCH_TARGET_ARCH_VAR" | cut -d'=' -f2)
+LUNCH_TARGET_ARCH=$(echo "$LUNCH_TARGET_ARCH_VAR" | cut -d'=' -f2 | tr -d "'")
 
 # Map TARGET_ARCH to a set of instruction sets for boot image generation.
 declare -a DEFAULT_INSTRUCTION_SETS # Declare as array to be safe
@@ -177,10 +177,10 @@ fi
 echo "### Determining build targets... ###"
 if $ACTION_FULL_SETUP; then
   # Full setup builds everything.
-  # r8 and smali-baksmali for d8/baksmali, 'dist' for dex2oat, 'generate-boot-image' for boot images.
+  # r8 and smali-baksmali for d8/baksmali, 'dist out/dist/art_release.zip' for dex2oat, 'generate-boot-image' for boot images.
   BUILD_TARGETS="r8 smali-baksmali dist out/dist/art_release.zip generate-boot-image"
 elif $ACTION_REBUILD_DEX2OAT; then
-  # Rebuilding dex2oat only requires the 'dist' target for art_release.zip.
+  # Rebuilding dex2oat only requires the 'dist out/dist/art_release.zip' target for art_release.zip.
   BUILD_TARGETS="dist out/dist/art_release.zip generate-boot-image"
 fi
 
