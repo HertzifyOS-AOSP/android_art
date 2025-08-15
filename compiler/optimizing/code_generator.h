@@ -534,6 +534,14 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
   static void ValidateInvokeRuntimeWithoutRecordingPcInfo(HInstruction* instruction,
                                                           SlowPathCode* slow_path);
 
+  void AddAllocatedCoreRegisters(uint32_t registers) {
+    allocated_registers_.AddCoreRegisters(registers);
+  }
+
+  void AddAllocatedFpuRegisters(uint32_t registers) {
+    allocated_registers_.AddFpuRegisters(registers);
+  }
+
   void AddAllocatedRegister(Location location) {
     allocated_registers_.Add(location);
   }

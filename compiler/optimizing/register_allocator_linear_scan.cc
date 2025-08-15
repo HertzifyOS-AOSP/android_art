@@ -851,6 +851,7 @@ void RegisterAllocatorLinearScan::LinearScan::DumpAllIntervals(std::ostream& str
 
 // By the book implementation of a linear scan register allocator.
 void RegisterAllocatorLinearScan::LinearScan::Run() {
+  uint32_t allocated_registers = 0u;
   size_t last_position = std::numeric_limits<size_t>::max();
   while (!unhandled_.empty()) {
     // Remove interval with the lowest start position from unhandled.
@@ -951,14 +952,17 @@ void RegisterAllocatorLinearScan::LinearScan::Run() {
 
     // If the interval had a register allocated, add it to the list of active intervals.
     if (success) {
-      codegen_->AddAllocatedRegister((register_type_ == RegisterType::kCoreRegister)
-          ? Location::RegisterLocation(current->GetRegister())
-          : Location::FpuRegisterLocation(current->GetRegister()));
+      allocated_registers |= 1u << current->GetRegister();
       active_.push_back(current);
       if (current->HasHighInterval() && !current->GetHighInterval()->HasRegister()) {
         current->GetHighInterval()->SetRegister(GetHighForLowRegister(current->GetRegister()));
       }
     }
+  }
+  if (register_type_ == RegisterType::kCoreRegister) {
+    codegen_->AddAllocatedCoreRegisters(allocated_registers);
+  } else {
+    codegen_->AddAllocatedFpuRegisters(allocated_registers);
   }
 }
 
