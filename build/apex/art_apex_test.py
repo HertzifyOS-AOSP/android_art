@@ -672,6 +672,7 @@ class TestingChecker:
     self._checker.check_art_test_data('dex_verification_fuzzer_corpus.zip')
     self._checker.check_art_test_data('class_verification_fuzzer_corpus.zip')
     self._checker.check_art_test_data('optimized_compiler_fuzzer_corpus.zip')
+    self._checker.check_art_test_data('baseline_compiler_fuzzer_corpus.zip')
 
 
 class NoSuperfluousFilesChecker:

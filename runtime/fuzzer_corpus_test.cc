@@ -63,10 +63,11 @@ class FuzzerCorpusTest : public CommonRuntimeTest {
     ASSERT_EQ(passed_class_verification, expected_success) << " Failed for " << name;
   }
 
-  static void OptimizedCompilation(const uint8_t* data,
-                                   size_t size,
-                                   const std::string& name,
-                                   bool expected_success) {
+  static void CommonCompilation(const uint8_t* data,
+                                size_t size,
+                                const std::string& name,
+                                bool expected_success,
+                                bool is_baseline) {
     std::unique_ptr<StandardDexFile> dex_file = fuzzer::VerifyDexFile(data, size, name);
     ASSERT_EQ(dex_file != nullptr, true) << " Failed for " << name;
 
@@ -76,7 +77,7 @@ class FuzzerCorpusTest : public CommonRuntimeTest {
     fuzzer::FuzzerCompiledMethodStorage storage;
     std::unique_ptr<fuzzer::FuzzerCompilerCallbacks> callbacks(
         new fuzzer::FuzzerCompilerCallbacks());
-    std::unique_ptr<CompilerOptions> compiler_options = fuzzer::CreateCompilerOptions();
+    std::unique_ptr<CompilerOptions> compiler_options = fuzzer::CreateCompilerOptions(is_baseline);
     std::unique_ptr<Compiler> compiler(fuzzer::CreateCompiler(*compiler_options, &storage));
 
     jobject class_loader = fuzzer::RegisterDexFileAndGetClassLoader(runtime, dex_file.get());
@@ -86,6 +87,20 @@ class FuzzerCorpusTest : public CommonRuntimeTest {
     // Note: no need to reset callbacks as they will get destroyed
     fuzzer::IterationCleanup(class_loader, dex_file.get());
     ASSERT_EQ(at_least_one_method_called_the_compiler, expected_success) << " Failed for " << name;
+  }
+
+  static void OptimizedCompilation(const uint8_t* data,
+                                   size_t size,
+                                   const std::string& name,
+                                   bool expected_success) {
+    CommonCompilation(data, size, name, expected_success, /*is_baseline=*/false);
+  }
+
+  static void BaselineCompilation(const uint8_t* data,
+                                  size_t size,
+                                  const std::string& name,
+                                  bool expected_success) {
+    CommonCompilation(data, size, name, expected_success, /*is_baseline=*/true);
   }
 
   void TestFuzzerHelper(
@@ -165,6 +180,15 @@ TEST_F(FuzzerCorpusTest, OptimizeCompileDexFiles) {
   const std::string archive_filename = "optimized_compiler_fuzzer_corpus.zip";
 
   TestFuzzerHelper(archive_filename, valid_dex_files, OptimizedCompilation);
+}
+
+// Tests that we can compile classes with kOptimizing from dex files without crashing.
+TEST_F(FuzzerCorpusTest, BaselineCompileDexFiles) {
+  // These dex files are expected to pass verification. The others are regressions tests.
+  const std::unordered_set<std::string> valid_dex_files = {"Main.dex", "hello_world.dex"};
+  const std::string archive_filename = "baseline_compiler_fuzzer_corpus.zip";
+
+  TestFuzzerHelper(archive_filename, valid_dex_files, BaselineCompilation);
 }
 
 }  // namespace art
