@@ -156,7 +156,7 @@ ALWAYS_INLINE bool VerifyClasses(jobject class_loader, const StandardDexFile* de
     MutableHandle<mirror::DexCache> h_dex_cache(scope.NewHandle<mirror::DexCache>(nullptr));
     MutableHandle<mirror::ClassLoader> h_dex_cache_class_loader = scope.NewHandle(h_loader.Get());
 
-    for (const ClassAccessor& accessor : dex_file->GetClasses()) {
+    for (const ClassAccessor accessor : dex_file->GetClasses()) {
       h_klass.Assign(
           class_linker->FindClass(soa.Self(), *dex_file, accessor.GetClassIdx(), h_loader));
       // Ignore classes that couldn't be loaded since we are looking for crashes during
