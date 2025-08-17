@@ -404,15 +404,14 @@ std::vector<std::unique_ptr<const DexFile>> OatFileManager::OpenDexFilesFromOat(
           // Prefetch the dex file based on vdex size limit (name should
           // have been dex size limit).
           VLOG(oat) << "Madvising dex file: " << dex_file->GetLocation();
-          Runtime::MadviseFileForRange(madvise_size_limit,
-                                       dex_file->Size(),
-                                       dex_file->Begin(),
-                                       dex_file->Begin() + dex_file->Size(),
-                                       dex_file->GetLocation());
-          if (dex_file->Size() >= madvise_size_limit) {
+          madvise_size_limit -= Runtime::MadviseFileForRange(madvise_size_limit,
+                                                             dex_file->Size(),
+                                                             dex_file->Begin(),
+                                                             dex_file->Begin() + dex_file->Size(),
+                                                             dex_file->GetLocation());
+          if (madvise_size_limit == 0) {
             break;
           }
-          madvise_size_limit -= dex_file->Size();
         }
       }
 

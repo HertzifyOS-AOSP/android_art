@@ -1090,11 +1090,17 @@ class Runtime {
 
   void RequestMetricsReport(bool synchronous = true);
 
-  static void MadviseFileForRange(size_t madvise_size_limit_bytes,
-                                  size_t map_size_bytes,
-                                  const uint8_t* map_begin,
-                                  const uint8_t* map_end,
-                                  const std::string& file_name);
+  // Requests madvise `WILLNEED` for the given file mapping range.
+  //
+  // Returns the actual number of bytes that were madvise'd. This is determined
+  // not only by the provided limit, but also the map region and the current
+  // process state (e.g., madvise may be short-circuited for low-pri processes).
+  // This will always be `<= madvise_size_limit_bytes`.
+  static size_t MadviseFileForRange(size_t madvise_size_limit_bytes,
+                                    size_t map_size_bytes,
+                                    const uint8_t* map_begin,
+                                    const uint8_t* map_end,
+                                    const std::string& file_name);
 
   const std::string& GetApexVersions() const {
     return apex_versions_;
