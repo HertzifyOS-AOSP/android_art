@@ -18,6 +18,7 @@
 
 #include "base/arena_bit_vector.h"
 #include "base/bit_vector-inl.h"
+#include "base/bit_utils_iterator.h"
 #include "code_generator.h"
 #include "com_android_art_flags.h"
 #include "linear_order.h"
@@ -593,6 +594,9 @@ LiveInterval* LiveInterval::SplitAt(size_t position) {
   }
 
   LiveInterval* new_interval = new (allocator_) LiveInterval(allocator_, type_);
+  if (IsPair()) {
+    new_interval->SetPair();
+  }
 
   new_interval->next_sibling_ = next_sibling_;
   next_sibling_ = new_interval;
@@ -673,21 +677,29 @@ void LiveInterval::Dump(std::ostream& stream) const {
   }
   stream << "}";
   stream << " is_fixed: " << is_fixed_ << ", is_split: " << IsSplit();
-  stream << " is_low: " << IsLowInterval();
-  stream << " is_high: " << IsHighInterval();
+  stream << " is_pair: " << IsPair();
 }
 
 void LiveInterval::DumpWithContext(std::ostream& stream,
                                    const CodeGenerator& codegen) const {
   Dump(stream);
   if (IsFixed()) {
-    stream << ", register:" << GetRegister() << "(";
-    if (IsFloatingPoint()) {
-      codegen.DumpFloatingPointRegister(stream, GetRegister());
+    if (HasRegisters()) {
+      stream << ", registers:0x" << GetRegisters() << std::dec << "(";
+      const char* delim = "";
+      for (uint32_t reg : LowToHighBits(GetRegisters())) {
+        stream << delim;
+        delim = ",";
+        if (IsFloatingPoint()) {
+          codegen.DumpFloatingPointRegister(stream, reg);
+        } else {
+          codegen.DumpCoreRegister(stream, reg);
+        }
+      }
+      stream << ")";
     } else {
-      codegen.DumpCoreRegister(stream, GetRegister());
+      stream << ", registers:none";
     }
-    stream << ")";
   } else {
     stream << ", spill slot:" << GetSpillSlot();
   }
@@ -704,7 +716,6 @@ static int RegisterOrLowRegister(Location location) {
 
 int LiveInterval::FindFirstRegisterHint(
     ArrayRef<size_t> free_until, ArrayRef<HInstruction* const> instructions_from_positions) const {
-  DCHECK(!IsHighInterval());
   if (IsTemp()) return kNoRegister;
 
   if (GetParent() == this && defined_by_ != nullptr) {
@@ -733,11 +744,11 @@ int LiveInterval::FindFirstRegisterHint(
       if (position < GetStart()) {
         LiveInterval* existing = GetParent()->GetSiblingAt(position);
         if (existing != nullptr
-            && existing->HasRegister()
+            && existing->HasRegisters()
             // It's worth using that register if it is available until
             // the next use.
-            && (free_until[existing->GetRegister()] >= next_register_use)) {
-          return existing->GetRegister();
+            && (free_until[existing->GetRegisterOrLowRegister()] >= next_register_use)) {
+          return existing->GetRegisterOrLowRegister();
         }
       }
     }
@@ -756,9 +767,9 @@ int LiveInterval::FindFirstRegisterHint(
       if (user->IsPhi()) {
         // If the phi has a register, try to use the same.
         DCHECK(SameRegisterKind(*user->GetLiveInterval()));
-        DCHECK_EQ(HasHighInterval(), user->GetLiveInterval()->HasHighInterval());
-        if (user->GetLiveInterval()->HasRegister()) {
-          int reg = user->GetLiveInterval()->GetRegister();
+        DCHECK_EQ(IsPair(), user->GetLiveInterval()->IsPair());
+        if (user->GetLiveInterval()->HasRegisters()) {
+          int reg = user->GetLiveInterval()->GetRegisterOrLowRegister();
           if (free_until[reg] >= use_position) {
             return reg;
           }
@@ -775,9 +786,9 @@ int LiveInterval::FindFirstRegisterHint(
                 user->GetBlock()->GetPredecessors()[i]->GetLifetimeEnd() - 1);
             DCHECK(sibling != nullptr);
             DCHECK(SameRegisterKind(*sibling));
-            DCHECK_EQ(HasHighInterval(), sibling->HasHighInterval());
-            if (sibling->HasRegister()) {
-              int reg = sibling->GetRegister();
+            DCHECK_EQ(IsPair(), sibling->IsPair());
+            if (sibling->HasRegisters()) {
+              int reg = sibling->GetRegisterOrLowRegister();
               if (free_until[reg] >= use_position) {
                 return reg;
               }
@@ -817,9 +828,9 @@ int LiveInterval::FindHintAtDefinition() const {
         // If the input dies at the end of the predecessor, we know its register can
         // be reused.
         DCHECK(SameRegisterKind(*input_interval));
-        DCHECK_EQ(HasHighInterval(), input_interval->HasHighInterval());
-        if (input_interval->HasRegister()) {
-          return input_interval->GetRegister();
+        DCHECK_EQ(IsPair(), input_interval->IsPair());
+        if (input_interval->HasRegisters()) {
+          return input_interval->GetRegisterOrLowRegister();
         }
       }
     }
@@ -834,9 +845,9 @@ int LiveInterval::FindHintAtDefinition() const {
         // If the input dies at the start of this instruction, we know its register can
         // be reused.
         DCHECK(SameRegisterKind(*input_interval));
-        DCHECK_EQ(HasHighInterval(), input_interval->HasHighInterval());
-        if (input_interval->HasRegister()) {
-          return input_interval->GetRegister();
+        DCHECK_EQ(IsPair(), input_interval->IsPair());
+        if (input_interval->HasRegisters()) {
+          return input_interval->GetRegisterOrLowRegister();
         }
       }
     }
@@ -846,13 +857,13 @@ int LiveInterval::FindHintAtDefinition() const {
 
 bool LiveInterval::SameRegisterKind(Location other) const {
   if (IsFloatingPoint()) {
-    if (IsLowInterval() || IsHighInterval()) {
+    if (IsPair()) {
       return other.IsFpuRegisterPair();
     } else {
       return other.IsFpuRegister();
     }
   } else {
-    if (IsLowInterval() || IsHighInterval()) {
+    if (IsPair()) {
       return other.IsRegisterPair();
     } else {
       return other.IsRegister();
