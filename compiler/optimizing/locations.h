@@ -457,6 +457,14 @@ class RegisterSet : public ValueObject {
   static RegisterSet Empty() { return RegisterSet(); }
   static RegisterSet AllFpu() { return RegisterSet(0, -1); }
 
+  void AddCoreRegisters(uint32_t registers) {
+    core_registers_ |= registers;
+  }
+
+  void AddFpuRegisters(uint32_t registers) {
+    floating_point_registers_ |= registers;
+  }
+
   void Add(Location loc) {
     if (loc.IsRegister()) {
       core_registers_ |= (1 << loc.reg());

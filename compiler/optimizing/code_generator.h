@@ -262,7 +262,6 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
 
   size_t GetNumberOfCoreRegisters() const { return number_of_core_registers_; }
   size_t GetNumberOfFloatingPointRegisters() const { return number_of_fpu_registers_; }
-  virtual void SetupBlockedRegisters() const = 0;
 
   virtual void ComputeSpillMask() {
     core_spill_mask_ = allocated_registers_.GetCoreRegisters() & core_callee_save_mask_;
@@ -436,11 +435,18 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
   void ClearSpillSlotsFromLoopPhisInStackMap(HSuspendCheck* suspend_check,
                                              HParallelMove* spills) const;
 
-  bool* GetBlockedCoreRegisters() const { return blocked_core_registers_; }
-  bool* GetBlockedFloatingPointRegisters() const { return blocked_fpu_registers_; }
+  uint32_t GetBlockedCoreRegisters() const { return blocked_core_registers_; }
+  uint32_t GetBlockedFloatingPointRegisters() const { return blocked_fpu_registers_; }
 
-  bool IsBlockedCoreRegister(size_t i) { return blocked_core_registers_[i]; }
-  bool IsBlockedFloatingPointRegister(size_t i) { return blocked_fpu_registers_[i]; }
+  bool IsBlockedCoreRegister(size_t i) {
+    DCHECK_LT(i, number_of_core_registers_);
+    return (blocked_core_registers_ & (1u << i)) != 0u;
+  }
+
+  bool IsBlockedFloatingPointRegister(size_t i) {
+    DCHECK_LT(i, number_of_fpu_registers_);
+    return (blocked_fpu_registers_ & (1u << i)) != 0u;
+  }
 
   // Helper that returns the offset of the array's length field.
   // Note: Besides the normal arrays, we also use the HArrayLength for
@@ -527,6 +533,14 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
   // Performs checks pertaining to an InvokeRuntimeWithoutRecordingPcInfo call.
   static void ValidateInvokeRuntimeWithoutRecordingPcInfo(HInstruction* instruction,
                                                           SlowPathCode* slow_path);
+
+  void AddAllocatedCoreRegisters(uint32_t registers) {
+    allocated_registers_.AddCoreRegisters(registers);
+  }
+
+  void AddAllocatedFpuRegisters(uint32_t registers) {
+    allocated_registers_.AddFpuRegisters(registers);
+  }
 
   void AddAllocatedRegister(Location location) {
     allocated_registers_.Add(location);
@@ -849,11 +863,11 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
   // Registers that were allocated during linear scan.
   RegisterSet allocated_registers_;
 
-  // Arrays used when doing register allocation to know which
-  // registers we can allocate. `SetupBlockedRegisters` updates the
-  // arrays.
-  bool* const blocked_core_registers_;
-  bool* const blocked_fpu_registers_;
+  // Bitmasks used when doing register allocation to know which registers we can allocate.
+  // Codegens should set these up in the constructor.
+  uint32_t blocked_core_registers_;
+  uint32_t blocked_fpu_registers_;
+
   size_t number_of_core_registers_;
   size_t number_of_fpu_registers_;
   size_t number_of_register_pairs_;
@@ -869,7 +883,6 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
   void InitializeCodeGenerationData();
   size_t GetStackOffsetOfSavedRegister(size_t index);
   void GenerateSlowPaths();
-  void BlockIfInRegister(Location location, bool is_out = false) const;
   void EmitEnvironment(HEnvironment* environment,
                        SlowPathCode* slow_path,
                        bool needs_vreg_info = true,
@@ -917,6 +930,7 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
   art::ArrayRef<const bool> unimplemented_intrinsics_;
 
   friend class OptimizingCFITest;
+  friend class RegisterAllocatorTest;
   ART_FRIEND_TEST(CodegenTest, ARM64FrameSizeSIMD);
   ART_FRIEND_TEST(CodegenTest, ARM64FrameSizeNoSIMD);
 

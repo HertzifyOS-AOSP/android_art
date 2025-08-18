@@ -174,7 +174,7 @@ class RegisterAllocatorLinearScan::LinearScan {
         : register_allocator->fp_registers_blocked_for_call_;
   }
 
-  static const bool* GetBlockedRegisters(CodeGenerator* codegen, RegisterType register_type) {
+  static uint32_t GetBlockedRegisters(CodeGenerator* codegen, RegisterType register_type) {
     return register_type == RegisterType::kCoreRegister
         ? codegen->GetBlockedCoreRegisters()
         : codegen->GetBlockedFloatingPointRegisters();
@@ -259,7 +259,7 @@ class RegisterAllocatorLinearScan::LinearScan {
 
   bool IsBlocked(int reg) const {
     DCHECK_LT(static_cast<size_t>(reg), number_of_registers_);
-    return blocked_registers_[reg];
+    return (blocked_registers_ & (1u << reg)) != 0u;
   }
 
   bool IsCallerSaveRegister(int reg) const {
@@ -289,10 +289,10 @@ class RegisterAllocatorLinearScan::LinearScan {
   const RegisterType register_type_;
 
   // Mask of registers blocked for a call.
-  uint32_t registers_blocked_for_call_;
+  const uint32_t registers_blocked_for_call_;
 
   // Blocked registers, as decided by the code generator.
-  const bool* const blocked_registers_;
+  const uint32_t blocked_registers_;
 
   // Spill slots for normal and wide intervals, pointing to appropriately typed slots
   // in the `RegisterAllocatorLinearScan`.
@@ -349,7 +349,6 @@ RegisterAllocatorLinearScan::RegisterAllocatorLinearScan(ScopedArenaAllocator* a
   float_spill_slots_.reserve(kDefaultNumberOfSpillSlots);
   double_spill_slots_.reserve(kDefaultNumberOfSpillSlots);
 
-  codegen->SetupBlockedRegisters();
   physical_core_register_intervals_.resize(codegen->GetNumberOfCoreRegisters(), nullptr);
   physical_fp_register_intervals_.resize(codegen->GetNumberOfFloatingPointRegisters(), nullptr);
 }
@@ -852,6 +851,7 @@ void RegisterAllocatorLinearScan::LinearScan::DumpAllIntervals(std::ostream& str
 
 // By the book implementation of a linear scan register allocator.
 void RegisterAllocatorLinearScan::LinearScan::Run() {
+  uint32_t allocated_registers = 0u;
   size_t last_position = std::numeric_limits<size_t>::max();
   while (!unhandled_.empty()) {
     // Remove interval with the lowest start position from unhandled.
@@ -952,14 +952,17 @@ void RegisterAllocatorLinearScan::LinearScan::Run() {
 
     // If the interval had a register allocated, add it to the list of active intervals.
     if (success) {
-      codegen_->AddAllocatedRegister((register_type_ == RegisterType::kCoreRegister)
-          ? Location::RegisterLocation(current->GetRegister())
-          : Location::FpuRegisterLocation(current->GetRegister()));
+      allocated_registers |= 1u << current->GetRegister();
       active_.push_back(current);
       if (current->HasHighInterval() && !current->GetHighInterval()->HasRegister()) {
         current->GetHighInterval()->SetRegister(GetHighForLowRegister(current->GetRegister()));
       }
     }
+  }
+  if (register_type_ == RegisterType::kCoreRegister) {
+    codegen_->AddAllocatedCoreRegisters(allocated_registers);
+  } else {
+    codegen_->AddAllocatedFpuRegisters(allocated_registers);
   }
 }
 

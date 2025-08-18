@@ -67,6 +67,17 @@ class RegisterAllocatorTest : public CommonCompilerTest, public OptimizingUnitTe
                                                 /* log_fatal_on_failure= */ false);
   }
 
+  template <typename RegType>
+  void BlockCoreRegistersExcept(CodeGenerator* codegen, std::initializer_list<RegType> allowed) {
+    size_t number_of_core_registers = codegen->GetNumberOfCoreRegisters();
+    uint32_t blocked_core_registers = MaxInt<uint32_t>(number_of_core_registers);
+    for (x86::Register reg : allowed) {
+      CHECK_LT(reg, number_of_core_registers);
+      blocked_core_registers &= ~(1u << reg);
+    }
+    codegen->blocked_core_registers_ = blocked_core_registers;
+  }
+
   void TestFreeUntil(bool special_first);
   void TestSpillInactive();
   void TestNoOutputOverlap();
@@ -450,8 +461,7 @@ void RegisterAllocatorTest::TestFreeUntil(bool special_first) {
   register_allocator.block_registers_special_interval_->AddRange(special_pos, special_pos + 1);
 
   // Set just one register available to make all intervals compete for the same.
-  bool* blocked_registers = codegen.GetBlockedCoreRegisters();
-  std::fill_n(blocked_registers + 1, codegen.GetNumberOfCoreRegisters() - 1, true);
+  BlockCoreRegistersExcept(&codegen, {x86::EAX});
 
   register_allocator.AllocateRegistersInternal();
 
@@ -767,8 +777,7 @@ void RegisterAllocatorTest::TestSpillInactive() {
   register_allocator.unhandled_core_intervals_.assign({fourth, third, second, first});
 
   // Set just one register available to make all intervals compete for the same.
-  bool* blocked_registers = codegen.GetBlockedCoreRegisters();
-  std::fill_n(blocked_registers + 1, codegen.GetNumberOfCoreRegisters() - 1, true);
+  BlockCoreRegistersExcept(&codegen, {x86::EAX});
 
   // We have set up all intervals manually and we want `AllocateRegistersInternal()` to run
   // the linear scan without processing instructions - check that the linear order is empty.
@@ -832,9 +841,7 @@ TEST_F(RegisterAllocatorTest, ReuseSpillSlots) {
   // Choose EAX and EDX which are used by type conversion from Int32 to Int64, so that
   // we can use the type conversion to spill all live intervals wherever we want.
   // Note that the `obj` parameter comes in the blocked ECX which works fine for the test.
-  bool* blocked_registers = codegen.GetBlockedCoreRegisters();
-  std::fill_n(blocked_registers, codegen.GetNumberOfCoreRegisters(), true);
-  blocked_registers[x86::EAX] = blocked_registers[x86::EDX] = false;
+  BlockCoreRegistersExcept(&codegen, {x86::EAX, x86::EDX});
 
   std::unique_ptr<RegisterAllocator> register_allocator =
       RegisterAllocator::Create(GetScopedAllocator(), &codegen, liveness);
@@ -904,8 +911,7 @@ TEST_F(RegisterAllocatorTest, ReuseSpillSlotGaps) {
   liveness.Analyze();
 
   // Set just one register available to make all intervals compete for the same.
-  bool* blocked_registers = codegen.GetBlockedCoreRegisters();
-  std::fill_n(blocked_registers + 1, codegen.GetNumberOfCoreRegisters() - 1, true);
+  BlockCoreRegistersExcept(&codegen, {x86::EAX});
 
   std::unique_ptr<RegisterAllocator> register_allocator =
       RegisterAllocator::Create(GetScopedAllocator(), &codegen, liveness);
@@ -983,8 +989,7 @@ TEST_F(RegisterAllocatorTest, ReuseSpillSlotsUnavailableWithSplitPhiInterval) {
 
   // Set just one register available to make all intervals compete for the same.
   // Note that the `obj` parameter comes in the blocked ECX which works fine for the test.
-  bool* blocked_registers = codegen.GetBlockedCoreRegisters();
-  std::fill_n(blocked_registers + 1, codegen.GetNumberOfCoreRegisters() - 1, true);
+  BlockCoreRegistersExcept(&codegen, {x86::EAX});
 
   std::unique_ptr<RegisterAllocator> register_allocator =
       RegisterAllocator::Create(GetScopedAllocator(), &codegen, liveness);
@@ -1085,9 +1090,7 @@ TEST_F(RegisterAllocatorTest, SplitSpillSlotLiveRangeHint) {
   ASSERT_LT(mid->GetLifetimeStart(), left->GetLifetimeStart());
 
   // Set just two register available, including the `obj` input register ECX.
-  bool* blocked_registers = codegen.GetBlockedCoreRegisters();
-  std::fill_n(blocked_registers, codegen.GetNumberOfCoreRegisters(), true);
-  blocked_registers[x86::EAX] = blocked_registers[x86::ECX] = false;
+  BlockCoreRegistersExcept(&codegen, {x86::EAX, x86::ECX});
 
   // Before the bug was fixed, the interval validation at the end of `AllocateRegisters()`
   // would report a spill slot conflict for the `iget_left_right` because it was allocated
@@ -1136,8 +1139,7 @@ void RegisterAllocatorTest::TestNoOutputOverlap() {
   RegisterAllocatorLinearScan register_allocator(GetScopedAllocator(), &codegen, liveness);
 
   // Set just one register available to make all intervals compete for the same.
-  bool* blocked_registers = codegen.GetBlockedCoreRegisters();
-  std::fill_n(blocked_registers + 1, codegen.GetNumberOfCoreRegisters() - 1, true);
+  BlockCoreRegistersExcept(&codegen, {x86::EAX});
 
   register_allocator.AllocateRegistersInternal();
 
@@ -1216,8 +1218,7 @@ void RegisterAllocatorTest::TestNoOutputOverlapAndTemp() {
 
   // Set just two registers available to avoid adding more instructions
   // to reproduce the situation where we could try to split the temp.
-  bool* blocked_registers = codegen.GetBlockedCoreRegisters();
-  std::fill_n(blocked_registers + 2, codegen.GetNumberOfCoreRegisters() - 2, true);
+  BlockCoreRegistersExcept(&codegen, {x86::EAX, x86::ECX});
 
   register_allocator.AllocateRegistersInternal();
 
@@ -1284,8 +1285,7 @@ TEST_F(RegisterAllocatorTest, NoOutputOverlapImmediateSpill) {
   get1_locs->SetOut(Location::RequiresRegister(), Location::kNoOutputOverlap);
 
   // Make three registers available.
-  bool* blocked_registers = codegen.GetBlockedCoreRegisters();
-  std::fill_n(blocked_registers + 3, codegen.GetNumberOfCoreRegisters() - 3, true);
+  BlockCoreRegistersExcept(&codegen, {x86::EAX, x86::ECX, x86::EDX});
 
   std::unique_ptr<RegisterAllocator> register_allocator =
       RegisterAllocator::Create(GetScopedAllocator(), &codegen, liveness);

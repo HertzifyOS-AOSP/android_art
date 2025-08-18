@@ -1951,6 +1951,7 @@ CodeGeneratorARMVIXL::CodeGeneratorARMVIXL(HGraph* graph,
                          graph->GetAllocator()->Adapter(kArenaAllocCodeGenerator)),
       jit_baker_read_barrier_slow_paths_(std::less<uint32_t>(),
                                          graph->GetAllocator()->Adapter(kArenaAllocCodeGenerator)) {
+  SetupBlockedRegisters();
   // Always save the LR register to mimic Quick.
   AddAllocatedRegister(Location::RegisterLocation(LR));
   // Give D30 and D31 as scratch register to VIXL. The register allocator only works on
@@ -2106,35 +2107,26 @@ void CodeGeneratorARMVIXL::Finalize() {
   }
 }
 
-void CodeGeneratorARMVIXL::SetupBlockedRegisters() const {
-  // Stack register, LR and PC are always reserved.
-  blocked_core_registers_[SP] = true;
-  blocked_core_registers_[LR] = true;
-  blocked_core_registers_[PC] = true;
-
-  // TODO: We don't need to reserve marking-register for userfaultfd GC. But
-  // that would require some work in the assembler code as the right GC is
-  // chosen at load-time and not compile time.
-  if (kReserveMarkingRegister) {
-    // Reserve marking register.
-    blocked_core_registers_[MR] = true;
-  }
-
-  // Reserve thread register.
-  blocked_core_registers_[TR] = true;
-
-  // Reserve temp register.
-  blocked_core_registers_[IP] = true;
+inline void CodeGeneratorARMVIXL::SetupBlockedRegisters() {
+  blocked_core_registers_ =
+      // Stack register, LR and PC are always reserved.
+      (1u << SP) | (1u << LR) | (1u << PC) |
+      // Reserve marking register.
+      // TODO: We don't need to reserve marking-register for userfaultfd GC. But
+      // that would require some work in the assembler code as the right GC is
+      // chosen at load-time and not compile time.
+      (kReserveMarkingRegister ? 1u << MR : 0u) |
+      // Reserve thread register.
+      (1u << TR) |
+      // Reserve temp register.
+      (1u << IP);
+  DCHECK_EQ(blocked_fpu_registers_, 0u);
 
   if (GetGraph()->IsDebuggable()) {
     // Stubs do not save callee-save floating point registers. If the graph
     // is debuggable, we need to deal with these registers differently. For
     // now, just block them.
-    for (uint32_t i = kFpuCalleeSaves.GetFirstSRegister().GetCode();
-         i <= kFpuCalleeSaves.GetLastSRegister().GetCode();
-         ++i) {
-      blocked_fpu_registers_[i] = true;
-    }
+    blocked_fpu_registers_ = ComputeSRegisterListMask(kFpuCalleeSaves);
   }
 }
 
@@ -2331,7 +2323,7 @@ void CodeGeneratorARMVIXL::GenerateFrameEntry() {
 
     vixl32::Register temp1 = temps.Acquire();
     // Use r4 as other temporary register.
-    DCHECK(!blocked_core_registers_[R4]);
+    DCHECK(!IsBlockedCoreRegister(R4));
     DCHECK(!kCoreCalleeSaves.Includes(r4));
     vixl32::Register temp2 = r4;
     for (vixl32::Register reg : kParameterCoreRegistersVIXL) {
@@ -2392,7 +2384,7 @@ void CodeGeneratorARMVIXL::GenerateFrameEntry() {
     // sure r4 is not blocked, e.g. in special purpose
     // TestCodeGeneratorARMVIXL; also asserting that r4 is available
     // here.
-    if (!blocked_core_registers_[R4]) {
+    if (!IsBlockedCoreRegister(R4)) {
       for (vixl32::Register reg : kParameterCoreRegistersVIXL) {
         DCHECK(!reg.Is(r4));
       }
@@ -2498,7 +2490,7 @@ void CodeGeneratorARMVIXL::GenerateFrameExit() {
   uint32_t fp_spills_offset = frame_size - FrameEntrySpillSize();
   if ((fpu_spill_mask_ == 0u || IsPowerOfTwo(fpu_spill_mask_)) &&
       // r4 is blocked by TestCodeGeneratorARMVIXL used by some tests.
-      core_spills_offset <= (blocked_core_registers_[r4.GetCode()] ? 2u : 3u) * kArmWordSize) {
+      core_spills_offset <= (IsBlockedCoreRegister(R4) ? 2u : 3u) * kArmWordSize) {
     // Load the FP spill if any and then do a single POP including the method
     // and up to two filler registers. If we have no FP spills, this also has
     // the advantage that we do not need to emit CFI directives.

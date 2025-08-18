@@ -894,29 +894,6 @@ uint32_t CodeGenerator::GetBootImageOffsetOfIntrinsicDeclaringClass(HInvoke* inv
   return GetBootImageOffsetImpl(declaring_class.Ptr(), ImageHeader::kSectionObjects);
 }
 
-void CodeGenerator::BlockIfInRegister(Location location, bool is_out) const {
-  // The DCHECKS below check that a register is not specified twice in
-  // the summary. The out location can overlap with an input, so we need
-  // to special case it.
-  if (location.IsRegister()) {
-    DCHECK(is_out || !blocked_core_registers_[location.reg()]);
-    blocked_core_registers_[location.reg()] = true;
-  } else if (location.IsFpuRegister()) {
-    DCHECK(is_out || !blocked_fpu_registers_[location.reg()]);
-    blocked_fpu_registers_[location.reg()] = true;
-  } else if (location.IsFpuRegisterPair()) {
-    DCHECK(is_out || !blocked_fpu_registers_[location.AsFpuRegisterPairLow<int>()]);
-    blocked_fpu_registers_[location.AsFpuRegisterPairLow<int>()] = true;
-    DCHECK(is_out || !blocked_fpu_registers_[location.AsFpuRegisterPairHigh<int>()]);
-    blocked_fpu_registers_[location.AsFpuRegisterPairHigh<int>()] = true;
-  } else if (location.IsRegisterPair()) {
-    DCHECK(is_out || !blocked_core_registers_[location.AsRegisterPairLow<int>()]);
-    blocked_core_registers_[location.AsRegisterPairLow<int>()] = true;
-    DCHECK(is_out || !blocked_core_registers_[location.AsRegisterPairHigh<int>()]);
-    blocked_core_registers_[location.AsRegisterPairHigh<int>()] = true;
-  }
-}
-
 std::unique_ptr<CodeGenerator> CodeGenerator::Create(HGraph* graph,
                                                      const CompilerOptions& compiler_options,
                                                      OptimizingCompilerStats* stats) {
@@ -975,10 +952,8 @@ CodeGenerator::CodeGenerator(HGraph* graph,
       fpu_spill_mask_(0),
       first_register_slot_in_slow_path_(0),
       allocated_registers_(RegisterSet::Empty()),
-      blocked_core_registers_(graph->GetAllocator()->AllocArray<bool>(number_of_core_registers,
-                                                                      kArenaAllocCodeGenerator)),
-      blocked_fpu_registers_(graph->GetAllocator()->AllocArray<bool>(number_of_fpu_registers,
-                                                                     kArenaAllocCodeGenerator)),
+      blocked_core_registers_(0u),
+      blocked_fpu_registers_(0u),
       number_of_core_registers_(number_of_core_registers),
       number_of_fpu_registers_(number_of_fpu_registers),
       number_of_register_pairs_(number_of_register_pairs),
@@ -997,6 +972,9 @@ CodeGenerator::CodeGenerator(HGraph* graph,
       requires_current_method_(GetGraph()->IsCompilingBaseline()),
       code_generation_data_(),
       unimplemented_intrinsics_(unimplemented_intrinsics) {
+  DCHECK_LE(number_of_core_registers_, BitSizeOf<uint32_t>());
+  DCHECK_LE(number_of_fpu_registers_, BitSizeOf<uint32_t>());
+
   if (GetGraph()->IsCompilingOsr()) {
     // Make OSR methods have all registers spilled, this simplifies the logic of
     // jumping to the compiled code directly.
