@@ -3822,6 +3822,8 @@ void Heap::GrowForUtilization(collector::GarbageCollector* collector_ran,
   MutexLock mu(Thread::Current(), process_state_update_lock_);
   // Use the multiplier to grow more for foreground.
   const double multiplier = HeapGrowthMultiplier();
+  collector::GarbageCollector* next_collector = nullptr;
+
   if (gc_type != collector::kGcTypeSticky) {
     // Grow the heap for non sticky GC.
     uint64_t delta = bytes_allocated * (1.0 / GetTargetHeapUtilization() - 1.0);
@@ -3857,6 +3859,7 @@ void Heap::GrowForUtilization(collector::GarbageCollector* collector_ran,
       next_gc_type_ = collector::kGcTypeSticky;
     } else {
       next_gc_type_ = non_sticky_gc_type;
+      next_collector = non_sticky_collector;
     }
     // If we have freed enough memory, shrink the heap back down.
     const size_t adjusted_max_free = static_cast<size_t>(max_free_ * multiplier);
@@ -3925,6 +3928,23 @@ void Heap::GrowForUtilization(collector::GarbageCollector* collector_ran,
       // Calculate when to perform the next ConcurrentGC.
       // Estimate how many remaining bytes we will have when we need to start the next GC.
       size_t remaining_bytes = bytes_allocated_during_gc;
+      // If the gc-type is changing then adjust remaining_bytes such that we don't give too
+      // much/little head-room for the next background GC to finish before hitting
+      // target_footprint_.
+      if (gc_type != next_gc_type_ && use_generational_gc_) {
+        DCHECK_EQ(collector_ran, FindCollectorByGcType(gc_type));
+        if (next_collector == nullptr) {
+          DCHECK_EQ(next_gc_type_, collector::kGcTypeSticky);
+          next_collector = FindCollectorByGcType(next_gc_type_);
+          DCHECK(next_collector != nullptr);
+        }
+        double next_gc_cpu_time = next_collector->GetMeanCpuTime();
+        double cur_gc_cpu_time = collector_ran->GetMeanCpuTime();
+        DCHECK(!std::isnan(cur_gc_cpu_time));
+        if (LIKELY(!std::isnan(next_gc_cpu_time))) {
+          remaining_bytes = remaining_bytes * (next_gc_cpu_time / cur_gc_cpu_time);
+        }
+      }
       size_t target_footprint = target_footprint_.load(std::memory_order_relaxed);
       DCHECK_LE(target_footprint_.load(std::memory_order_relaxed), GetMaxMemory());
       // Start a concurrent GC when we get close to the estimated remaining bytes. When the
