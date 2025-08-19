@@ -95,13 +95,14 @@ inline std::ostream& operator<<(std::ostream& os, const InstructionDumper& id) {
 #define ASSERT_BLOCK_REMOVED(b) ASSERT_TRUE(IsRemoved(b)) << "Not removed: B" << b->GetBlockId()
 #define ASSERT_BLOCK_RETAINED(b) ASSERT_FALSE(IsRemoved(b)) << "Removed: B" << b->GetBlockId()
 
+// Build a `LiveInterval`. Does not support pair intervals.
 inline LiveInterval* BuildInterval(const size_t ranges[][2],
                                    size_t number_of_ranges,
                                    ScopedArenaAllocator* allocator,
                                    uint32_t regs = kNoRegisters,
                                    HInstruction* defined_by = nullptr) {
   LiveInterval* interval =
-      LiveInterval::MakeInterval(allocator, DataType::Type::kInt32, defined_by);
+      LiveInterval::MakeInterval(allocator, DataType::Type::kInt32, /*is_pair=*/ false, defined_by);
   if (defined_by != nullptr) {
     defined_by->SetLiveInterval(interval);
   }

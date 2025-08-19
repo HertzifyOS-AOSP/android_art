@@ -128,8 +128,9 @@ void SsaLivenessAnalysis::NumberInstructions() {
       DCHECK(current->GetLocations()->Out().IsValid());
       instructions_from_ssa_index_.push_back(current);
       current->SetSsaIndex(ssa_index++);
+      bool is_pair = codegen_->NeedsTwoRegisters(current->GetType());
       current->SetLiveInterval(
-          LiveInterval::MakeInterval(allocator_, current->GetType(), current));
+          LiveInterval::MakeInterval(allocator_, current->GetType(), is_pair, current));
       current->SetLifetimePosition(lifetime_position);
     }
     lifetime_position += kLivenessPositionsPerInstruction;
@@ -146,8 +147,9 @@ void SsaLivenessAnalysis::NumberInstructions() {
       if (locations != nullptr && locations->Out().IsValid()) {
         instructions_from_ssa_index_.push_back(current);
         current->SetSsaIndex(ssa_index++);
+        bool is_pair = codegen_->NeedsTwoRegisters(current->GetType());
         current->SetLiveInterval(
-            LiveInterval::MakeInterval(allocator_, current->GetType(), current));
+            LiveInterval::MakeInterval(allocator_, current->GetType(), is_pair, current));
       }
       instructions_from_lifetime_position_.push_back(current);
       current->SetLifetimePosition(lifetime_position);
@@ -593,10 +595,7 @@ LiveInterval* LiveInterval::SplitAt(size_t position) {
     return nullptr;
   }
 
-  LiveInterval* new_interval = new (allocator_) LiveInterval(allocator_, type_);
-  if (IsPair()) {
-    new_interval->SetPair();
-  }
+  LiveInterval* new_interval = new (allocator_) LiveInterval(allocator_, type_, IsPair());
 
   new_interval->next_sibling_ = next_sibling_;
   next_sibling_ = new_interval;

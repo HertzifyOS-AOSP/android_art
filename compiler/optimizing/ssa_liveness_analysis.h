@@ -253,23 +253,27 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
  public:
   static LiveInterval* MakeInterval(ScopedArenaAllocator* allocator,
                                     DataType::Type type,
+                                    bool is_pair,
                                     HInstruction* instruction = nullptr) {
-    return new (allocator) LiveInterval(allocator, type, instruction);
+    return new (allocator) LiveInterval(allocator, type, is_pair, instruction);
   }
 
   static LiveInterval* MakeFixedInterval(ScopedArenaAllocator* allocator,
                                          uint32_t regs,
                                          DataType::Type type) {
-    return new (allocator) LiveInterval(allocator, type, nullptr, true, regs);
+    return new (allocator) LiveInterval(
+        allocator, type, /*is_pair=*/ false, /*defined_by*/ nullptr, /*is_fixed=*/ true, regs);
   }
 
   static LiveInterval* MakeTempInterval(ScopedArenaAllocator* allocator,
                                         DataType::Type type,
+                                        bool is_pair,
                                         size_t temp_index,
                                         size_t position) {
     int8_t checked_index = dchecked_integral_cast<int8_t>(temp_index);
     LiveInterval* temp = new (allocator) LiveInterval(allocator,
                                                       type,
+                                                      is_pair,
                                                       /*defined_by*/ nullptr,
                                                       /*is_fixed=*/ false,
                                                       /*regs=*/ kNoRegisters,
@@ -646,11 +650,6 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
     return IsFloatingPoint() == other.IsFloatingPoint();
   }
 
-  void SetPair() {
-    DCHECK(!is_pair_);
-    is_pair_ = true;
-  }
-
   bool IsPair() const {
     return is_pair_;
   }
@@ -812,6 +811,7 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
  private:
   LiveInterval(ScopedArenaAllocator* allocator,
                DataType::Type type,
+               bool is_pair,
                HInstruction* defined_by = nullptr,
                bool is_fixed = false,
                uint32_t regs = kNoRegisters,
@@ -832,7 +832,7 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
         type_(type),
         temp_index_(temp_index),
         is_fixed_(is_fixed),
-        is_pair_(false) {}
+        is_pair_(is_pair) {}
 
   // Searches for a LiveRange that either covers the given position or is the
   // first next LiveRange. Returns null if no such LiveRange exists. Ranges
@@ -941,7 +941,7 @@ class LiveInterval : public ArenaObject<kArenaAllocSsaLiveness> {
   const bool is_fixed_;
 
   // Whether this interval represents a register pair.
-  bool is_pair_;
+  const bool is_pair_;
 
   static constexpr int kNoSpillSlot = -1;
   static constexpr int8_t kNoTempIndex = -1;

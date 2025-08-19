@@ -553,9 +553,7 @@ void RegisterAllocatorLinearScan::ProcessInstruction(HInstruction* instruction) 
 
   DCHECK(unhandled.empty() || current->StartsBeforeOrAt(unhandled.back()));
 
-  if (codegen_->NeedsTwoRegisters(current->GetType())) {
-    current->SetPair();
-  }
+  DCHECK_EQ(codegen_->NeedsTwoRegisters(current->GetType()), current->IsPair());
 
   current->ResetSearchCache();
   CheckForFixedOutput(instruction, will_call);
@@ -603,20 +601,18 @@ void RegisterAllocatorLinearScan::CheckForTempLiveIntervals(HInstruction* instru
       DCHECK(temp.IsUnallocated());
       switch (temp.GetPolicy()) {
         case Location::kRequiresRegister: {
-          LiveInterval* interval =
-              LiveInterval::MakeTempInterval(allocator_, DataType::Type::kInt32, i, position);
+          LiveInterval* interval = LiveInterval::MakeTempInterval(
+              allocator_, DataType::Type::kInt32, /*is_pair=*/ false, i, position);
           temp_intervals_.push_back(interval);
           unhandled_core_intervals_.push_back(interval);
           break;
         }
 
         case Location::kRequiresFpuRegister: {
-          LiveInterval* interval =
-              LiveInterval::MakeTempInterval(allocator_, DataType::Type::kFloat64, i, position);
+          bool is_pair = codegen_->NeedsTwoRegisters(DataType::Type::kFloat64);
+          LiveInterval* interval = LiveInterval::MakeTempInterval(
+              allocator_, DataType::Type::kFloat64, is_pair, i, position);
           temp_intervals_.push_back(interval);
-          if (codegen_->NeedsTwoRegisters(DataType::Type::kFloat64)) {
-            interval->SetPair();
-          }
           unhandled_fp_intervals_.push_back(interval);
           break;
         }
