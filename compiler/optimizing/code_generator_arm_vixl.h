@@ -661,10 +661,6 @@ class CodeGeneratorARMVIXL : public CodeGenerator {
 
   void Finalize() override;
 
-  bool NeedsTwoRegisters(DataType::Type type) const override {
-    return type == DataType::Type::kFloat64 || type == DataType::Type::kInt64;
-  }
-
   void ComputeSpillMask() override;
 
   vixl::aarch32::Label* GetFrameEntryLabel() { return &frame_entry_label_; }

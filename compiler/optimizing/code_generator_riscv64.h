@@ -516,8 +516,6 @@ class CodeGeneratorRISCV64 : public CodeGenerator {
 
   ParallelMoveResolver* GetMoveResolver() override { return &move_resolver_; }
 
-  bool NeedsTwoRegisters([[maybe_unused]] DataType::Type type) const override { return false; }
-
   void IncreaseFrame(size_t adjustment) override;
   void DecreaseFrame(size_t adjustment) override;
 
