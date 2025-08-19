@@ -821,8 +821,6 @@ class CodeGeneratorARM64 : public CodeGenerator {
 
   ParallelMoveResolverARM64* GetMoveResolver() override { return &move_resolver_; }
 
-  bool NeedsTwoRegisters([[maybe_unused]] DataType::Type type) const override { return false; }
-
   // Check if the desired_string_load_kind is supported. If it is, return it,
   // otherwise return a fall-back kind that should be used instead.
   HLoadString::LoadKind GetSupportedLoadStringKind(

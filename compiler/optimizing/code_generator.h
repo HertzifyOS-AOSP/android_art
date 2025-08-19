@@ -281,9 +281,13 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
   virtual size_t SaveFloatingPointRegister(size_t stack_index, uint32_t reg_id) = 0;
   virtual size_t RestoreFloatingPointRegister(size_t stack_index, uint32_t reg_id) = 0;
 
-  virtual bool NeedsTwoRegisters(DataType::Type type) const = 0;
   // Returns whether we should split long moves in parallel moves.
   virtual bool ShouldSplitLongMoves() const { return false; }
+
+  bool NeedsTwoRegisters(DataType::Type type) const {
+    DCHECK_LT(enum_cast<>(type), BitSizeOf<uint32_t>());
+    return (data_types_requiring_register_pair_ & (1u << enum_cast<>(type))) != 0u;
+  }
 
   // Returns true if `invoke` is an implemented intrinsic in this codegen's arch.
   bool IsImplementedIntrinsic(HInvoke* invoke) const {
@@ -862,6 +866,10 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
 
   // Registers that were allocated during linear scan.
   RegisterSet allocated_registers_;
+
+  // Bitmask of data types that need a register pair.
+  // Codegens should set this up in the constructor if any data type requires a register pair.
+  uint32_t data_types_requiring_register_pair_;
 
   // Bitmasks used when doing register allocation to know which registers we can allocate.
   // Codegens should set these up in the constructor.

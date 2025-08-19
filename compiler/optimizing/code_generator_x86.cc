@@ -1174,6 +1174,9 @@ CodeGeneratorX86::CodeGeneratorX86(HGraph* graph,
       fixups_to_jump_tables_(graph->GetAllocator()->Adapter(kArenaAllocCodeGenerator)),
       method_address_offset_(std::less<uint32_t>(),
                              graph->GetAllocator()->Adapter(kArenaAllocCodeGenerator)) {
+  // `long`s require register pairs.
+  data_types_requiring_register_pair_ = 1u << enum_cast<>(DataType::Type::kInt64);
+
   SetupBlockedRegisters();
   // Use a fake return address register to mimic Quick.
   AddAllocatedRegister(Location::RegisterLocation(kFakeReturnRegister));

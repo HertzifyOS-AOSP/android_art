@@ -605,10 +605,6 @@ class CodeGeneratorX86 : public CodeGenerator {
     block_labels_ = CommonInitializeLabels<Label>();
   }
 
-  bool NeedsTwoRegisters(DataType::Type type) const override {
-    return type == DataType::Type::kInt64;
-  }
-
   bool ShouldSplitLongMoves() const override { return true; }
 
   Label* GetFrameEntryLabel() { return &frame_entry_label_; }

@@ -515,8 +515,6 @@ class CodeGeneratorX86_64 : public CodeGenerator {
     block_labels_ = CommonInitializeLabels<Label>();
   }
 
-  bool NeedsTwoRegisters([[maybe_unused]] DataType::Type type) const override { return false; }
-
   // Check if the desired_string_load_kind is supported. If it is, return it,
   // otherwise return a fall-back kind that should be used instead.
   HLoadString::LoadKind GetSupportedLoadStringKind(

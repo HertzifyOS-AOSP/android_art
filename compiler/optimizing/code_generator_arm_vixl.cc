@@ -1951,6 +1951,10 @@ CodeGeneratorARMVIXL::CodeGeneratorARMVIXL(HGraph* graph,
                          graph->GetAllocator()->Adapter(kArenaAllocCodeGenerator)),
       jit_baker_read_barrier_slow_paths_(std::less<uint32_t>(),
                                          graph->GetAllocator()->Adapter(kArenaAllocCodeGenerator)) {
+  // 64-bit types require register pairs.
+  data_types_requiring_register_pair_ =
+      (1u << enum_cast<>(DataType::Type::kFloat64)) | (1u << enum_cast<>(DataType::Type::kInt64));
+
   SetupBlockedRegisters();
   // Always save the LR register to mimic Quick.
   AddAllocatedRegister(Location::RegisterLocation(LR));

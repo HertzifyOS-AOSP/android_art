@@ -36,6 +36,7 @@
 #include "base/systrace.h"
 #include "class_linker.h"
 #include "class_loader_context.h"
+#include "com_android_art_rw_flags.h"
 #include "dex/art_dex_file_loader.h"
 #include "dex/dex_file-inl.h"
 #include "dex/dex_file_loader.h"
@@ -411,6 +412,22 @@ std::vector<std::unique_ptr<const DexFile>> OatFileManager::OpenDexFilesFromOat(
                                                              dex_file->GetLocation());
           if (madvise_size_limit == 0) {
             break;
+          }
+        }
+        if (com::android::art::rw::flags::madvise_type_lookup_table() && madvise_size_limit > 0) {
+          // If we have remaining madvise quota, use it to page in the type lookup table if present;
+          // this is typically on the critical path for startup.
+          const VdexFile* vdex_file = oat_file != nullptr ? oat_file->GetVdexFile() : nullptr;
+          if (vdex_file != nullptr && vdex_file->HasTypeLookupTableSection()) {
+            const VdexFile::VdexSectionHeader& section_header =
+                vdex_file->GetSectionHeader(VdexSection::kTypeLookupTableSection);
+            VLOG(oat) << "Madvising type lookup table: " << vdex_file->GetName();
+            madvise_size_limit -=
+                Runtime::MadviseFileForRange(madvise_size_limit,
+                                             section_header.section_size,
+                                             vdex_file->Begin() + section_header.section_offset,
+                                             vdex_file->End(),
+                                             vdex_file->GetName());
           }
         }
       }
