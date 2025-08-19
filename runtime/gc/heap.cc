@@ -4239,6 +4239,24 @@ void Heap::RevokeAllThreadLocalBuffers() {
   }
 }
 
+size_t Heap::GetDefaultMemoryGcCostFactor() {
+  if (com::android::art::rw::flags::auto_tune_time_based_gc_triggering()) {
+    // For the default value, use the ratio of total memory to compute resources
+    // on device, which should get us in a good ballpark.
+    int64_t num_cpus = sysconf(_SC_NPROCESSORS_CONF);
+    int64_t num_pages = sysconf(_SC_PHYS_PAGES);
+    int64_t page_size = sysconf(_SC_PAGESIZE);
+
+    if (num_cpus > 0 && num_pages > 0 && page_size > 0) {
+      return static_cast<size_t>(page_size * (num_pages / (100 * num_cpus)));
+    }
+  }
+
+  // We don't know how much memory or compute resources the device has. Pick
+  // something suitable for 2025 era phones and hope for the best.
+  return static_cast<size_t>(32 * MB);
+}
+
 class Heap::TimeBasedGcThresholdCheckTask : public HeapTask {
  public:
   explicit TimeBasedGcThresholdCheckTask(uint64_t target_time) : HeapTask(target_time) {}

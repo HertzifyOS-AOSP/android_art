@@ -151,7 +151,6 @@ class Heap {
   static constexpr double kDefaultTargetUtilization = 0.6;
 
   static constexpr bool kDefaultEnableTimeBasedGcTrigger = false;
-  static constexpr size_t kDefaultMemoryGcCostFactor = 32 * MB;
 
   static constexpr double kDefaultHeapGrowthMultiplier = 2.0;
   // Primitive arrays larger than this size are put in the large object space.
@@ -196,6 +195,8 @@ class Heap {
   static size_t GetDefaultStartingSize() {
     return gPageSize;
   }
+
+  static size_t GetDefaultMemoryGcCostFactor();
 
   // Whether the transition-GC heap threshold condition applies or not for non-low memory devices.
   // Stressing GC will bypass the heap threshold condition.
