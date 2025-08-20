@@ -33,6 +33,13 @@
 
 namespace art HIDDEN {
 
+// Forward declare CompilerOptions so that the CreateCompilerOptions forward declare works.
+class CompilerOptions;
+
+namespace fuzzer {
+std::unique_ptr<CompilerOptions> CreateCompilerOptions();
+}  // namespace fuzzer
+
 namespace jit {
 class JitCompiler;
 }  // namespace jit
@@ -414,7 +421,6 @@ class CompilerOptions final {
   // Classes listed in the preloaded-classes file, used for boot image and
   // boot image extension compilation.
   HashSet<std::string> preloaded_classes_;
-
   CompilerType compiler_type_;
   ImageType image_type_;
   bool multi_image_;
@@ -504,6 +510,8 @@ class CompilerOptions final {
   friend class verifier::VerifierDepsTest;
   friend class linker::Arm64RelativePatcherTest;
   friend class linker::Thumb2RelativePatcherTest;
+
+  friend std::unique_ptr<CompilerOptions> fuzzer::CreateCompilerOptions();
 
   template <class Base>
   friend bool ReadCompilerOptions(Base& map, CompilerOptions* options, std::string* error_msg);
