@@ -21,6 +21,7 @@
 #include "dex/class_accessor-inl.h"
 #include "handle_scope-inl.h"
 #include "interpreter/unstarted_runtime.h"
+#include "noop_compiler_callbacks.h"
 #include "runtime_intrinsics.h"
 #include "scoped_thread_state_change-inl.h"
 
@@ -63,13 +64,16 @@ static std::string GetClassPathOption(const char* option,
   return option + android::base::Join(class_path, ':');
 }
 
-void FuzzerInitialize(CompilerCallbacks* callbacks) {
+void FuzzerInitialize() {
   // Set logging to error and above to avoid warnings about unexpected checksums.
   android::base::SetMinimumLogSeverity(android::base::ERROR);
 
   // Create runtime.
   RuntimeOptions options;
-  options.push_back(std::make_pair("compilercallbacks", callbacks));
+  {
+    static NoopCompilerCallbacks callbacks;
+    options.push_back(std::make_pair("compilercallbacks", &callbacks));
+  }
 
   std::string boot_class_path_string =
       GetClassPathOption("-Xbootclasspath:", GetLibCoreDexFileNames());
@@ -143,68 +147,67 @@ ALWAYS_INLINE bool VerifyClasses(jobject class_loader, const StandardDexFile* de
   ClassLinker* class_linker = runtime->GetClassLinker();
   ScopedObjectAccess soa(Thread::Current());
 
-  StackHandleScope<4> scope(soa.Self());
-  Handle<mirror::ClassLoader> h_loader =
-      scope.NewHandle(soa.Decode<mirror::ClassLoader>(class_loader));
-  MutableHandle<mirror::Class> h_klass(scope.NewHandle<mirror::Class>(nullptr));
-  MutableHandle<mirror::DexCache> h_dex_cache(scope.NewHandle<mirror::DexCache>(nullptr));
-  MutableHandle<mirror::ClassLoader> h_dex_cache_class_loader = scope.NewHandle(h_loader.Get());
+  // Scope for the handles
+  {
+    StackHandleScope<4> scope(soa.Self());
+    Handle<mirror::ClassLoader> h_loader =
+        scope.NewHandle(soa.Decode<mirror::ClassLoader>(class_loader));
+    MutableHandle<mirror::Class> h_klass(scope.NewHandle<mirror::Class>(nullptr));
+    MutableHandle<mirror::DexCache> h_dex_cache(scope.NewHandle<mirror::DexCache>(nullptr));
+    MutableHandle<mirror::ClassLoader> h_dex_cache_class_loader = scope.NewHandle(h_loader.Get());
 
-  for (ClassAccessor accessor : dex_file->GetClasses()) {
-    h_klass.Assign(
-        class_linker->FindClass(soa.Self(), *dex_file, accessor.GetClassIdx(), h_loader));
-    // Ignore classes that couldn't be loaded since we are looking for crashes during
-    // class/method verification.
-    if (h_klass == nullptr || h_klass->IsErroneous()) {
-      // Treat as failure to pass verification
-      passed_class_verification = false;
-      soa.Self()->ClearException();
-      continue;
+    for (const ClassAccessor accessor : dex_file->GetClasses()) {
+      h_klass.Assign(
+          class_linker->FindClass(soa.Self(), *dex_file, accessor.GetClassIdx(), h_loader));
+      // Ignore classes that couldn't be loaded since we are looking for crashes during
+      // class/method verification.
+      if (h_klass == nullptr || h_klass->IsErroneous()) {
+        // Treat as failure to pass verification
+        passed_class_verification = false;
+        soa.Self()->ClearException();
+        continue;
+      }
+      if (&h_klass->GetDexFile() != dex_file) {
+        // Skip a duplicate class (as the resolved class is from another dex file). This can happen
+        // e.g. if we have a class named "sun.misc.Unsafe" in fuzz.dex.
+        continue;
+      }
+
+      h_dex_cache.Assign(h_klass->GetDexCache());
+
+      // The class loader from the class's dex cache is different from the dex file's class loader
+      // for boot image classes e.g. java.util.AbstractCollection.
+      h_dex_cache_class_loader.Assign(h_klass->GetDexCache()->GetClassLoader());
+
+      CHECK(h_klass->IsResolved()) << h_klass->PrettyClass();
+      verifier::FailureKind failure_kind =
+          class_linker->VerifyClass(soa.Self(),
+                                    /* verifier_deps= */ nullptr,
+                                    h_klass,
+                                    // Don't abort on verification errors.
+                                    verifier::HardFailLogMode::kLogWarning);
+
+      DCHECK_EQ(h_klass->IsErroneous(), failure_kind == verifier::FailureKind::kHardFailure);
+      if (failure_kind == verifier::FailureKind::kHardFailure) {
+        passed_class_verification = false;
+        // ClassLinker::VerifyClass throws, so we clear it before we continue.
+        CHECK(soa.Self()->IsExceptionPending());
+        soa.Self()->ClearException();
+      }
+
+      CHECK(h_klass->ShouldVerifyAtRuntime() ||
+            h_klass->IsVerifiedNeedsAccessChecks() ||
+            h_klass->IsVerified() ||
+            h_klass->IsErroneous())
+          << h_klass->PrettyDescriptor() << ": state=" << h_klass->GetStatus();
+
+      soa.Self()->AssertNoPendingException();
     }
-    if (&h_klass->GetDexFile() != dex_file) {
-      // Skip a duplicate class (as the resolved class is from another dex file). This can happen
-      // e.g. if we have a class named "sun.misc.Unsafe" in fuzz.dex.
-      continue;
-    }
-
-    h_dex_cache.Assign(h_klass->GetDexCache());
-
-    // The class loader from the class's dex cache is different from the dex file's class loader
-    // for boot image classes e.g. java.util.AbstractCollection.
-    h_dex_cache_class_loader.Assign(h_klass->GetDexCache()->GetClassLoader());
-
-    CHECK(h_klass->IsResolved()) << h_klass->PrettyClass();
-    verifier::FailureKind failure_kind =
-        class_linker->VerifyClass(soa.Self(),
-                                  /* verifier_deps= */ nullptr,
-                                  h_klass,
-                                  // Don't abort on verification errors.
-                                  verifier::HardFailLogMode::kLogWarning);
-
-    DCHECK_EQ(h_klass->IsErroneous(), failure_kind == verifier::FailureKind::kHardFailure);
-    if (failure_kind == verifier::FailureKind::kHardFailure) {
-      passed_class_verification = false;
-      // ClassLinker::VerifyClass throws, so we clear it before we continue.
-      CHECK(soa.Self()->IsExceptionPending());
-      soa.Self()->ClearException();
-    }
-
-    CHECK(h_klass->ShouldVerifyAtRuntime() || h_klass->IsVerifiedNeedsAccessChecks() ||
-          h_klass->IsVerified() || h_klass->IsErroneous())
-        << h_klass->PrettyDescriptor() << ": state=" << h_klass->GetStatus();
-
-    soa.Self()->AssertNoPendingException();
   }
 
-  return passed_class_verification;
-}
-
-ALWAYS_INLINE void IterationCleanup(jobject class_loader, const StandardDexFile* dex_file) {
-  ScopedObjectAccess soa(Thread::Current());
-  Runtime* runtime = Runtime::Current();
   // Clear the arena pool to free RAM. The next iteration won't be referencing the pool we just
   // used.
-  runtime->ReclaimArenaPoolMemory();
+  Runtime::Current()->ReclaimArenaPoolMemory();
 
   // Delete weak root to the DexCache before removing a DEX file from the cache. This is usually
   // handled by the GC, but since we are not calling it every iteration, we need to delete them
@@ -217,10 +220,12 @@ ALWAYS_INLINE void IterationCleanup(jobject class_loader, const StandardDexFile*
 
   // Mimic DexFile_closeDexFile.
   RemoveNativeDebugInfoForDex(soa.Self(), dex_file);
-  runtime->GetClassLinker()->RemoveDexFromCaches(*dex_file);
+  class_linker->RemoveDexFromCaches(*dex_file);
 
   // Delete global ref and unload class loader to free RAM.
   soa.Env()->GetVm()->DeleteGlobalRef(soa.Self(), class_loader);
+
+  return passed_class_verification;
 }
 
 jobject RegisterDexFileAndGetClassLoader(Runtime* runtime, const StandardDexFile* dex_file) {
@@ -232,135 +237,6 @@ jobject RegisterDexFileAndGetClassLoader(Runtime* runtime, const StandardDexFile
   ObjPtr<mirror::ClassLoader> cl = self->DecodeJObject(class_loader)->AsClassLoader();
   class_linker->RegisterDexFile(*dex_file, cl);
   return class_loader;
-}
-
-std::unique_ptr<CompilerOptions> CreateCompilerOptions() {
-  std::unique_ptr<CompilerOptions> opt = std::make_unique<CompilerOptions>();
-  opt->emit_read_barrier_ = gUseReadBarrier;
-  opt->instruction_set_ =
-      (kRuntimeISA == InstructionSet::kArm) ? InstructionSet::kThumb2 : kRuntimeISA;
-  std::unique_ptr<const InstructionSetFeatures> kISAFeatures =
-      InstructionSetFeatures::FromCppDefines();
-  CHECK(kISAFeatures != nullptr);
-  CHECK_EQ(kRuntimeISA, kISAFeatures->GetInstructionSet());
-  opt->instruction_set_features_ =
-      InstructionSetFeatures::FromBitmap(kRuntimeISA, kISAFeatures->AsBitmap());
-  CHECK(opt->instruction_set_features_ != nullptr);
-  opt->implicit_null_checks_ = true;
-  opt->implicit_so_checks_ = true;
-  opt->implicit_suspend_checks_ = kRuntimeISA == InstructionSet::kArm64;
-  return opt;
-}
-
-Compiler* CreateCompiler(const CompilerOptions& compiler_options,
-                         CompiledCodeStorage* storage) {
-  // Consistency checks
-  CHECK(!compiler_options.GetDebuggable());
-  CHECK(!kUseTableLookupReadBarrier);
-  CHECK(kReserveMarkingRegister);
-  CHECK(!kPoisonHeapReferences);
-  // TODO(solanes): parametrize the compilation kind and get kBaseline for free.
-  CHECK(!compiler_options.IsBaseline());
-
-  // Testing AOT compiler.
-  CHECK_EQ(Runtime::Current()->GetJit(), nullptr);
-
-  return Compiler::Create(compiler_options, storage);
-}
-
-ALWAYS_INLINE bool CompileClasses(jobject class_loader,
-                                  const StandardDexFile* dex_file,
-                                  Compiler* compiler,
-                                  FuzzerCompilerCallbacks* callbacks,
-                                  bool debug_prints) {
-  bool at_least_one_method_called_the_compiler = false;
-  Runtime* runtime = Runtime::Current();
-  ClassLinker* class_linker = runtime->GetClassLinker();
-
-  ScopedObjectAccess soa(Thread::Current());
-  StackHandleScope<4> scope(soa.Self());
-  Handle<mirror::ClassLoader> h_loader =
-      scope.NewHandle(soa.Decode<mirror::ClassLoader>(class_loader));
-  MutableHandle<mirror::Class> h_klass(scope.NewHandle<mirror::Class>(nullptr));
-  MutableHandle<mirror::DexCache> h_dex_cache(scope.NewHandle<mirror::DexCache>(nullptr));
-  MutableHandle<mirror::ClassLoader> h_dex_cache_class_loader = scope.NewHandle(h_loader.Get());
-
-  // We finished verification and we can move to compilation, using the verification results
-  for (ClassAccessor accessor : dex_file->GetClasses()) {
-    h_klass.Assign(
-        class_linker->FindClass(soa.Self(), *dex_file, accessor.GetClassIdx(), h_loader));
-    // Ignore classes that couldn't be loaded since we are looking for crashes during
-    // compilation.
-    if (h_klass == nullptr || h_klass->IsErroneous()) {
-      soa.Self()->ClearException();
-      continue;
-    }
-    if (&h_klass->GetDexFile() != dex_file) {
-      // Skip a duplicate class (as the resolved class is from another dex file). This can happen
-      // e.g. if we have a class named "sun.misc.Unsafe" in fuzz.dex.
-      continue;
-    }
-
-    ClassReference ref(dex_file, h_klass->GetDexClassDefIndex());
-    if (callbacks->IsClassRejected(ref)) {
-      continue;
-    }
-
-    h_dex_cache.Assign(h_klass->GetDexCache());
-
-    // The class loader from the class's dex cache is different from the dex file's class loader
-    // for boot image classes e.g. java.util.AbstractCollection.
-    h_dex_cache_class_loader.Assign(h_klass->GetDexCache()->GetClassLoader());
-
-    int64_t previous_method_idx = -1;
-    for (const ClassAccessor::Method& method : accessor.GetMethods()) {
-      const uint32_t method_idx = method.GetIndex();
-      if (method_idx == previous_method_idx) {
-        // Duplicate method
-        continue;
-      }
-      previous_method_idx = method_idx;
-
-      const uint32_t access_flags = method.GetAccessFlags();
-
-      if (ArtMethod::IsNative(access_flags)) {
-        // TODO(solanes): Support JNI?
-        continue;
-      }
-
-      if (ArtMethod::IsAbstract(access_flags)) {
-        // Abstract methods don't have code.
-        continue;
-      }
-
-      // TODO(solanes): If we want to support the fast compiler, add `!method.IsInvokable() ||`.
-      if (!ArtMethod::IsCompilable(access_flags) || ArtMethod::IsIntrinsic(access_flags)) {
-        // This method will never be compiled.
-        continue;
-      }
-
-      MethodReference method_ref(dex_file, method.GetIndex());
-      if (debug_prints) {
-        LOG(ERROR) << "Going to compile: " << dex_file->PrettyMethod(method.GetIndex())
-                   << ". IsUncompilableMethod: " << std::boolalpha
-                   << callbacks->IsUncompilableMethod(method_ref) << std::noboolalpha
-                   << " using klass " << h_klass->PrettyClass();
-      }
-
-      if (callbacks->IsUncompilableMethod(method_ref)) {
-        continue;
-      }
-      at_least_one_method_called_the_compiler = true;
-      compiler->Compile(method.GetCodeItem(),
-                        access_flags,
-                        accessor.GetClassDefIndex(),
-                        method.GetIndex(),
-                        h_dex_cache_class_loader,
-                        *dex_file,
-                        h_dex_cache);
-    }
-  }
-  return at_least_one_method_called_the_compiler;
 }
 
 }  // namespace fuzzer

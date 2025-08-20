@@ -59,33 +59,7 @@ class FuzzerCorpusTest : public CommonRuntimeTest {
 
     jobject class_loader = fuzzer::RegisterDexFileAndGetClassLoader(runtime, dex_file.get());
     const bool passed_class_verification = fuzzer::VerifyClasses(class_loader, dex_file.get());
-    fuzzer::IterationCleanup(class_loader, dex_file.get());
     ASSERT_EQ(passed_class_verification, expected_success) << " Failed for " << name;
-  }
-
-  static void OptimizedCompilation(const uint8_t* data,
-                                   size_t size,
-                                   const std::string& name,
-                                   bool expected_success) {
-    std::unique_ptr<StandardDexFile> dex_file = fuzzer::VerifyDexFile(data, size, name);
-    ASSERT_EQ(dex_file != nullptr, true) << " Failed for " << name;
-
-    Runtime* runtime = Runtime::Current();
-    CHECK(runtime != nullptr);
-
-    fuzzer::FuzzerCompiledMethodStorage storage;
-    std::unique_ptr<fuzzer::FuzzerCompilerCallbacks> callbacks(
-        new fuzzer::FuzzerCompilerCallbacks());
-    std::unique_ptr<CompilerOptions> compiler_options = fuzzer::CreateCompilerOptions();
-    std::unique_ptr<Compiler> compiler(fuzzer::CreateCompiler(*compiler_options, &storage));
-
-    jobject class_loader = fuzzer::RegisterDexFileAndGetClassLoader(runtime, dex_file.get());
-    fuzzer::VerifyClasses(class_loader, dex_file.get());
-    const bool at_least_one_method_called_the_compiler = fuzzer::CompileClasses(
-        class_loader, dex_file.get(), compiler.get(), callbacks.get(), /*kDebugPrints=*/false);
-    // Note: no need to reset callbacks as they will get destroyed
-    fuzzer::IterationCleanup(class_loader, dex_file.get());
-    ASSERT_EQ(at_least_one_method_called_the_compiler, expected_success) << " Failed for " << name;
   }
 
   void TestFuzzerHelper(
@@ -156,15 +130,6 @@ TEST_F(FuzzerCorpusTest, VerifyCorpusClassDexFiles) {
   const std::string archive_filename = "class_verification_fuzzer_corpus.zip";
 
   TestFuzzerHelper(archive_filename, valid_dex_files, ClassVerification);
-}
-
-// Tests that we can compile classes with kOptimizing from dex files without crashing.
-TEST_F(FuzzerCorpusTest, OptimizeCompileDexFiles) {
-  // These dex files are expected to pass verification. The others are regressions tests.
-  const std::unordered_set<std::string> valid_dex_files = {"Main.dex", "hello_world.dex"};
-  const std::string archive_filename = "optimized_compiler_fuzzer_corpus.zip";
-
-  TestFuzzerHelper(archive_filename, valid_dex_files, OptimizedCompilation);
 }
 
 }  // namespace art
