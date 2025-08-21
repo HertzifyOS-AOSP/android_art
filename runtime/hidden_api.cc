@@ -16,6 +16,8 @@
 
 #include "hidden_api.h"
 
+#include <dlfcn.h>
+
 #include <atomic>
 #include <optional>
 
@@ -35,10 +37,6 @@
 #include "stack.h"
 #include "thread-inl.h"
 #include "well_known_classes.h"
-
-#ifndef __APPLE__
-#include <link.h>
-#endif
 
 namespace art HIDDEN {
 namespace hiddenapi {
@@ -110,33 +108,10 @@ static const std::vector<std::string> kCorePlatformApiExemptions = {
 };
 
 static std::optional<std::string> FindDsoForNativeCaller(void* native_caller_addr) {
-#ifndef __APPLE__
-  struct dl_iterate_context {
-    void* address;
-    std::string dso_name;
-
-    static int callback(dl_phdr_info* info, [[maybe_unused]] size_t size, void* data) {
-      struct dl_iterate_context* ctx = reinterpret_cast<dl_iterate_context*>(data);
-      for (Elf64_Half i = 0; i < info->dlpi_phnum; ++i) {
-        const ElfW(Phdr) & phdr = info->dlpi_phdr[i];
-        if (phdr.p_type == PT_LOAD) {
-          uint8_t* start_addr = reinterpret_cast<uint8_t*>(info->dlpi_addr + phdr.p_vaddr);
-          uint8_t* end_addr = start_addr + phdr.p_memsz;
-          if (ctx->address >= start_addr && ctx->address < end_addr) {
-            ctx->dso_name = info->dlpi_name;
-            return 1;  // DSO found - stop iteration.
-          }
-        }
-      }
-      return 0;  // Continue iteration.
-    }
-  } context{.address = native_caller_addr};
-
-  if (dl_iterate_phdr(dl_iterate_context::callback, &context)) {
-    return std::move(context.dso_name);
+  Dl_info info;
+  if (dladdr(native_caller_addr, &info)) {
+    return std::string(info.dli_fname);
   }
-#endif
-
   return std::nullopt;
 }
 
@@ -668,8 +643,9 @@ void MemberSignature::LogAccessToLogcat(AccessMethod access_method,
       << Dumpable<MemberSignature>(*this)
       << " (runtime_flags=" << FormatHiddenApiRuntimeFlags(runtime_flags)
       << ", domain=" << callee_context.GetDomain() << ", api=" << api_list << ") from "
-      << caller_context << " (domain=" << caller_context.GetDomain() << ") using " << access_method
-      << (access_denied ? ": denied" : ": allowed");
+      << caller_context << " (domain=" << caller_context.GetDomain()
+      << ", TargetSdkVersion=" << Runtime::Current()->GetTargetSdkVersion() << ") using "
+      << access_method << (access_denied ? ": denied" : ": allowed");
   if (access_denied && api_list.IsTestApi()) {
     // see b/177047045 for more details about test api access getting denied
     LOG(WARNING) << "hiddenapi: If this is a platform test consider enabling "
