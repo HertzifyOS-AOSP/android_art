@@ -404,7 +404,7 @@ class MarkCompact final : public GarbageCollector {
 
   // Perform one last round of marking, identifying roots from dirty cards
   // during a stop-the-world (STW) pause.
-  void MarkingPause() REQUIRES(Locks::mutator_lock_, !Locks::heap_bitmap_lock_);
+  void MarkingPause() REQUIRES(!Locks::mutator_lock_, !Locks::heap_bitmap_lock_);
   // Perform stop-the-world pause prior to concurrent compaction.
   // Updates GC-roots and protects heap so that during the concurrent
   // compaction phase we can receive faults and compact the corresponding pages

@@ -884,14 +884,7 @@ void MarkCompact::RunPhases() {
     // priority threads.
     spc.SetToNormalOrBetter();
   }
-  {
-    // Marking pause
-    ScopedPause pause(this);
-    MarkingPause();
-    if (kIsDebugBuild) {
-      bump_pointer_space_->AssertAllThreadLocalBuffersAreRevoked();
-    }
-  }
+  MarkingPause();
   TraceFaults();
   bool perform_compaction;
   {
@@ -1539,7 +1532,7 @@ void MarkCompact::ReMarkRoots(Runtime* runtime) {
 void MarkCompact::MarkingPause() {
   TimingLogger::ScopedTiming t("(Paused)MarkingPause", GetTimings());
   Runtime* runtime = Runtime::Current();
-  Locks::mutator_lock_->AssertExclusiveHeld(thread_running_gc_);
+  ScopedPause pause(this);
   {
     // Handle the dirty objects as we are a concurrent GC
     WriterMutexLock mu(thread_running_gc_, *Locks::heap_bitmap_lock_);
@@ -1601,6 +1594,9 @@ void MarkCompact::MarkingPause() {
   // paused since there is no lock in the GetReferent fast path.
   heap_->GetReferenceProcessor()->EnableSlowPath();
   marking_done_ = true;
+  if (kIsDebugBuild) {
+    bump_pointer_space_->AssertAllThreadLocalBuffersAreRevoked();
+  }
 }
 
 void MarkCompact::SweepSystemWeaks(Thread* self, Runtime* runtime, const bool paused) {
