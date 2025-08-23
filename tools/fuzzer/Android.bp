@@ -200,6 +200,35 @@ cc_fuzz {
     ],
 }
 
+// Optimizing compiler
+cc_fuzz {
+    name: "libart_optimizing_compiler_fuzzer",
+    srcs: ["libart_optimizing_compiler_fuzzer.cc"],
+    defaults: [
+        "libart_fuzzer-defaults",
+        "fuzzer-creating-runtime-defaults",
+    ],
+    // Can not be in defaults due to soong limitations.
+    device_common_corpus: [
+        ":art_runtest_corpus",
+        "class-verifier-corpus/*",
+    ],
+}
+
+cc_fuzz {
+    name: "libart_optimizing_compiler_fuzzerd",
+    srcs: ["libart_optimizing_compiler_fuzzer.cc"],
+    defaults: [
+        "libart_fuzzerd-defaults",
+        "fuzzer-creating-runtime-defaults",
+    ],
+    // Can not be in defaults due to soong limitations.
+    device_common_corpus: [
+        ":art_runtest_corpus",
+        "class-verifier-corpus/*",
+    ],
+}
+
 // Build an ART apex and extract the .jar from them. In particular, the core-oj and
 // core-libart jars will have hiddenapi data, which is needed for the debug+target
 // version of the fuzzer.
@@ -1455,5 +1484,16 @@ genrule {
         "$(location soong_zip) -j -L 0 -o $(out) -D $$(dirname $${FILES[0]})",
     srcs: ["class-verifier-corpus/*"],
     out: ["class_verification_fuzzer_corpus.zip"],
+    tools: ["soong_zip"],
+}
+
+genrule {
+    name: "art-gtest-jars-OptimizedCompilerFuzzerFolder",
+    // Zip the optimized-compiler-corpus folder. To get the folder, we grab the first file
+    // from `in` and use its directory.
+    cmd: "FILES=($(in)) &&" +
+        "$(location soong_zip) -j -L 0 -o $(out) -D $$(dirname $${FILES[0]})",
+    srcs: ["optimized-compiler-corpus/*"],
+    out: ["optimized_compiler_fuzzer_corpus.zip"],
     tools: ["soong_zip"],
 }

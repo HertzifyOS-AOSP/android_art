@@ -1064,6 +1064,7 @@ art_cc_defaults {
         ":art-gtest-jars-AllFields",
         ":art-gtest-jars-DexVerificationFuzzerFolder",
         ":art-gtest-jars-ClassVerificationFuzzerFolder",
+        ":art-gtest-jars-OptimizedCompilerFuzzerFolder",
         ":art-gtest-jars-ErroneousA",
         ":art-gtest-jars-ErroneousB",
         ":art-gtest-jars-ErroneousInit",
