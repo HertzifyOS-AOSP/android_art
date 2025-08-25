@@ -806,8 +806,7 @@ class LocationSummary : public ArenaObject<kArenaAllocLocationSummary> {
   // Inputs array allocated together with the `LocationSummary`.
   Location inputs_[0];
 
-  ART_FRIEND_TEST(RegisterAllocatorTest, ExpectedInRegisterHint);
-  ART_FRIEND_TEST(RegisterAllocatorTest, SameAsFirstInputHint);
+  friend class RegisterAllocatorTest;
   DISALLOW_COPY_AND_ASSIGN(LocationSummary);
 };
 
