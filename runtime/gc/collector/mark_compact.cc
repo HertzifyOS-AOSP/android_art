@@ -1446,15 +1446,12 @@ class MarkCompact::VisitReferencesVisitor {
  public:
   explicit VisitReferencesVisitor(Visitor visitor) : visitor_(visitor) {}
 
-  ALWAYS_INLINE void operator()(mirror::Object* obj,
-                                MemberOffset offset,
-                                [[maybe_unused]] bool is_static) const
+  void operator()(mirror::Object* obj, MemberOffset offset, [[maybe_unused]] bool is_static) const
       REQUIRES(Locks::heap_bitmap_lock_) REQUIRES_SHARED(Locks::mutator_lock_) {
-    visitor_(obj->GetFieldObject<mirror::Object>(offset));
+    visitor_(obj->GetFieldObject<mirror::Object, kDefaultVerifyFlags, kWithoutReadBarrier>(offset));
   }
 
-  ALWAYS_INLINE void operator()([[maybe_unused]] ObjPtr<mirror::Class> klass,
-                                ObjPtr<mirror::Reference> ref) const
+  void operator()([[maybe_unused]] ObjPtr<mirror::Class> klass, ObjPtr<mirror::Reference> ref) const
       REQUIRES(Locks::heap_bitmap_lock_) REQUIRES_SHARED(Locks::mutator_lock_) {
     visitor_(ref.Ptr());
   }
@@ -5202,6 +5199,69 @@ void MarkCompact::CompactionPhase() {
   }
 }
 
+class MarkCompact::RefFieldsVisitor {
+ public:
+  ALWAYS_INLINE explicit RefFieldsVisitor(MarkCompact* const mark_compact)
+      : mark_compact_(mark_compact),
+        young_gen_begin_(mark_compact->mid_gen_end_),
+        young_gen_end_(mark_compact->moving_space_end_),
+        // Ideally we should only check for objects outside young-gen. However,
+        // the boundary of young-gen can change later in PrepareForCompaction()
+        // as we need the mid-gen-end to be page-aligned. Since most of the
+        // objects don't have native-roots, it's not too costly to check all
+        // objects being visited during marking.
+        check_native_roots_to_young_gen_(mark_compact->use_generational_) {}
+
+  bool ShouldDirtyCard() const { return dirty_card_; }
+  void Reset() const { dirty_card_ = false; }
+
+  ALWAYS_INLINE void operator()(mirror::Object* obj,
+                                MemberOffset offset,
+                                [[maybe_unused]] bool is_static) const
+      REQUIRES(Locks::heap_bitmap_lock_) REQUIRES_SHARED(Locks::mutator_lock_) {
+    if (kCheckLocks) {
+      Locks::mutator_lock_->AssertSharedHeld(Thread::Current());
+      Locks::heap_bitmap_lock_->AssertExclusiveHeld(Thread::Current());
+    }
+    mirror::Object* ref =
+        obj->GetFieldObject<mirror::Object, kVerifyNone, kWithoutReadBarrier>(offset);
+    mark_compact_->MarkObject(ref, obj, offset);
+  }
+
+  ALWAYS_INLINE void operator()(ObjPtr<mirror::Class> klass, ObjPtr<mirror::Reference> ref) const
+      REQUIRES(Locks::heap_bitmap_lock_) REQUIRES_SHARED(Locks::mutator_lock_) {
+    mark_compact_->DelayReferenceReferent(klass, ref);
+  }
+
+  ALWAYS_INLINE void VisitRootIfNonNull(mirror::CompressedReference<mirror::Object>* root) const
+      REQUIRES(Locks::heap_bitmap_lock_) REQUIRES_SHARED(Locks::mutator_lock_) {
+    if (!root->IsNull()) {
+      VisitRoot(root);
+    }
+  }
+
+  ALWAYS_INLINE void VisitRoot(mirror::CompressedReference<mirror::Object>* root) const
+      REQUIRES(Locks::heap_bitmap_lock_) REQUIRES_SHARED(Locks::mutator_lock_) {
+    if (kCheckLocks) {
+      Locks::mutator_lock_->AssertSharedHeld(Thread::Current());
+      Locks::heap_bitmap_lock_->AssertExclusiveHeld(Thread::Current());
+    }
+    mirror::Object* ref = root->AsMirrorPtr();
+    mark_compact_->MarkObject(ref, nullptr, MemberOffset(0));
+    if (check_native_roots_to_young_gen_) {
+      dirty_card_ |= reinterpret_cast<uint8_t*>(ref) >= young_gen_begin_ &&
+                     reinterpret_cast<uint8_t*>(ref) < young_gen_end_;
+    }
+  }
+
+ private:
+  MarkCompact* const mark_compact_;
+  uint8_t* const young_gen_begin_;
+  uint8_t* const young_gen_end_;
+  const bool check_native_roots_to_young_gen_;
+  mutable bool dirty_card_;
+};
+
 template <size_t kBufferSize>
 class MarkCompact::ThreadRootsVisitor : public RootVisitor {
  public:
@@ -5236,9 +5296,9 @@ class MarkCompact::ThreadRootsVisitor : public RootVisitor {
     }
   }
 
-  void VisitRoots(mirror::Object*** roots,
-                  size_t count,
-                  [[maybe_unused]] const RootInfo& info) override
+  ALWAYS_INLINE void VisitRoots(mirror::Object*** roots,
+                                size_t count,
+                                [[maybe_unused]] const RootInfo& info) override
       REQUIRES_SHARED(Locks::mutator_lock_) REQUIRES(Locks::heap_bitmap_lock_) {
     for (size_t i = 0; i < count; i++) {
       mirror::Object* obj = *roots[i];
@@ -5251,9 +5311,9 @@ class MarkCompact::ThreadRootsVisitor : public RootVisitor {
     }
   }
 
-  void VisitRoots(mirror::CompressedReference<mirror::Object>** roots,
-                  size_t count,
-                  [[maybe_unused]] const RootInfo& info) override
+  ALWAYS_INLINE void VisitRoots(mirror::CompressedReference<mirror::Object>** roots,
+                                size_t count,
+                                [[maybe_unused]] const RootInfo& info) override
       REQUIRES_SHARED(Locks::mutator_lock_) REQUIRES(Locks::heap_bitmap_lock_) {
     for (size_t i = 0; i < count; i++) {
       mirror::Object* obj = roots[i]->AsMirrorPtr();
@@ -5290,8 +5350,8 @@ class MarkCompact::ThreadRootsVisitor : public RootVisitor {
     end_ = overflow_arr_start_ + requested_size;
   }
 
-  void Push(mirror::Object* obj) REQUIRES_SHARED(Locks::mutator_lock_)
-                                 REQUIRES(Locks::heap_bitmap_lock_) {
+  ALWAYS_INLINE void Push(mirror::Object* obj) REQUIRES_SHARED(Locks::mutator_lock_)
+      REQUIRES(Locks::heap_bitmap_lock_) {
     if (UNLIKELY(top_ == end_)) {
       FetchBuffer();
       DCHECK_GE(end_ - top_, static_cast<ssize_t>(kBufferSize));
@@ -5340,17 +5400,13 @@ class MarkCompact::CheckpointMarkThreadRoots : public Closure {
   MarkCompact* const mark_compact_;
 };
 
-inline void MarkCompact::ProcessMarkObject(mirror::Object* obj) {
-  DCHECK(obj != nullptr);
-  ScanObject</*kUpdateLiveWords=*/true>(obj);
-}
-
 void MarkCompact::ProcessMarkStackNonNull() {
   TimingLogger::ScopedTiming t(__FUNCTION__, GetTimings());
+  RefFieldsVisitor visitor(this);
   while (!mark_stack_->IsEmpty()) {
     mirror::Object* obj = mark_stack_->PopBack();
     if (obj != nullptr) {
-      ProcessMarkObject(obj);
+      ScanObject</*kUpdateLiveWords=*/true>(obj, visitor);
     }
   }
 }
@@ -5389,9 +5445,11 @@ void MarkCompact::MarkRootsCheckpoint(Thread* self, Runtime* runtime) {
     }
   }
   if (vec != nullptr) {
+    RefFieldsVisitor visitor(this);
     for (auto [arr, size] : *vec) {
       for (size_t i = 0; i < size; i++) {
-        ProcessMarkObject(arr[i].AsMirrorPtr());
+        DCHECK(arr[i].AsMirrorPtr() != nullptr);
+        ColdScanObject(arr[i].AsMirrorPtr(), visitor);
       }
       free(arr);
       ProcessMarkStack();
@@ -5420,17 +5478,19 @@ void MarkCompact::RevokeAllThreadLocalBuffers() {
 class MarkCompact::ScanObjectVisitor {
  public:
   explicit ScanObjectVisitor(MarkCompact* const mark_compact) ALWAYS_INLINE
-      : mark_compact_(mark_compact) {}
+      : mark_compact_(mark_compact),
+        ref_visitor_(mark_compact) {}
 
   void operator()(ObjPtr<mirror::Object> obj) const
       ALWAYS_INLINE
       REQUIRES(Locks::heap_bitmap_lock_)
       REQUIRES_SHARED(Locks::mutator_lock_) {
-    mark_compact_->ScanObject</*kUpdateLiveWords*/ false>(obj.Ptr());
+    mark_compact_->ScanObject</*kUpdateLiveWords=*/false>(obj.Ptr(), ref_visitor_);
   }
 
  private:
   MarkCompact* const mark_compact_;
+  RefFieldsVisitor ref_visitor_;
 };
 
 void MarkCompact::UpdateAndMarkModUnion() {
@@ -5492,7 +5552,7 @@ void MarkCompact::MarkReachableObjects() {
       if (obj != nullptr) {
         size_t obj_size = obj->SizeOf<kDefaultVerifyFlags>();
         if (reinterpret_cast<uintptr_t>(obj) + RoundUp(obj_size, kAlignment) > old_gen_end) {
-          ScanObject</*kUpdateLiveWords=*/true>(obj);
+          ColdScanObject(obj, RefFieldsVisitor(this));
         }
       }
     }
@@ -5607,69 +5667,6 @@ void MarkCompact::MarkingPhase() {
   }
 }
 
-class MarkCompact::RefFieldsVisitor {
- public:
-  ALWAYS_INLINE RefFieldsVisitor(MarkCompact* const mark_compact)
-      : mark_compact_(mark_compact),
-        young_gen_begin_(mark_compact->mid_gen_end_),
-        young_gen_end_(mark_compact->moving_space_end_),
-        dirty_card_(false),
-        // Ideally we should only check for objects outside young-gen. However,
-        // the boundary of young-gen can change later in PrepareForCompaction()
-        // as we need the mid-gen-end to be page-aligned. Since most of the
-        // objects don't have native-roots, it's not too costly to check all
-        // objects being visited during marking.
-        check_native_roots_to_young_gen_(mark_compact->use_generational_) {}
-
-  bool ShouldDirtyCard() const { return dirty_card_; }
-
-  ALWAYS_INLINE void operator()(mirror::Object* obj,
-                                MemberOffset offset,
-                                [[maybe_unused]] bool is_static) const
-      REQUIRES(Locks::heap_bitmap_lock_) REQUIRES_SHARED(Locks::mutator_lock_) {
-    if (kCheckLocks) {
-      Locks::mutator_lock_->AssertSharedHeld(Thread::Current());
-      Locks::heap_bitmap_lock_->AssertExclusiveHeld(Thread::Current());
-    }
-    mirror::Object* ref = obj->GetFieldObject<mirror::Object>(offset);
-    mark_compact_->MarkObject(ref, obj, offset);
-  }
-
-  void operator()(ObjPtr<mirror::Class> klass, ObjPtr<mirror::Reference> ref) const ALWAYS_INLINE
-      REQUIRES(Locks::heap_bitmap_lock_) REQUIRES_SHARED(Locks::mutator_lock_) {
-    mark_compact_->DelayReferenceReferent(klass, ref);
-  }
-
-  void VisitRootIfNonNull(mirror::CompressedReference<mirror::Object>* root) const ALWAYS_INLINE
-      REQUIRES(Locks::heap_bitmap_lock_) REQUIRES_SHARED(Locks::mutator_lock_) {
-    if (!root->IsNull()) {
-      VisitRoot(root);
-    }
-  }
-
-  void VisitRoot(mirror::CompressedReference<mirror::Object>* root) const
-      REQUIRES(Locks::heap_bitmap_lock_)
-      REQUIRES_SHARED(Locks::mutator_lock_) {
-    if (kCheckLocks) {
-      Locks::mutator_lock_->AssertSharedHeld(Thread::Current());
-      Locks::heap_bitmap_lock_->AssertExclusiveHeld(Thread::Current());
-    }
-    mirror::Object* ref = root->AsMirrorPtr();
-    mark_compact_->MarkObject(ref);
-    if (check_native_roots_to_young_gen_) {
-      dirty_card_ |= reinterpret_cast<uint8_t*>(ref) >= young_gen_begin_ &&
-                     reinterpret_cast<uint8_t*>(ref) < young_gen_end_;
-    }
-  }
-
- private:
-  MarkCompact* const mark_compact_;
-  uint8_t* const young_gen_begin_;
-  uint8_t* const young_gen_end_;
-  mutable bool dirty_card_;
-  const bool check_native_roots_to_young_gen_;
-};
-
 template <size_t kAlignment>
 size_t MarkCompact::LiveWordsBitmap<kAlignment>::LiveBytesInBitmapWord(size_t chunk_idx) const {
   const size_t index = chunk_idx * kBitmapWordsPerVectorWord;
@@ -5707,52 +5704,56 @@ void MarkCompact::UpdateLivenessInfo(mirror::Object* obj, size_t obj_size) {
       << "size:" << size << " obj-size:" << RoundUp(obj_size, kAlignment);
 }
 
+mirror::Class* MarkCompact::ReloadScanObjClass(mirror::Object* obj) {
+  // It was seen in ConcurrentCopying GC that after a small wait when we reload
+  // the class pointer, it turns out to be a valid class object. So as a workaround,
+  // we can continue execution and log an error that this happened.
+  mirror::Class* klass;
+  for (size_t i = 0; i < 1000; i++) {
+    // Wait for 1ms at a time. Don't wait for more than 1 second in total.
+    usleep(1000);
+    klass = obj->GetClass<kVerifyNone, kWithoutReadBarrier>();
+    if (klass != nullptr) {
+      return klass;
+    }
+  }
+  // It must be heap corruption.
+  LOG(FATAL_WITHOUT_ABORT) << "klass pointer for obj: " << obj << " found to be null."
+                           << " black_dense_end: " << static_cast<void*>(black_dense_end_)
+                           << " mid_gen_end: " << static_cast<void*>(mid_gen_end_)
+                           << " prev_post_compact_end: " << prev_post_compact_end_
+                           << " prev_black_allocations_begin: " << prev_black_allocations_begin_
+                           << " prev_black_dense_end: " << prev_black_dense_end_
+                           << " prev_moving_space_end_at_compaction: "
+                           << prev_moving_space_end_at_compaction_
+                           << " prev_gc_young: " << prev_gc_young_
+                           << " prev_gc_performed_compaction: " << prev_gc_performed_compaction_;
+  heap_->GetVerification()->LogHeapCorruption(
+      obj, mirror::Object::ClassOffset(), klass, /*fatal=*/true);
+  UNREACHABLE();
+}
+
 template <bool kUpdateLiveWords>
-void MarkCompact::ScanObject(mirror::Object* obj) {
+void MarkCompact::ScanObject(mirror::Object* obj, const RefFieldsVisitor& visitor) {
   mirror::Class* klass = obj->GetClass<kVerifyNone, kWithoutReadBarrier>();
   // TODO(lokeshgidra): Remove the following condition once b/373609505 is fixed.
   if (UNLIKELY(klass == nullptr)) {
-    // It was seen in ConcurrentCopying GC that after a small wait when we reload
-    // the class pointer, it turns out to be a valid class object. So as a workaround,
-    // we can continue execution and log an error that this happened.
-    for (size_t i = 0; i < 1000; i++) {
-      // Wait for 1ms at a time. Don't wait for more than 1 second in total.
-      usleep(1000);
-      klass = obj->GetClass<kVerifyNone, kWithoutReadBarrier>();
-      if (klass != nullptr) {
-        break;
-      }
-    }
-    if (klass == nullptr) {
-      // It must be heap corruption.
-      LOG(FATAL_WITHOUT_ABORT) << "klass pointer for obj: " << obj << " found to be null."
-                               << " black_dense_end: " << static_cast<void*>(black_dense_end_)
-                               << " mid_gen_end: " << static_cast<void*>(mid_gen_end_)
-                               << " prev_post_compact_end: " << prev_post_compact_end_
-                               << " prev_black_allocations_begin: " << prev_black_allocations_begin_
-                               << " prev_black_dense_end: " << prev_black_dense_end_
-                               << " prev_moving_space_end_at_compaction: "
-                               << prev_moving_space_end_at_compaction_
-                               << " prev_gc_young: " << prev_gc_young_
-                               << " prev_gc_performed_compaction: "
-                               << prev_gc_performed_compaction_;
-      heap_->GetVerification()->LogHeapCorruption(
-          obj, mirror::Object::ClassOffset(), klass, /*fatal=*/true);
-    }
+    klass = ReloadScanObjClass(obj);
   }
   // The size of `obj` is used both here (to update `bytes_scanned_`) and in
   // `UpdateLivenessInfo`. As fetching this value can be expensive, do it once
   // here and pass that information to `UpdateLivenessInfo`.
-  size_t obj_size = obj->SizeOf<kDefaultVerifyFlags>();
+  size_t obj_size = obj->SizeOf<kDefaultVerifyFlags>(klass);
   bytes_scanned_ += obj_size;
 
-  RefFieldsVisitor visitor(this);
   DCHECK(IsMarked(obj)) << "Scanning marked object " << obj << "\n" << heap_->DumpSpaces();
   if (kUpdateLiveWords && HasAddress(obj)) {
     UpdateLivenessInfo(obj, obj_size);
     freed_objects_--;
   }
-  obj->VisitReferences(visitor, visitor);
+  visitor.Reset();
+  obj->FastVisitReferences</*kVisitNativeRoots=*/true, kVerifyNone, kWithoutReadBarrier>(visitor,
+                                                                                         visitor);
   // old-gen cards for objects containing references to mid-gen needs to be kept
   // dirty for re-scan in the next GC cycle. We take care of that majorly during
   // compaction-phase as that enables us to implicitly take care of
@@ -5771,9 +5772,12 @@ void MarkCompact::ScanObject(mirror::Object* obj) {
 void MarkCompact::ProcessMarkStack() {
   // TODO: eventually get rid of this as we now call this function quite a few times.
   TimingLogger::ScopedTiming t(__FUNCTION__, GetTimings());
+  RefFieldsVisitor visitor(this);
   // TODO: try prefetch like in CMS
   while (!mark_stack_->IsEmpty()) {
-    ProcessMarkObject(mark_stack_->PopBack());
+    mirror::Object* obj = mark_stack_->PopBack();
+    DCHECK(obj != nullptr);
+    ScanObject</*kUpdateLiveWords=*/true>(obj, visitor);
   }
 }
 
@@ -5829,7 +5833,7 @@ inline bool MarkCompact::MarkObjectNonNullNoPush(mirror::Object* obj,
     return false;
   } else {
     // Must be a large-object space, otherwise it's a case of heap corruption.
-    if (!IsAlignedParam(obj, space::LargeObjectSpace::ObjectAlignment())) {
+    if (UNLIKELY(!IsAlignedParam(obj, space::LargeObjectSpace::ObjectAlignment()))) {
       // Objects in large-object space are aligned to the large-object alignment.
       // So if we have an object which doesn't belong to any space and is not
       // page-aligned as well, then it's memory corruption.

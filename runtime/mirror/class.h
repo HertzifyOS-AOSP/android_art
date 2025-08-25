@@ -1458,6 +1458,7 @@ class EXPORT MANAGED Class final : public Object {
   void VisitStaticFieldsReferences(const Visitor& visitor) HOT_ATTR;
 
   template <bool kVisitNativeRoots,
+            bool kVisitInstanceFieldsRefs,
             VerifyObjectFlags kVerifyFlags = kDefaultVerifyFlags,
             ReadBarrierOption kReadBarrierOption = kWithReadBarrier,
             typename Visitor>

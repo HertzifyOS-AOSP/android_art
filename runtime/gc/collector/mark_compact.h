@@ -244,6 +244,8 @@ class MarkCompact final : public GarbageCollector {
   static constexpr uint32_t kBitsPerVectorWord = kBitsPerIntPtrT;
   static constexpr uint32_t kOffsetChunkSize = kBitsPerVectorWord * kAlignment;
   static_assert(kOffsetChunkSize < kMinPageSize);
+
+  class RefFieldsVisitor;
   // Bitmap with bits corresponding to every live word set. For an object
   // which is 4 words in size will have the corresponding 4 bits set. This is
   // required for efficient computation of new-address (post-compaction) from
@@ -533,16 +535,24 @@ class MarkCompact final : public GarbageCollector {
       REQUIRES_SHARED(Locks::mutator_lock_)
       REQUIRES(Locks::heap_bitmap_lock_);
   // Go through all the objects in the mark-stack until it's empty.
-  void ProcessMarkStack() override REQUIRES_SHARED(Locks::mutator_lock_)
+  NO_INLINE void ProcessMarkStack() override REQUIRES_SHARED(Locks::mutator_lock_)
       REQUIRES(Locks::heap_bitmap_lock_);
   void ExpandMarkStack() REQUIRES_SHARED(Locks::mutator_lock_)
       REQUIRES(Locks::heap_bitmap_lock_);
 
+  // Try re-loading class from 'obj' in case it shows up (See b/373609505)
+  mirror::Class* ReloadScanObjClass(mirror::Object* obj) REQUIRES_SHARED(Locks::mutator_lock_)
+      REQUIRES(Locks::heap_bitmap_lock_);
   // Scan object for references. If kUpdateLivewords is true then set bits in
   // the live-words bitmap and add size to chunk-info.
   template <bool kUpdateLiveWords>
-  void ScanObject(mirror::Object* obj) REQUIRES_SHARED(Locks::mutator_lock_)
-      REQUIRES(Locks::heap_bitmap_lock_);
+  ALWAYS_INLINE void ScanObject(mirror::Object* obj, const RefFieldsVisitor& visitor)
+      REQUIRES_SHARED(Locks::mutator_lock_) REQUIRES(Locks::heap_bitmap_lock_);
+
+  NO_INLINE void ColdScanObject(mirror::Object* obj, const RefFieldsVisitor& visitor)
+      REQUIRES_SHARED(Locks::mutator_lock_) REQUIRES(Locks::heap_bitmap_lock_) {
+    return ScanObject</*kUpdateLiveWords=*/true>(obj, visitor);
+  }
   // Push objects to the mark-stack right after successfully marking objects.
   void PushOnMarkStack(mirror::Object* obj)
       REQUIRES_SHARED(Locks::mutator_lock_)
@@ -551,29 +561,26 @@ class MarkCompact final : public GarbageCollector {
   // Update the live-words bitmap as well as add the object size to the
   // chunk-info vector. Both are required for computation of post-compact addresses.
   // Also updates freed_objects_ counter.
-  void UpdateLivenessInfo(mirror::Object* obj, size_t obj_size)
+  SINGLE_CALLER void UpdateLivenessInfo(mirror::Object* obj, size_t obj_size)
       REQUIRES_SHARED(Locks::mutator_lock_);
 
   void ProcessReferences(Thread* self)
       REQUIRES_SHARED(Locks::mutator_lock_)
       REQUIRES(!Locks::heap_bitmap_lock_);
 
-  void MarkObjectNonNull(mirror::Object* obj,
-                         mirror::Object* holder = nullptr,
-                         MemberOffset offset = MemberOffset(0))
-      REQUIRES_SHARED(Locks::mutator_lock_)
-      REQUIRES(Locks::heap_bitmap_lock_);
+  ALWAYS_INLINE void MarkObjectNonNull(mirror::Object* obj,
+                                       mirror::Object* holder = nullptr,
+                                       MemberOffset offset = MemberOffset(0))
+      REQUIRES_SHARED(Locks::mutator_lock_) REQUIRES(Locks::heap_bitmap_lock_);
 
-  void MarkObject(mirror::Object* obj, mirror::Object* holder, MemberOffset offset)
-      REQUIRES_SHARED(Locks::mutator_lock_)
-      REQUIRES(Locks::heap_bitmap_lock_);
+  ALWAYS_INLINE void MarkObject(mirror::Object* obj, mirror::Object* holder, MemberOffset offset)
+      REQUIRES_SHARED(Locks::mutator_lock_) REQUIRES(Locks::heap_bitmap_lock_);
 
   template <bool kParallel>
-  bool MarkObjectNonNullNoPush(mirror::Object* obj,
-                               mirror::Object* holder = nullptr,
-                               MemberOffset offset = MemberOffset(0))
-      REQUIRES(Locks::heap_bitmap_lock_)
-      REQUIRES_SHARED(Locks::mutator_lock_);
+  ALWAYS_INLINE bool MarkObjectNonNullNoPush(mirror::Object* obj,
+                                             mirror::Object* holder = nullptr,
+                                             MemberOffset offset = MemberOffset(0))
+      REQUIRES(Locks::heap_bitmap_lock_) REQUIRES_SHARED(Locks::mutator_lock_);
 
   void Sweep(bool swap_bitmaps) REQUIRES_SHARED(Locks::mutator_lock_)
       REQUIRES(Locks::heap_bitmap_lock_);
@@ -721,9 +728,6 @@ class MarkCompact final : public GarbageCollector {
 
   // Like ProcessMarkStack(), but ignores null entries.
   void ProcessMarkStackNonNull() REQUIRES_SHARED(Locks::mutator_lock_)
-      REQUIRES(Locks::heap_bitmap_lock_);
-  // Process one object popped out of mark_stack. Expects obj to be non-null.
-  void ProcessMarkObject(mirror::Object* obj) REQUIRES_SHARED(Locks::mutator_lock_)
       REQUIRES(Locks::heap_bitmap_lock_);
   // Called to assess if it's safe to use MOVE ioctl, both from kernel bug-fixes
   // as well as seccomp filter point of view.
@@ -1064,7 +1068,6 @@ class MarkCompact final : public GarbageCollector {
   class CheckpointMarkThreadRoots;
   template <size_t kBufferSize>
   class ThreadRootsVisitor;
-  class RefFieldsVisitor;
   template <bool kCheckBegin, bool kCheckEnd, bool kDirtyOldToMid = false>
   class RefsUpdateVisitor;
   class ArenaPoolPageUpdater;

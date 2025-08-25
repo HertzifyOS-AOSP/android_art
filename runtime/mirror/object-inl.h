@@ -346,12 +346,9 @@ inline bool Object::IsPhantomReferenceInstance() {
 }
 
 template <VerifyObjectFlags kVerifyFlags>
-inline size_t Object::SizeOf() {
+inline size_t Object::SizeOf(mirror::Class* klass) {
   size_t result;
   constexpr VerifyObjectFlags kNewFlags = RemoveThisFlags(kVerifyFlags);
-  // Read barrier is never required for SizeOf since objects sizes are constant. Reading from-space
-  // values is OK because of that.
-  mirror::Class* klass = GetClass<kNewFlags, kWithoutReadBarrier>();
   uint32_t class_flags = klass->GetClassFlags<kNewFlags>();
   if ((class_flags & kClassFlagArray) != 0) {
     result = AsArray<kNewFlags>()->template SizeOf<kNewFlags>(class_flags >>
@@ -370,6 +367,15 @@ inline size_t Object::SizeOf() {
   // barrier here if Object::SizeOf() is called on a from-space reference.
   DCHECK_GE(result, sizeof(Object)) << " class=" << klass->PrettyClass();
   return result;
+}
+
+template <VerifyObjectFlags kVerifyFlags>
+inline size_t Object::SizeOf() {
+  constexpr VerifyObjectFlags kNewFlags = RemoveThisFlags(kVerifyFlags);
+  // Read barrier is never required for SizeOf since objects sizes are constant.
+  // Reading from-space values is OK because of that.
+  mirror::Class* klass = GetClass<kNewFlags, kWithoutReadBarrier>();
+  return SizeOf<kVerifyFlags>(klass);
 }
 
 template<VerifyObjectFlags kVerifyFlags, bool kIsVolatile>
@@ -882,7 +888,7 @@ inline void Object::VisitInstanceFieldsReferences(ObjPtr<Class> klass, const Vis
   // Using NO_THREAD_SAFETY_ANALYSIS as heap_bitmap_lock_ and mutator_lock_ are
   // required in shared/exclusive modes in all possible combinations.
   auto visit_one_word = [&visitor, this](uint32_t field_offset, uint32_t ref_offsets)
-                            NO_THREAD_SAFETY_ANALYSIS {
+                            NO_THREAD_SAFETY_ANALYSIS ALWAYS_INLINE {
                               while (ref_offsets != 0) {
                                 if ((ref_offsets & 1) != 0) {
                                   visitor(this, MemberOffset(field_offset), /*is_static=*/false);
@@ -898,16 +904,18 @@ inline void Object::VisitInstanceFieldsReferences(ObjPtr<Class> klass, const Vis
     if (kIsDebugBuild) {
       klass->VerifyOverflowReferenceBitmap<kVerifyFlags, kReadBarrierOption>();
     }
-    uint32_t bitmap_num_words = ref_offsets & ~Class::kVisitReferencesSlowpathMask;
-    uint32_t* overflow_bitmap = reinterpret_cast<uint32_t*>(
-        reinterpret_cast<uint8_t*>(klass.Ptr()) +
-        (klass->GetClassSize<kVerifyFlags>() - bitmap_num_words * sizeof(uint32_t)));
-    for (uint32_t i = 0; i < bitmap_num_words; i++) {
-      visit_one_word(kObjectHeaderSize + i * sizeof(HeapReference<Object>) * 32,
-                     overflow_bitmap[i]);
-    }
+    [visit_one_word, ref_offsets, klass]() REQUIRES_SHARED(Locks::mutator_lock_) {
+      uint32_t bitmap_num_words = ref_offsets & ~Class::kVisitReferencesSlowpathMask;
+      uint32_t* overflow_bitmap = reinterpret_cast<uint32_t*>(
+          reinterpret_cast<uint8_t*>(klass.Ptr()) +
+          (klass->GetClassSize<kVerifyFlags>() - bitmap_num_words * sizeof(uint32_t)));
+      for (uint32_t i = 0; i < bitmap_num_words; i++) {
+        visit_one_word(kObjectHeaderSize + i * sizeof(HeapReference<Object>) * 32,
+                       overflow_bitmap[i]);
+      }
+    }();
   } else {
-    visit_one_word(mirror::kObjectHeaderSize, ref_offsets);
+    visit_one_word(kObjectHeaderSize, ref_offsets);
   }
 }
 
