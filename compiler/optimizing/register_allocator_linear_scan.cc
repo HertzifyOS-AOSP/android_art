@@ -277,6 +277,17 @@ class RegisterAllocatorLinearScan::LinearScan {
                                                      registers_blocked_for_call_);
   }
 
+  // Returns the first register hint that is at least free before the value
+  // contained in `free_until`. If none is found, returns `kNoRegister`.
+  int FindFirstRegisterHint(LiveInterval* interval, ArrayRef<size_t> free_until) const;
+
+  // If there is enough at the definition site to find a register (for example
+  // it uses the same input as the first input), returns the register as a hint.
+  // Returns `kNoRegister` otherwise.
+  int FindHintAtDefinition(LiveInterval* interval) const;
+
+  static constexpr int kNoRegister = -1;
+
   CodeGenerator* const codegen_;
 
   // Number of registers for the current register kind (core or floating point).
@@ -1010,6 +1021,153 @@ bool RegisterAllocatorLinearScan::LinearScan::TryUsingSpillSlotHint(LiveInterval
   return true;
 }
 
+static int RegisterOrLowRegister(Location location) {
+  return location.IsPair() ? location.low() : location.reg();
+}
+
+int RegisterAllocatorLinearScan::LinearScan::FindFirstRegisterHint(
+    LiveInterval* interval, ArrayRef<size_t> free_until) const {
+  if (interval->IsTemp()) return kNoRegister;
+
+  if (interval->GetParent() == interval && interval->GetDefinedBy() != nullptr) {
+    // This is the first interval for the instruction. Try to find
+    // a register based on its definition.
+    DCHECK_EQ(interval->GetDefinedBy()->GetLiveInterval(), interval);
+    int hint = FindHintAtDefinition(interval);
+    if (hint != kNoRegister && free_until[hint] > interval->GetStart()) {
+      return hint;
+    }
+  }
+
+  if (interval->IsSplit() &&
+      SsaLivenessAnalysis::IsAtBlockBoundary(
+          interval->GetStart() / kLivenessPositionsPerInstruction, instructions_from_positions_)) {
+    // If the start of this interval is at a block boundary, we look at the
+    // location of the interval in blocks preceding the block this interval
+    // starts at. If one location is a register we return it as a hint. This
+    // will avoid a move between the two blocks.
+    HBasicBlock* block = SsaLivenessAnalysis::GetBlockFromPosition(
+        interval->GetStart() / kLivenessPositionsPerInstruction, instructions_from_positions_);
+    size_t next_register_use = interval->FirstRegisterUse();
+    for (HBasicBlock* predecessor : block->GetPredecessors()) {
+      size_t position = predecessor->GetLifetimeEnd() - 1;
+      // We know positions above GetStart() do not have a location yet.
+      if (position < interval->GetStart()) {
+        LiveInterval* existing = interval->GetParent()->GetSiblingAt(position);
+        if (existing != nullptr
+            && existing->HasRegisters()
+            // It's worth using that register if it is available until
+            // the next use.
+            && (free_until[existing->GetRegisterOrLowRegister()] >= next_register_use)) {
+          return existing->GetRegisterOrLowRegister();
+        }
+      }
+    }
+  }
+
+  size_t start = interval->GetStart();
+  size_t end = interval->GetEnd();
+  for (const UsePosition& use : interval->GetUses()) {
+    size_t use_position = use.GetPosition();
+    if (use_position > end) {
+      break;
+    }
+    if (use_position >= start && !use.IsSynthesized()) {
+      HInstruction* user = use.GetUser();
+      size_t input_index = use.GetInputIndex();
+      if (user->IsPhi()) {
+        // If the phi has a register, try to use the same.
+        DCHECK(interval->SameRegisterKind(*user->GetLiveInterval()));
+        DCHECK_EQ(interval->IsPair(), user->GetLiveInterval()->IsPair());
+        if (user->GetLiveInterval()->HasRegisters()) {
+          int reg = user->GetLiveInterval()->GetRegisterOrLowRegister();
+          if (free_until[reg] >= use_position) {
+            return reg;
+          }
+        }
+        // If the instruction dies at the phi assignment, we can try having the
+        // same register.
+        if (end == user->GetBlock()->GetPredecessors()[input_index]->GetLifetimeEnd()) {
+          HInputsRef inputs = user->GetInputs();
+          for (size_t i = 0; i < inputs.size(); ++i) {
+            if (i == input_index) {
+              continue;
+            }
+            LiveInterval* sibling = inputs[i]->GetLiveInterval()->GetSiblingAt(
+                user->GetBlock()->GetPredecessors()[i]->GetLifetimeEnd() - 1);
+            DCHECK(sibling != nullptr);
+            DCHECK(interval->SameRegisterKind(*sibling));
+            DCHECK_EQ(interval->IsPair(), sibling->IsPair());
+            if (sibling->HasRegisters()) {
+              int reg = sibling->GetRegisterOrLowRegister();
+              if (free_until[reg] >= use_position) {
+                return reg;
+              }
+            }
+          }
+        }
+      } else {
+        // If the instruction is expected in a register, try to use it.
+        LocationSummary* locations = user->GetLocations();
+        Location expected = locations->InAt(use.GetInputIndex());
+        // We use the user's lifetime position - 1 (and not `use_position`) because the
+        // register is blocked at the beginning of the user.
+        size_t position = user->GetLifetimePosition() - 1;
+        if (expected.IsRegisterKind()) {
+          DCHECK(interval->SameRegisterKind(expected));
+          int reg = RegisterOrLowRegister(expected);
+          if (free_until[reg] >= position) {
+            return reg;
+          }
+        }
+      }
+    }
+  }
+
+  return kNoRegister;
+}
+
+int RegisterAllocatorLinearScan::LinearScan::FindHintAtDefinition(LiveInterval* interval) const {
+  HInstruction* defined_by = interval->GetDefinedBy();
+  DCHECK(defined_by != nullptr);
+  if (defined_by->IsPhi()) {
+    // Try to use the same register as one of the inputs.
+    const ArenaVector<HBasicBlock*>& predecessors = defined_by->GetBlock()->GetPredecessors();
+    HInputsRef inputs = defined_by->GetInputs();
+    for (size_t i = 0; i < inputs.size(); ++i) {
+      size_t end = predecessors[i]->GetLifetimeEnd();
+      LiveInterval* input_interval = inputs[i]->GetLiveInterval()->GetSiblingAt(end - 1);
+      if (input_interval->GetEnd() == end) {
+        // If the input dies at the end of the predecessor, we know its register can
+        // be reused.
+        DCHECK(interval->SameRegisterKind(*input_interval));
+        DCHECK_EQ(interval->IsPair(), input_interval->IsPair());
+        if (input_interval->HasRegisters()) {
+          return input_interval->GetRegisterOrLowRegister();
+        }
+      }
+    }
+  } else {
+    LocationSummary* locations = defined_by->GetLocations();
+    Location out = locations->Out();
+    if (out.IsUnallocated() && out.GetPolicy() == Location::kSameAsFirstInput) {
+      // Try to use the same register as the first input.
+      LiveInterval* input_interval =
+          defined_by->InputAt(0)->GetLiveInterval()->GetSiblingAt(interval->GetStart() - 1);
+      if (input_interval->GetEnd() == interval->GetStart()) {
+        // If the input dies at the start of this instruction, we know its register can
+        // be reused.
+        DCHECK(interval->SameRegisterKind(*input_interval));
+        DCHECK_EQ(interval->IsPair(), input_interval->IsPair());
+        if (input_interval->HasRegisters()) {
+          return input_interval->GetRegisterOrLowRegister();
+        }
+      }
+    }
+  }
+  return kNoRegister;
+}
+
 // Find a free register. If multiple are found, pick the register that
 // is free the longest.
 bool RegisterAllocatorLinearScan::LinearScan::TryAllocateFreeReg(LiveInterval* current) {
@@ -1096,7 +1254,7 @@ bool RegisterAllocatorLinearScan::LinearScan::TryAllocateFreeReg(LiveInterval* c
     DCHECK_NE(free_until[current->GetRegisterOrLowRegister()], 0u);
     DCHECK_IMPLIES(current->IsPair(), free_until[current->GetHighRegister()] != 0u);
   } else {
-    int hint = current->FindFirstRegisterHint(free_until, instructions_from_positions_);
+    int hint = FindFirstRegisterHint(current, free_until);
     if ((hint != kNoRegister)
         // For simplicity, if the hint we are getting for a pair cannot be used,
         // we are just going to allocate a new pair.
