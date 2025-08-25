@@ -27,11 +27,10 @@ namespace art HIDDEN {
 
 inline uint32_t RegisterAllocator::GetSingleRegisterMask(LiveInterval* interval,
                                                          RegisterType register_type) {
-  DCHECK(interval->HasRegister());
+  DCHECK(interval->HasRegisters());
   DCHECK_EQ(register_type == RegisterType::kFpRegister,
             DataType::IsFloatingPointType(interval->GetType()));
-  DCHECK_LE(static_cast<size_t>(interval->GetRegister()), BitSizeOf<uint32_t>());
-  return 1u << interval->GetRegister();
+  return interval->GetRegisters();
 }
 
 inline uint32_t RegisterAllocator::GetBlockedRegistersMask(
@@ -39,7 +38,7 @@ inline uint32_t RegisterAllocator::GetBlockedRegistersMask(
     ArrayRef<HInstruction* const> instructions_from_positions,
     size_t number_of_registers,
     uint32_t registers_blocked_for_call) {
-  DCHECK(!interval->HasRegister());
+  DCHECK(!interval->HasRegisters());
   DCHECK(interval->IsFixed());
   DCHECK_EQ(interval->GetType(), DataType::Type::kVoid);
   DCHECK(interval->GetFirstRange() != nullptr);

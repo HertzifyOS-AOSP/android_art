@@ -130,7 +130,7 @@ void RegisterAllocator::DumpRegister(std::ostream& stream,
 
 uint32_t RegisterAllocator::GetRegisterMask(LiveInterval* interval,
                                             RegisterType register_type) const {
-  if (interval->HasRegister()) {
+  if (interval->HasRegisters()) {
     return GetSingleRegisterMask(interval, register_type);
   } else if (interval->IsFixed()) {
     size_t num_registers;
@@ -172,7 +172,7 @@ bool RegisterAllocator::ValidateIntervals(ArrayRef<LiveInterval* const> interval
   // `registers_blocked_for_call` instead of the cached per-type members
   // that we cannot use in this static member function.
   auto get_register_mask = [&](LiveInterval* interval) {
-    if (interval->HasRegister()) {
+    if (interval->HasRegisters()) {
       return GetSingleRegisterMask(interval, register_type);
     } else if (interval->IsFixed()) {
       DCHECK(liveness != nullptr);
@@ -239,14 +239,18 @@ bool RegisterAllocator::ValidateIntervals(ArrayRef<LiveInterval* const> interval
         BitVector* liveness_of_register = liveness_of_values[reg];
         for (size_t j = it.CurrentRange()->GetStart(); j < it.CurrentRange()->GetEnd(); ++j) {
           if (liveness_of_register->IsBitSet(j)) {
-            if (current->IsUsingInputRegister() && current->CanUseInputRegister()) {
+            if (!com::android::art::flags::reg_alloc_no_output_overlap() &&
+                j == it.CurrentRange()->GetStart() &&
+                current->IsUsingInputRegister(reg) &&
+                current->CanUseInputRegister(reg)) {
               continue;
             }
             if (log_fatal_on_failure) {
               std::ostringstream message;
-              message << "Register conflict at " << j << " ";
+              message << "Register conflict at " << j
+                      << " in " << codegen.GetGraph()->PrettyMethod() << " ";
               if (defined_by != nullptr) {
-                message << "(" << defined_by->DebugName() << ")";
+                message << "(" << defined_by->DebugName() << "#" << defined_by->GetId() << ")";
               }
               message << "for ";
               DumpRegister(message, reg, register_type, &codegen);
@@ -280,24 +284,10 @@ LiveInterval* RegisterAllocator::Split(LiveInterval* interval, size_t position) 
   DCHECK(!interval->IsDeadAt(position));
   if (position == interval->GetStart()) {
     // Spill slot will be allocated when handling `interval` again.
-    interval->ClearRegister();
-    if (interval->HasHighInterval()) {
-      interval->GetHighInterval()->ClearRegister();
-    } else if (interval->HasLowInterval()) {
-      interval->GetLowInterval()->ClearRegister();
-    }
+    interval->ClearRegisters();
     return interval;
   } else {
     LiveInterval* new_interval = interval->SplitAt(position);
-    if (interval->HasHighInterval()) {
-      LiveInterval* high = interval->GetHighInterval()->SplitAt(position);
-      new_interval->SetHighInterval(high);
-      high->SetLowInterval(new_interval);
-    } else if (interval->HasLowInterval()) {
-      LiveInterval* low = interval->GetLowInterval()->SplitAt(position);
-      new_interval->SetLowInterval(low);
-      low->SetHighInterval(new_interval);
-    }
     return new_interval;
   }
 }

@@ -109,11 +109,11 @@ TEST_F(RegisterAllocatorTest, ValidateIntervals) {
   // Test with two intervals of the same range.
   {
     static constexpr size_t ranges[][2] = {{0, 42}};
-    intervals.push_back(BuildInterval(ranges, arraysize(ranges), GetScopedAllocator(), 0));
-    intervals.push_back(BuildInterval(ranges, arraysize(ranges), GetScopedAllocator(), 1));
+    intervals.push_back(BuildInterval(ranges, arraysize(ranges), GetScopedAllocator(), 1u << 0));
+    intervals.push_back(BuildInterval(ranges, arraysize(ranges), GetScopedAllocator(), 1u << 1));
     ASSERT_TRUE(ValidateIntervals(intervals, codegen));
 
-    intervals[1]->SetRegister(0);
+    intervals[1]->SetRegisters(1u << 0);
     ASSERT_FALSE(ValidateIntervals(intervals, codegen));
     intervals.clear();
   }
@@ -121,12 +121,12 @@ TEST_F(RegisterAllocatorTest, ValidateIntervals) {
   // Test with two non-intersecting intervals.
   {
     static constexpr size_t ranges1[][2] = {{0, 42}};
-    intervals.push_back(BuildInterval(ranges1, arraysize(ranges1), GetScopedAllocator(), 0));
+    intervals.push_back(BuildInterval(ranges1, arraysize(ranges1), GetScopedAllocator(), 1u << 0));
     static constexpr size_t ranges2[][2] = {{42, 43}};
-    intervals.push_back(BuildInterval(ranges2, arraysize(ranges2), GetScopedAllocator(), 1));
+    intervals.push_back(BuildInterval(ranges2, arraysize(ranges2), GetScopedAllocator(), 1u << 1));
     ASSERT_TRUE(ValidateIntervals(intervals, codegen));
 
-    intervals[1]->SetRegister(0);
+    intervals[1]->SetRegisters(1u << 0);
     ASSERT_TRUE(ValidateIntervals(intervals, codegen));
     intervals.clear();
   }
@@ -134,12 +134,12 @@ TEST_F(RegisterAllocatorTest, ValidateIntervals) {
   // Test with two non-intersecting intervals, with one with a lifetime hole.
   {
     static constexpr size_t ranges1[][2] = {{0, 42}, {45, 48}};
-    intervals.push_back(BuildInterval(ranges1, arraysize(ranges1), GetScopedAllocator(), 0));
+    intervals.push_back(BuildInterval(ranges1, arraysize(ranges1), GetScopedAllocator(), 1u << 0));
     static constexpr size_t ranges2[][2] = {{42, 43}};
-    intervals.push_back(BuildInterval(ranges2, arraysize(ranges2), GetScopedAllocator(), 1));
+    intervals.push_back(BuildInterval(ranges2, arraysize(ranges2), GetScopedAllocator(), 1u << 1));
     ASSERT_TRUE(ValidateIntervals(intervals, codegen));
 
-    intervals[1]->SetRegister(0);
+    intervals[1]->SetRegisters(1u << 0);
     ASSERT_TRUE(ValidateIntervals(intervals, codegen));
     intervals.clear();
   }
@@ -147,12 +147,12 @@ TEST_F(RegisterAllocatorTest, ValidateIntervals) {
   // Test with intersecting intervals.
   {
     static constexpr size_t ranges1[][2] = {{0, 42}, {44, 48}};
-    intervals.push_back(BuildInterval(ranges1, arraysize(ranges1), GetScopedAllocator(), 0));
+    intervals.push_back(BuildInterval(ranges1, arraysize(ranges1), GetScopedAllocator(), 1u << 0));
     static constexpr size_t ranges2[][2] = {{42, 47}};
-    intervals.push_back(BuildInterval(ranges2, arraysize(ranges2), GetScopedAllocator(), 1));
+    intervals.push_back(BuildInterval(ranges2, arraysize(ranges2), GetScopedAllocator(), 1u << 1));
     ASSERT_TRUE(ValidateIntervals(intervals, codegen));
 
-    intervals[1]->SetRegister(0);
+    intervals[1]->SetRegisters(1u << 0);
     ASSERT_FALSE(ValidateIntervals(intervals, codegen));
     intervals.clear();
   }
@@ -160,17 +160,17 @@ TEST_F(RegisterAllocatorTest, ValidateIntervals) {
   // Test with siblings.
   {
     static constexpr size_t ranges1[][2] = {{0, 42}, {44, 48}};
-    intervals.push_back(BuildInterval(ranges1, arraysize(ranges1), GetScopedAllocator(), 0));
+    intervals.push_back(BuildInterval(ranges1, arraysize(ranges1), GetScopedAllocator(), 1u << 0));
     intervals[0]->SplitAt(43);
     static constexpr size_t ranges2[][2] = {{42, 47}};
-    intervals.push_back(BuildInterval(ranges2, arraysize(ranges2), GetScopedAllocator(), 1));
+    intervals.push_back(BuildInterval(ranges2, arraysize(ranges2), GetScopedAllocator(), 1u << 1));
     ASSERT_TRUE(ValidateIntervals(intervals, codegen));
 
-    intervals[1]->SetRegister(0);
+    intervals[1]->SetRegisters(1u << 0);
     // Sibling of the first interval has no register allocated to it.
     ASSERT_TRUE(ValidateIntervals(intervals, codegen));
 
-    intervals[0]->GetNextSibling()->SetRegister(0);
+    intervals[0]->GetNextSibling()->SetRegisters(1u << 0);
     ASSERT_FALSE(ValidateIntervals(intervals, codegen));
   }
 }
@@ -334,13 +334,13 @@ TEST_F(RegisterAllocatorTest, Loop3) {
 
   LiveInterval* phi_interval = phi->GetLiveInterval();
   LiveInterval* loop_update = phi->InputAt(1)->GetLiveInterval();
-  ASSERT_TRUE(phi_interval->HasRegister());
-  ASSERT_TRUE(loop_update->HasRegister());
-  ASSERT_NE(phi_interval->GetRegister(), loop_update->GetRegister());
+  ASSERT_TRUE(phi_interval->HasRegisters());
+  ASSERT_TRUE(loop_update->HasRegisters());
+  ASSERT_NE(phi_interval->GetRegisters(), loop_update->GetRegisters());
 
   HBasicBlock* return_block = graph->GetBlocks()[3];
   HReturn* ret = return_block->GetLastInstruction()->AsReturn();
-  ASSERT_EQ(phi_interval->GetRegister(), ret->InputAt(0)->GetLiveInterval()->GetRegister());
+  ASSERT_EQ(phi_interval->GetRegisters(), ret->InputAt(0)->GetLiveInterval()->GetRegisters());
 }
 
 TEST_F(RegisterAllocatorTest, FirstRegisterUse) {
@@ -465,15 +465,15 @@ void RegisterAllocatorTest::TestFreeUntil(bool special_first) {
 
   register_allocator.AllocateRegistersInternal();
 
-  std::pair<size_t, int> expected_add_start_and_reg[] = {
-    {add->GetLifetimePosition() + kLivenessPositionOfNonOverlappingOutput, 0},
-    {blocking_pos1, -1},
+  std::pair<size_t, int> expected_add_start_and_regs[] = {
+    {add->GetLifetimePosition() + kLivenessPositionOfNonOverlappingOutput, 1u << 0},
+    {blocking_pos1, kNoRegisters},
   };
   LiveInterval* li = add->GetLiveInterval();
-  for (const std::pair<size_t, int>& expected_start_and_reg : expected_add_start_and_reg) {
+  for (const std::pair<size_t, int>& expected_start_and_regs : expected_add_start_and_regs) {
     ASSERT_TRUE(li != nullptr);
-    ASSERT_EQ(expected_start_and_reg.first, li->GetStart());
-    ASSERT_EQ(expected_start_and_reg.second, li->GetRegister());
+    ASSERT_EQ(expected_start_and_regs.first, li->GetStart());
+    ASSERT_EQ(expected_start_and_regs.second, li->GetRegisters());
     li = li->GetNextSibling();
   }
   ASSERT_TRUE(li == nullptr);
@@ -520,9 +520,9 @@ TEST_F(RegisterAllocatorTest, PhiHint) {
         RegisterAllocator::Create(GetScopedAllocator(), &codegen, liveness);
     register_allocator->AllocateRegisters();
 
-    ASSERT_EQ(input1->GetLiveInterval()->GetRegister(), 0);
-    ASSERT_EQ(input2->GetLiveInterval()->GetRegister(), 0);
-    ASSERT_EQ(phi->GetLiveInterval()->GetRegister(), 0);
+    ASSERT_EQ(input1->GetLiveInterval()->GetRegisters(), 1u << 0);
+    ASSERT_EQ(input2->GetLiveInterval()->GetRegisters(), 1u << 0);
+    ASSERT_EQ(phi->GetLiveInterval()->GetRegisters(), 1u << 0);
   }
 
   {
@@ -538,9 +538,9 @@ TEST_F(RegisterAllocatorTest, PhiHint) {
         RegisterAllocator::Create(GetScopedAllocator(), &codegen, liveness);
     register_allocator->AllocateRegisters();
 
-    ASSERT_EQ(input1->GetLiveInterval()->GetRegister(), 2);
-    ASSERT_EQ(input2->GetLiveInterval()->GetRegister(), 2);
-    ASSERT_EQ(phi->GetLiveInterval()->GetRegister(), 2);
+    ASSERT_EQ(input1->GetLiveInterval()->GetRegisters(), 1u << 2);
+    ASSERT_EQ(input2->GetLiveInterval()->GetRegisters(), 1u << 2);
+    ASSERT_EQ(phi->GetLiveInterval()->GetRegisters(), 1u << 2);
   }
 
   {
@@ -556,9 +556,9 @@ TEST_F(RegisterAllocatorTest, PhiHint) {
         RegisterAllocator::Create(GetScopedAllocator(), &codegen, liveness);
     register_allocator->AllocateRegisters();
 
-    ASSERT_EQ(input1->GetLiveInterval()->GetRegister(), 2);
-    ASSERT_EQ(input2->GetLiveInterval()->GetRegister(), 2);
-    ASSERT_EQ(phi->GetLiveInterval()->GetRegister(), 2);
+    ASSERT_EQ(input1->GetLiveInterval()->GetRegisters(), 1u << 2);
+    ASSERT_EQ(input2->GetLiveInterval()->GetRegisters(), 1u << 2);
+    ASSERT_EQ(phi->GetLiveInterval()->GetRegisters(), 1u << 2);
   }
 
   {
@@ -574,9 +574,9 @@ TEST_F(RegisterAllocatorTest, PhiHint) {
         RegisterAllocator::Create(GetScopedAllocator(), &codegen, liveness);
     register_allocator->AllocateRegisters();
 
-    ASSERT_EQ(input1->GetLiveInterval()->GetRegister(), 2);
-    ASSERT_EQ(input2->GetLiveInterval()->GetRegister(), 2);
-    ASSERT_EQ(phi->GetLiveInterval()->GetRegister(), 2);
+    ASSERT_EQ(input1->GetLiveInterval()->GetRegisters(), 1u << 2);
+    ASSERT_EQ(input2->GetLiveInterval()->GetRegisters(), 1u << 2);
+    ASSERT_EQ(phi->GetLiveInterval()->GetRegisters(), 1u << 2);
   }
 }
 
@@ -604,7 +604,7 @@ TEST_F(RegisterAllocatorTest, ExpectedInRegisterHint) {
     register_allocator->AllocateRegisters();
 
     // Check the validity that in normal conditions, the register should be hinted to 0 (EAX).
-    ASSERT_EQ(field->GetLiveInterval()->GetRegister(), 0);
+    ASSERT_EQ(field->GetLiveInterval()->GetRegisters(), 1u << 0);
   }
 
   {
@@ -621,7 +621,7 @@ TEST_F(RegisterAllocatorTest, ExpectedInRegisterHint) {
         RegisterAllocator::Create(GetScopedAllocator(), &codegen, liveness);
     register_allocator->AllocateRegisters();
 
-    ASSERT_EQ(field->GetLiveInterval()->GetRegister(), 2);
+    ASSERT_EQ(field->GetLiveInterval()->GetRegisters(), 1u << 2);
   }
 }
 
@@ -654,8 +654,8 @@ TEST_F(RegisterAllocatorTest, SameAsFirstInputHint) {
     register_allocator->AllocateRegisters();
 
     // Check the validity that in normal conditions, the registers are the same.
-    ASSERT_EQ(first_sub->GetLiveInterval()->GetRegister(), 1);
-    ASSERT_EQ(second_sub->GetLiveInterval()->GetRegister(), 1);
+    ASSERT_EQ(first_sub->GetLiveInterval()->GetRegisters(), 1u << 1);
+    ASSERT_EQ(second_sub->GetLiveInterval()->GetRegisters(), 1u << 1);
   }
 
   {
@@ -674,8 +674,8 @@ TEST_F(RegisterAllocatorTest, SameAsFirstInputHint) {
         RegisterAllocator::Create(GetScopedAllocator(), &codegen, liveness);
     register_allocator->AllocateRegisters();
 
-    ASSERT_EQ(first_sub->GetLiveInterval()->GetRegister(), 2);
-    ASSERT_EQ(second_sub->GetLiveInterval()->GetRegister(), 2);
+    ASSERT_EQ(first_sub->GetLiveInterval()->GetRegisters(), 1u << 2);
+    ASSERT_EQ(second_sub->GetLiveInterval()->GetRegisters(), 1u << 2);
   }
 }
 
@@ -704,7 +704,7 @@ TEST_F(RegisterAllocatorTest, ExpectedExactInRegisterAndSameOutputHint) {
   register_allocator->AllocateRegisters();
 
   // div on x86 requires its first input in eax and the output be the same as the first input.
-  ASSERT_EQ(div->GetLiveInterval()->GetRegister(), 0);
+  ASSERT_EQ(div->GetLiveInterval()->GetRegisters(), 1u << 0);
 }
 
 // Test a bug in the register allocator, where allocating a blocked
@@ -726,12 +726,13 @@ void RegisterAllocatorTest::TestSpillInactive() {
   LocationSummary* locations = LocationSummary::CreateNoCall(GetAllocator(), user);
   locations->SetInAt(0, Location::RequiresRegister());
   static constexpr size_t phi_ranges[][2] = {{10 * kLppi, 15 * kLppi}};
-  BuildInterval(phi_ranges, arraysize(phi_ranges), GetScopedAllocator(), -1, user);
+  BuildInterval(phi_ranges, arraysize(phi_ranges), GetScopedAllocator(), kNoRegisters, user);
 
   // Create an interval with lifetime holes.
   static constexpr size_t ranges1[][2] =
       {{0u * kLppi, 2u * kLppi}, {4u * kLppi, 5u * kLppi}, {7u * kLppi, 8u * kLppi}};
-  LiveInterval* first = BuildInterval(ranges1, arraysize(ranges1), GetScopedAllocator(), -1, one);
+  LiveInterval* first =
+      BuildInterval(ranges1, arraysize(ranges1), GetScopedAllocator(), kNoRegisters, one);
   first->uses_.push_front(*new (GetScopedAllocator()) UsePosition(user, 0u, 7u * kLppi));
   first->uses_.push_front(*new (GetScopedAllocator()) UsePosition(user, 0u, 6u * kLppi));
   first->uses_.push_front(*new (GetScopedAllocator()) UsePosition(user, 0u, 5u * kLppi));
@@ -743,7 +744,8 @@ void RegisterAllocatorTest::TestSpillInactive() {
   // Create an interval that conflicts with the next interval, to force the next
   // interval to call `AllocateBlockedReg`.
   static constexpr size_t ranges2[][2] = {{2u * kLppi, 4u * kLppi}};
-  LiveInterval* second = BuildInterval(ranges2, arraysize(ranges2), GetScopedAllocator(), -1, two);
+  LiveInterval* second =
+      BuildInterval(ranges2, arraysize(ranges2), GetScopedAllocator(), kNoRegisters, two);
   locations = LocationSummary::CreateNoCall(GetAllocator(), second->GetDefinedBy());
   locations->SetOut(Location::RequiresRegister());
 
@@ -753,7 +755,8 @@ void RegisterAllocatorTest::TestSpillInactive() {
   // "[0, 2(, [4, 6(" in the list of handled intervals, even though we haven't processed intervals
   // before lifetime position 6 yet.
   static constexpr size_t ranges3[][2] = {{2u * kLppi, 4u * kLppi}, {7u * kLppi, 8u * kLppi}};
-  LiveInterval* third = BuildInterval(ranges3, arraysize(ranges3), GetScopedAllocator(), -1, three);
+  LiveInterval* third =
+      BuildInterval(ranges3, arraysize(ranges3), GetScopedAllocator(), kNoRegisters, three);
   third->uses_.push_front(*new (GetScopedAllocator()) UsePosition(user, 0u, 7u * kLppi));
   third->uses_.push_front(*new (GetScopedAllocator()) UsePosition(user, 0u, 4u * kLppi));
   third->uses_.push_front(*new (GetScopedAllocator()) UsePosition(user, 0u, 3u * kLppi));
@@ -764,7 +767,8 @@ void RegisterAllocatorTest::TestSpillInactive() {
   // Because the first part of the split interval was considered handled, this interval
   // was free to allocate the same register, even though it conflicts with it.
   static constexpr size_t ranges4[][2] = {{4u * kLppi, 5u * kLppi}};
-  LiveInterval* fourth = BuildInterval(ranges4, arraysize(ranges4), GetScopedAllocator(), -1, four);
+  LiveInterval* fourth =
+      BuildInterval(ranges4, arraysize(ranges4), GetScopedAllocator(), kNoRegisters, four);
   locations = LocationSummary::CreateNoCall(GetAllocator(), fourth->GetDefinedBy());
   locations->SetOut(Location::RequiresRegister());
 
@@ -867,9 +871,9 @@ TEST_F(RegisterAllocatorTest, ReuseSpillSlots) {
 
   // Check that `phi1` and `phi2` are split and don't have a register in the first sibling.
   EXPECT_TRUE(phi1->GetLiveInterval()->GetNextSibling() != nullptr);
-  EXPECT_TRUE(!phi1->GetLiveInterval()->HasRegister());
+  EXPECT_TRUE(!phi1->GetLiveInterval()->HasRegisters());
   EXPECT_TRUE(phi2->GetLiveInterval()->GetNextSibling() != nullptr);
-  EXPECT_TRUE(!phi2->GetLiveInterval()->HasRegister());
+  EXPECT_TRUE(!phi2->GetLiveInterval()->HasRegisters());
 }
 
 TEST_F(RegisterAllocatorTest, ReuseSpillSlotGaps) {
@@ -1147,27 +1151,27 @@ void RegisterAllocatorTest::TestNoOutputOverlap() {
   static constexpr int kExpectedRegister = 0;
   LiveInterval* neg_li = neg->GetLiveInterval();
   ASSERT_EQ(neg->GetLifetimePosition(), neg_li->GetStart());
-  ASSERT_EQ(kExpectedRegister, neg_li->GetRegister());
+  ASSERT_EQ(1u << kExpectedRegister, neg_li->GetRegisters());
   LiveInterval* add_li = add->GetLiveInterval();
   ASSERT_EQ(add->GetLifetimePosition() + kLivenessPositionOfNonOverlappingOutput,
             add_li->GetStart());
-  ASSERT_EQ(kExpectedRegister, add_li->GetRegister());
+  ASSERT_EQ(1u << kExpectedRegister, add_li->GetRegisters());
   LiveInterval* add2_li = add2->GetLiveInterval();
   ASSERT_EQ(add2->GetLifetimePosition() + kLivenessPositionOfNonOverlappingOutput,
             add2_li->GetStart());
-  ASSERT_EQ(kExpectedRegister, add2_li->GetRegister());
+  ASSERT_EQ(1u << kExpectedRegister, add2_li->GetRegisters());
 
   // Check the splits of the `neg` interval.
   ASSERT_EQ(add_li->GetStart(), neg_li->GetEnd());
   LiveInterval* neg_li2 = neg_li->GetNextSibling();
   ASSERT_TRUE(neg_li2 != nullptr);
   ASSERT_EQ(add_li->GetStart(), neg_li2->GetStart());
-  ASSERT_EQ(kNoRegister, neg_li2->GetRegister());
+  ASSERT_EQ(kNoRegisters, neg_li2->GetRegisters());
   ASSERT_EQ(add2->GetLifetimePosition(), neg_li2->GetEnd());
   LiveInterval* neg_li3 = neg_li2->GetNextSibling();
   ASSERT_TRUE(neg_li3 != nullptr);
   ASSERT_EQ(add2->GetLifetimePosition(), neg_li3->GetStart());
-  ASSERT_EQ(kExpectedRegister, neg_li3->GetRegister());
+  ASSERT_EQ(1u << kExpectedRegister, neg_li3->GetRegisters());
   ASSERT_EQ(add2->GetLifetimePosition() + kLivenessPositionOfNormalUse, neg_li3->GetEnd());
   ASSERT_TRUE(neg_li3->GetNextSibling() == nullptr);
 
@@ -1176,7 +1180,7 @@ void RegisterAllocatorTest::TestNoOutputOverlap() {
   LiveInterval* add_li2 = add_li->GetNextSibling();
   ASSERT_TRUE(add_li2 != nullptr);
   ASSERT_EQ(add2->GetLifetimePosition(), add_li2->GetStart());
-  ASSERT_EQ(kNoRegister, add_li2->GetRegister());
+  ASSERT_EQ(kNoRegisters, add_li2->GetRegisters());
   ASSERT_EQ(ret->GetLifetimePosition(), add_li2->GetEnd());
   ASSERT_TRUE(add_li2->GetNextSibling() == nullptr);
 
@@ -1225,12 +1229,12 @@ void RegisterAllocatorTest::TestNoOutputOverlapAndTemp() {
   // Check the splits of the `neg` interval.
   LiveInterval* neg_li = neg->GetLiveInterval();
   ASSERT_EQ(neg->GetLifetimePosition(), neg_li->GetStart());
-  ASSERT_TRUE(neg_li->HasRegister());
+  ASSERT_TRUE(neg_li->HasRegisters());
   ASSERT_EQ(add->GetLifetimePosition() + kLivenessPositionOfNonOverlappingOutput, neg_li->GetEnd());
   LiveInterval* neg_li2 = neg_li->GetNextSibling();
   ASSERT_TRUE(neg_li2 != nullptr);
   ASSERT_EQ(neg_li->GetEnd(), neg_li2->GetStart());
-  ASSERT_EQ(kNoRegister, neg_li2->GetRegister());
+  ASSERT_EQ(kNoRegisters, neg_li2->GetRegisters());
   ASSERT_EQ(sub->GetLifetimePosition() + kLivenessPositionOfNormalUse, neg_li2->GetEnd());
   ASSERT_TRUE(neg_li2->GetNextSibling() == nullptr);
 }
@@ -1297,34 +1301,34 @@ TEST_F(RegisterAllocatorTest, NoOutputOverlapImmediateSpill) {
   ASSERT_TRUE(param_li->HasSpillSlot());
   EXPECT_GT(block->GetLifetimeStart(), param_li->GetStart());
   EXPECT_EQ(block->GetLifetimeStart(), param_li->GetEnd());
-  EXPECT_EQ(1, param_li->GetRegister());  // Initial argument register.
+  EXPECT_EQ(1u << 1, param_li->GetRegisters());  // Initial argument register.
   LiveInterval* param_li2 = param_li->GetNextSibling();
   ASSERT_TRUE(param_li2 != nullptr);
   EXPECT_EQ(block->GetLifetimeStart(), param_li2->GetStart());
   EXPECT_EQ(invoke->GetLifetimePosition(), param_li2->GetEnd());
-  EXPECT_EQ(0, param_li2->GetRegister());  // Moved to register 0.
+  EXPECT_EQ(1u << 0, param_li2->GetRegisters());  // Moved to register 0.
   LiveInterval* param_li3 = param_li2->GetNextSibling();
   ASSERT_TRUE(param_li3 != nullptr);
   EXPECT_EQ(invoke->GetLifetimePosition(), param_li3->GetStart());
   EXPECT_EQ(get1->GetLifetimePosition(), param_li3->GetEnd());
-  EXPECT_FALSE(param_li3->HasRegister());  // No register.
+  EXPECT_FALSE(param_li3->HasRegisters());  // No register.
   LiveInterval* param_li4 = param_li3->GetNextSibling();
   ASSERT_TRUE(param_li4 != nullptr);
   EXPECT_EQ(get1->GetLifetimePosition(), param_li4->GetStart());
   EXPECT_EQ(get1->GetLifetimePosition() + kLivenessPositionOfNonOverlappingOutput,
             param_li4->GetEnd());
-  EXPECT_EQ(0, param_li4->GetRegister());  // Allocated register 0.
+  EXPECT_EQ(1u << 0, param_li4->GetRegisters());  // Allocated register 0.
   LiveInterval* param_li5 = param_li4->GetNextSibling();
   ASSERT_TRUE(param_li5 != nullptr);
   EXPECT_EQ(get1->GetLifetimePosition() + kLivenessPositionOfNonOverlappingOutput,
             param_li5->GetStart());
   EXPECT_EQ(get2->GetLifetimePosition(), param_li5->GetEnd());
-  EXPECT_FALSE(param_li5->HasRegister());  // No register.
+  EXPECT_FALSE(param_li5->HasRegisters());  // No register.
   LiveInterval* param_li6 = param_li5->GetNextSibling();
   ASSERT_TRUE(param_li6 != nullptr);
   EXPECT_EQ(get2->GetLifetimePosition(), param_li6->GetStart());
   EXPECT_EQ(get2->GetLifetimePosition() + kLivenessPositionOfNormalUse, param_li6->GetEnd());
-  EXPECT_EQ(2, param_li6->GetRegister());  // Allocated register 2, avoiding `get1` result in 0-1.
+  EXPECT_EQ(1u << 2, param_li6->GetRegisters());  // Allocated reg 2, avoiding `get1` result in 0-1.
   ASSERT_TRUE(param_li6->GetNextSibling() == nullptr);
 }
 

@@ -734,8 +734,7 @@ class HGraphVisualizerPrinter final : public CRTPGraphVisitor<HGraphVisualizerPr
         StartAttributeStream("env_uses") << StringList(interval->GetEnvironmentUses());
         StartAttributeStream("is_fixed") << interval->IsFixed();
         StartAttributeStream("is_split") << interval->IsSplit();
-        StartAttributeStream("is_low") << interval->IsLowInterval();
-        StartAttributeStream("is_high") << interval->IsHighInterval();
+        StartAttributeStream("is_pair") << interval->IsPair();
       }
     }
 

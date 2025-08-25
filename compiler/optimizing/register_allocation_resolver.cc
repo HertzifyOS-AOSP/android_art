@@ -161,7 +161,7 @@ void RegisterAllocationResolver::Resolve(ArrayRef<HInstruction* const> safepoint
           // a lifetime hole in it. `CoversSlow` returns whether the interval is live at that
           // position.
           if ((sibling != nullptr) && sibling->CoversSlow(block->GetLifetimeStart())) {
-            DCHECK(!sibling->HasRegister());
+            DCHECK(!sibling->HasRegisters());
           }
         }
       }
@@ -197,25 +197,21 @@ void RegisterAllocationResolver::Resolve(ArrayRef<HInstruction* const> safepoint
 
   // Resolve temp locations.
   for (LiveInterval* temp : temp_intervals) {
-    if (temp->IsHighInterval()) {
-      // High intervals can be skipped, they are already handled by the low interval.
-      continue;
-    }
     HInstruction* at = liveness_.GetTempUser(temp);
     size_t temp_index = temp->GetTempIndex();
+    uint32_t reg = temp->GetRegisterOrLowRegister();
     LocationSummary* locations = at->GetLocations();
     switch (temp->GetType()) {
       case DataType::Type::kInt32:
-        locations->SetTempAt(temp_index, Location::RegisterLocation(temp->GetRegister()));
+        locations->SetTempAt(temp_index, Location::RegisterLocation(reg));
         break;
 
       case DataType::Type::kFloat64:
         if (codegen_->NeedsTwoRegisters(DataType::Type::kFloat64)) {
-          Location location = Location::FpuRegisterPairLocation(
-              temp->GetRegister(), temp->GetHighInterval()->GetRegister());
+          Location location = Location::FpuRegisterPairLocation(reg, temp->GetHighRegister());
           locations->SetTempAt(temp_index, location);
         } else {
-          locations->SetTempAt(temp_index, Location::FpuRegisterLocation(temp->GetRegister()));
+          locations->SetTempAt(temp_index, Location::FpuRegisterLocation(reg));
         }
         break;
 
@@ -235,24 +231,14 @@ void RegisterAllocationResolver::UpdateSafepointLiveRegisters(
     for (LiveInterval* current = instruction->GetLiveInterval();
          current != nullptr;
          current = current->GetNextSibling()) {
-      if (!current->HasRegister()) {
+      if (!current->HasRegisters()) {
         continue;
       }
-
-      DCHECK_LT(static_cast<size_t>(current->GetRegister()), BitSizeOf<uint32_t>());
-      uint32_t register_mask = 1u << current->GetRegister();
-      DCHECK_EQ(current->HasHighInterval(), current->GetHighOrLowInterval() != nullptr);
-      if (current->GetHighOrLowInterval() != nullptr) {
-        DCHECK(current->GetHighInterval()->HasRegister());
-        DCHECK_LT(static_cast<size_t>(current->GetHighInterval()->GetRegister()),
-                  BitSizeOf<uint32_t>());
-        register_mask |= 1u << current->GetHighInterval()->GetRegister();
-      }
-
+      uint32_t register_mask = current->GetRegisters();
       remaining_safepoints = current->ForCoveredSafepoints(
           safepoints,
           remaining_safepoints,
-          [&](HInstruction* safepoint) ALWAYS_INLINE {
+          [register_field_accessor, register_mask](HInstruction* safepoint) ALWAYS_INLINE {
             RegisterSet* live_registers = safepoint->GetLocations()->GetLiveRegisters();
             (live_registers->*register_field_accessor) |= register_mask;
             return true;
@@ -289,7 +275,7 @@ void RegisterAllocationResolver::ConnectSiblings(LiveInterval* interval,
                                                  ArrayRef<HInstruction* const> safepoints) {
   LiveInterval* current = interval;
   if (current->HasSpillSlot()
-      && current->HasRegister()
+      && current->HasRegisters()
       // Currently, we spill unconditionnally the current method in the code generators.
       && !interval->GetDefinedBy()->IsCurrentMethod()) {
     // We spill eagerly, so move must be at definition.
@@ -367,7 +353,7 @@ void RegisterAllocationResolver::ConnectSiblings(LiveInterval* interval,
     // insert a move.
     LiveInterval* next_sibling = current->GetNextSibling();
     if (next_sibling != nullptr
-        && next_sibling->HasRegister()
+        && next_sibling->HasRegisters()
         && current->GetEnd() == next_sibling->GetStart()) {
       Location destination = GetLocation(next_sibling);
       InsertParallelMoveAt(current->GetEnd(), interval->GetDefinedBy(), source, destination);
@@ -439,7 +425,7 @@ void RegisterAllocationResolver::ConnectSplitSiblings(LiveInterval* interval,
     return;
   }
 
-  if (!destination->HasRegister()) {
+  if (!destination->HasRegisters()) {
     // Values are eagerly spilled. Spill slot already contains appropriate value.
     return;
   }
@@ -695,21 +681,19 @@ void RegisterAllocationResolver::InsertMoveAfter(HInstruction* instruction,
 }
 
 Location RegisterAllocationResolver::GetLocation(LiveInterval* interval) {
-  DCHECK(!interval->IsHighInterval());
-  if (interval->HasRegister()) {
+  if (interval->HasRegisters()) {
+    uint32_t reg = interval->GetRegisterOrLowRegister();
     if (interval->IsFloatingPoint()) {
-      if (interval->HasHighInterval()) {
-        return Location::FpuRegisterPairLocation(interval->GetRegister(),
-                                                 interval->GetHighInterval()->GetRegister());
+      if (interval->IsPair()) {
+        return Location::FpuRegisterPairLocation(reg, interval->GetHighRegister());
       } else {
-        return Location::FpuRegisterLocation(interval->GetRegister());
+        return Location::FpuRegisterLocation(reg);
       }
     } else {
-      if (interval->HasHighInterval()) {
-        return Location::RegisterPairLocation(interval->GetRegister(),
-                                              interval->GetHighInterval()->GetRegister());
+      if (interval->IsPair()) {
+        return Location::RegisterPairLocation(reg, interval->GetHighRegister());
       } else {
-        return Location::RegisterLocation(interval->GetRegister());
+        return Location::RegisterLocation(reg);
       }
     }
   } else {
