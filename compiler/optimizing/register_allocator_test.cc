@@ -67,6 +67,13 @@ class RegisterAllocatorTest : public CommonCompilerTest, public OptimizingUnitTe
                                                 /* log_fatal_on_failure= */ false);
   }
 
+  void OverrideOutput(LocationSummary* locations,
+                      Location out,
+                      Location::OutputOverlap output_overlaps = Location::kOutputOverlap) {
+    locations->output_ = out;
+    locations->output_overlaps_ = output_overlaps;
+  }
+
   template <typename RegType>
   void BlockCoreRegistersExcept(CodeGenerator* codegen, std::initializer_list<RegType> allowed) {
     size_t number_of_core_registers = codegen->GetNumberOfCoreRegisters();
@@ -666,7 +673,7 @@ TEST_F(RegisterAllocatorTest, SameAsFirstInputHint) {
 
     // check that both adds get the same register.
     // Don't use UpdateOutput because output is already allocated.
-    first_sub->InputAt(0)->GetLocations()->output_ = Location::RegisterLocation(2);
+    OverrideOutput(first_sub->InputAt(0)->GetLocations(), Location::RegisterLocation(2));
     ASSERT_EQ(first_sub->GetLocations()->Out().GetPolicy(), Location::kSameAsFirstInput);
     ASSERT_EQ(second_sub->GetLocations()->Out().GetPolicy(), Location::kSameAsFirstInput);
 
@@ -844,8 +851,10 @@ TEST_F(RegisterAllocatorTest, ReuseSpillSlots) {
   // Set just two registers available to make it easy to force spills.
   // Choose EAX and EDX which are used by type conversion from Int32 to Int64, so that
   // we can use the type conversion to spill all live intervals wherever we want.
-  // Note that the `obj` parameter comes in the blocked ECX which works fine for the test.
   BlockCoreRegistersExcept(&codegen, {x86::EAX, x86::EDX});
+
+  // Change the `obj` parameter to come in EDX.
+  OverrideOutput(obj->GetLocations(), Location::RegisterLocation(x86::EDX));
 
   std::unique_ptr<RegisterAllocator> register_allocator =
       RegisterAllocator::Create(GetScopedAllocator(), &codegen, liveness);
@@ -916,6 +925,13 @@ TEST_F(RegisterAllocatorTest, ReuseSpillSlotGaps) {
 
   // Set just one register available to make all intervals compete for the same.
   BlockCoreRegistersExcept(&codegen, {x86::EAX});
+  // Rewrite condition locations to work with the single register EAX.
+  for (HCondition* c : {cond, deopt_cond}) {
+    ASSERT_TRUE(c->GetLocations()->Out().Equals(Location::RegisterLocation(x86::ECX)));
+    OverrideOutput(c->GetLocations(), Location::RegisterLocation(x86::EAX));
+    c->GetLocations()->SetInAt(0, Location::Any());
+    ASSERT_TRUE(c->GetLocations()->InAt(1).Equals(Location::Any()));
+  }
 
   std::unique_ptr<RegisterAllocator> register_allocator =
       RegisterAllocator::Create(GetScopedAllocator(), &codegen, liveness);
@@ -935,6 +951,9 @@ TEST_F(RegisterAllocatorTest, ReuseSpillSlotGaps) {
 TEST_F(RegisterAllocatorTest, ReuseSpillSlotsUnavailableWithSplitPhiInterval) {
   if (!com::android::art::flags::reg_alloc_spill_slot_reuse()) {
     GTEST_SKIP() << "Improved spill slot reuse disabled.";
+  }
+  if (!com::android::art::flags::reg_alloc_no_output_overlap()) {
+    GTEST_SKIP() << "Improved `Location::kNoOutputOverlap` handling disabled.";
   }
   HBasicBlock* return_block = InitEntryMainExitGraph();
   auto [start, left, right] = CreateDiamondPattern(return_block);
@@ -992,8 +1011,9 @@ TEST_F(RegisterAllocatorTest, ReuseSpillSlotsUnavailableWithSplitPhiInterval) {
   liveness.Analyze();
 
   // Set just one register available to make all intervals compete for the same.
-  // Note that the `obj` parameter comes in the blocked ECX which works fine for the test.
   BlockCoreRegistersExcept(&codegen, {x86::EAX});
+  // Change the `obj` parameter to come in EAX.
+  OverrideOutput(obj->GetLocations(), Location::RegisterLocation(x86::EAX));
 
   std::unique_ptr<RegisterAllocator> register_allocator =
       RegisterAllocator::Create(GetScopedAllocator(), &codegen, liveness);

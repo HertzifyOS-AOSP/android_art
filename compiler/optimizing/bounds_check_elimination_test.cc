@@ -340,14 +340,15 @@ HInstruction* BoundsCheckEliminationTest::BuildSSAGraph2(int initial,
   HInstruction* null_check = MakeNullCheck(pre_header, parameter);
   HInstruction* array_length = MakeArrayLength(pre_header, null_check);
 
-  auto [phi, add] = MakeLinearLoopVar(loop_header, loop_body, array_length, constant_minus_1);
+  auto [phi, add] = MakeLinearLoopVar(loop_header, loop_body, array_length, constant_increment);
   DCHECK(cond == kCondLE || cond == kCondLT) << cond;
   HInstruction* cmp = MakeCondition(loop_header, cond, phi, constant_initial);
   MakeIf(loop_header, cmp);
 
   null_check = MakeNullCheck(loop_body, parameter);
   array_length = MakeArrayLength(loop_body, null_check);
-  HInstruction* bounds_check = MakeBoundsCheck(loop_body, add, array_length);
+  HAdd* add_m1 = MakeBinOp<HAdd>(loop_body, DataType::Type::kInt32, phi, constant_minus_1);
+  HInstruction* bounds_check = MakeBoundsCheck(loop_body, add_m1, array_length);
   MakeArraySet(loop_body, null_check, bounds_check, constant_10, DataType::Type::kInt32);
 
   return bounds_check;
@@ -513,7 +514,6 @@ TEST_F(BoundsCheckEliminationTest, BubbleSortArrayBoundsElimination) {
   auto [inner_body_compare, inner_body_swap, skip_swap] = CreateDiamondPattern(inner_body_add);
 
   HInstruction* parameter = MakeParam(DataType::Type::kReference);
-  HInstruction* constant_0 = graph_->GetIntConstant(0);
   HInstruction* constant_minus_1 = graph_->GetIntConstant(-1);
   HInstruction* constant_1 = graph_->GetIntConstant(1);
 
