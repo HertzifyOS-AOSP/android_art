@@ -3049,7 +3049,11 @@ static bool TryReplaceStringBuilderAppend(CodeGenerator* codegen, HInvoke* invok
       ++num_args;
     } else if (user->IsConstructorFence()) {
       // The last use we see is the constructor fence.
-      DCHECK(seen_constructor);
+      if (!seen_constructor) {
+        // If we haven't seen a constructor at this point, it means that the instance was
+        // constructed using Object<init> instead of StringBuilder<init>.
+        return false;
+      }
       DCHECK(!seen_constructor_fence);
       seen_constructor_fence = true;
     } else {
