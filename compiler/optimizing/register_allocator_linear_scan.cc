@@ -871,38 +871,45 @@ void RegisterAllocatorLinearScan::LinearScan::Run() {
 
       // Remove currently active intervals that are dead at this position.
       // Move active intervals that have a lifetime hole at this position to inactive.
-      auto active_kept_end = std::remove_if(
+      // Note: While the intent would be better expressed with `std::remove_if()`, we use
+      // `std::copy_if()` with the opposite condition instead because it has a simpler
+      // implementation and calls the somewhat complicated lambda only once. Simplified
+      // code flow outweighs the benefits of avoiding some unnecessary pointer writes.
+      auto active_kept_end = std::copy_if(
           active_.begin(),
           active_.end(),
+          active_.begin(),
           [this, position](LiveInterval* interval) {
             if (interval->IsDeadAt(position)) {
               handled_.push_back(interval);
-              return true;
+              return false;
             } else if (!interval->Covers(position)) {
               inactive_.push_back(interval);
-              return true;
+              return false;
             } else {
-              return false;  // Keep this interval.
+              return true;  // Keep this interval.
             }
           });
       active_.erase(active_kept_end, active_.end());
 
       // Remove currently inactive intervals that are dead at this position.
       // Move inactive intervals that cover this position to active.
+      // Note: Using `std::copy_if()` instead of `std::remove_if()` as above.
       auto inactive_to_handle_end = inactive_.begin() + inactive_intervals_to_handle;
-      auto inactive_kept_end = std::remove_if(
+      auto inactive_kept_end = std::copy_if(
           inactive_.begin(),
           inactive_to_handle_end,
+          inactive_.begin(),
           [this, position](LiveInterval* interval) {
             DCHECK(interval->GetStart() < position || interval->IsFixed());
             if (interval->IsDeadAt(position)) {
               handled_.push_back(interval);
-              return true;
+              return false;
             } else if (interval->Covers(position)) {
               active_.push_back(interval);
-              return true;
+              return false;
             } else {
-              return false;  // Keep this interval.
+              return true;  // Keep this interval.
             }
           });
       inactive_.erase(inactive_kept_end, inactive_to_handle_end);
