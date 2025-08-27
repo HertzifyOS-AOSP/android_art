@@ -432,7 +432,7 @@ void RegisterAllocatorTest::TestFreeUntil(bool special_first) {
   HAdd* add = MakeBinOp<HAdd>(block, DataType::Type::kInt32, const0, const0);
   HInstruction* placeholder1 = MakeUnOp<HNeg>(block, DataType::Type::kInt32, const0);
   HInstruction* placeholder2 = MakeUnOp<HNeg>(block, DataType::Type::kInt32, const0);
-  HInstruction* ret = MakeReturn(block, add);
+  MakeReturn(block, add);
 
   graph_->ComputeDominanceInformation();
   x86::CodeGeneratorX86 codegen(graph_, *compiler_options_);
@@ -916,7 +916,7 @@ TEST_F(RegisterAllocatorTest, ReuseSpillSlotGaps) {
       GetAllocator(), deopt_cond, DeoptimizationKind::kDebugging, /*dex_pc=*/ 0u);
   AddOrInsertInstruction(return_block, deopt);
   ManuallyBuildEnvFor(deopt, {phi1});
-  HReturn* ret = MakeReturn(return_block, phi2);
+  MakeReturn(return_block, phi2);
 
   graph_->BuildDominatorTree();
   x86::CodeGeneratorX86 codegen(graph_, *compiler_options_);
@@ -996,7 +996,7 @@ TEST_F(RegisterAllocatorTest, ReuseSpillSlotsUnavailableWithSplitPhiInterval) {
   // Use `HSub` which can have the second operand on the stack for x86.
   HSub* sub1 = MakeBinOp<HSub>(return_block, DataType::Type::kInt32, get_phi, neg_neg);
   // Add an invoke that forces the `get_phi` interval to be split when initially allocated.
-  HInvoke* invoke = MakeInvokeStatic(return_block, DataType::Type::kVoid, {}, {});
+  MakeInvokeStatic(return_block, DataType::Type::kVoid, {}, {});
   // Add another register use for the `get_phi` after the `invoke`.
   HSub* sub2 = MakeBinOp<HSub>(return_block, DataType::Type::kInt32, get_phi, sub1);
 
