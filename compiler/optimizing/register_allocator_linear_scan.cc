@@ -171,10 +171,11 @@ class RegisterAllocatorLinearScan::LinearScan {
         : register_allocator->fp_registers_blocked_for_call_;
   }
 
-  static uint32_t GetBlockedRegisters(CodeGenerator* codegen, RegisterType register_type) {
-    return register_type == RegisterType::kCoreRegister
-        ? codegen->GetBlockedCoreRegisters()
-        : codegen->GetBlockedFloatingPointRegisters();
+  static uint32_t GetAvailableRegisters(
+      RegisterAllocatorLinearScan* register_allocator, RegisterType register_type) {
+     return register_type == RegisterType::kCoreRegister
+        ? register_allocator->available_core_registers_
+        : register_allocator->available_fp_registers_;
   }
 
   static ScopedArenaVector<SpillSlotData>* GetSpillSlots(
@@ -263,7 +264,7 @@ class RegisterAllocatorLinearScan::LinearScan {
 
   bool IsBlocked(int reg) const {
     DCHECK_LT(static_cast<size_t>(reg), number_of_registers_);
-    return (blocked_registers_ & (1u << reg)) != 0u;
+    return (available_registers_ & (1u << reg)) == 0u;
   }
 
   bool IsCallerSaveRegister(int reg) const {
@@ -277,10 +278,10 @@ class RegisterAllocatorLinearScan::LinearScan {
 
   uint32_t GetRegisterMask(LiveInterval* interval) {
     return interval->HasRegisters()
-        ? RegisterAllocator::GetSingleRegisterMask(interval, register_type_)
+        ? RegisterAllocator::GetNormalRegisterMask(interval, register_type_)
         : RegisterAllocator::GetBlockedRegistersMask(interval,
                                                      instructions_from_positions_,
-                                                     number_of_registers_,
+                                                     available_registers_,
                                                      registers_blocked_for_call_);
   }
 
@@ -307,8 +308,8 @@ class RegisterAllocatorLinearScan::LinearScan {
   // Mask of registers blocked for a call.
   const uint32_t registers_blocked_for_call_;
 
-  // Blocked registers, as decided by the code generator.
-  const uint32_t blocked_registers_;
+  // All available registers, as decided by the code generator.
+  const uint32_t available_registers_;
 
   // Spill slots for normal and wide intervals, pointing to appropriately typed slots
   // in the `RegisterAllocatorLinearScan`.
@@ -493,7 +494,7 @@ RegisterAllocatorLinearScan::LinearScan::LinearScan(
       number_of_registers_(GetNumberOfRegisters(codegen, register_type)),
       register_type_(register_type),
       registers_blocked_for_call_(GetRegistersBlockedForCall(register_allocator, register_type)),
-      blocked_registers_(GetBlockedRegisters(codegen, register_type)),
+      available_registers_(GetAvailableRegisters(register_allocator, register_type)),
       spill_slots_(GetSpillSlots(register_allocator, register_type)),
       wide_spill_slots_(GetWideSpillSlots(register_allocator, register_type)),
       unhandled_(TakeUnhandledIntervals(register_allocator, register_type)),
@@ -857,7 +858,7 @@ void RegisterAllocatorLinearScan::LinearScan::DumpAllIntervals(std::ostream& str
 // By the book implementation of a linear scan register allocator.
 void RegisterAllocatorLinearScan::LinearScan::Run() {
   uint32_t available_registers = com::android::art::flags::reg_alloc_no_output_overlap()
-      ? MaxInt<uint32_t>(number_of_registers_) & ~blocked_registers_
+      ? available_registers_
       : 0u;  // Unused.
   uint32_t allocated_registers = 0u;
   size_t last_position = std::numeric_limits<size_t>::max();
@@ -896,9 +897,8 @@ void RegisterAllocatorLinearScan::LinearScan::Run() {
               return true;  // Keep this interval.
             }
             if (com::android::art::flags::reg_alloc_no_output_overlap()) {
-              // TODO: Refactor `GetBlockedCoreRegistersForCall()` that provides data
-              // for `GetRegisterMask()` to exclude blocked registers.
-              available_registers |= GetRegisterMask(interval) & ~blocked_registers_;
+              available_registers |= GetRegisterMask(interval);
+              DCHECK_EQ(available_registers & ~available_registers_, 0u);
             }
             return false;
           });
@@ -976,6 +976,7 @@ void RegisterAllocatorLinearScan::LinearScan::Run() {
       std::tie(success, evicted_registers) = AllocateBlockedReg(current);
       if (com::android::art::flags::reg_alloc_no_output_overlap()) {
         available_registers |= evicted_registers;
+        DCHECK_EQ(available_registers & ~available_registers_, 0u);
       }
     }
 
@@ -1235,8 +1236,7 @@ bool RegisterAllocatorLinearScan::LinearScan::TryAllocateFreeReg(LiveInterval* c
   std::fill_n(free_until.begin(), free_until.size(), kMaxLifetimePosition);
 
   if (kIsDebugBuild || !com::android::art::flags::reg_alloc_no_output_overlap()) {
-    uint32_t current_available_registers =
-        MaxInt<uint32_t>(number_of_registers_) & ~blocked_registers_;
+    uint32_t current_available_registers = available_registers_;
     // For each active interval, set its register(s) to not free.
     for (LiveInterval* interval : active_) {
       DCHECK(interval->HasRegisters() || interval->IsFixed());
@@ -1524,17 +1524,16 @@ std::pair<bool, uint32_t> RegisterAllocatorLinearScan::LinearScan::AllocateBlock
     }
   }
 
-  uint32_t available_registers = MaxInt<uint32_t>(number_of_registers_) & ~blocked_registers_;
   int reg = kNoRegister;
   bool should_spill = false;
   if (current->IsPair()) {
-    reg = FindAvailableRegisterPair(available_registers, next_use, first_register_use);
+    reg = FindAvailableRegisterPair(available_registers_, next_use, first_register_use);
     DCHECK_NE(reg, kNoRegister);
     // We should spill if both registers are not available.
     should_spill = (first_register_use >= next_use[reg]) ||
                    (first_register_use >= next_use[GetHighForLowRegister(reg)]);
   } else {
-    reg = FindAvailableRegister(available_registers, next_use, current);
+    reg = FindAvailableRegister(available_registers_, next_use, current);
     DCHECK_NE(reg, kNoRegister);
     should_spill = (first_register_use >= next_use[reg]);
   }
