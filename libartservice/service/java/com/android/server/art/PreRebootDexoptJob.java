@@ -452,6 +452,24 @@ public class PreRebootDexoptJob implements ArtServiceJobInterface {
         try {
             mInjector.getUpdateEngine().triggerPostinstall("system" /* partition */);
         } catch (ServiceSpecificException e) {
+            // From system/update_engine/common/error_code.h.
+            final int POSTINTALL_RUNNER_ERROR = 5;
+            final int UPDATE_PROCESSING = 65;
+            // update_engine threw "Already processing an update, cancel it first."
+            // It probably means a newer update is superseding the original update.
+            boolean updateSuperseded = e.errorCode == UPDATE_PROCESSING;
+            // update_engine threw "Postinstall action did not run. OTA update must first reach the
+            // Postinstall phase(which verfies that all partitions can be mounted) before calling
+            // TriggerPostinstall".
+            // It probably means the original update has been revoked.
+            boolean updateRevoked =
+                    e.errorCode == POSTINTALL_RUNNER_ERROR
+                            && e.getMessage().contains("TriggerPostinstall");
+            if (updateSuperseded || updateRevoked) {
+                AsLog.i("update_engine error ignored: " + e.getMessage());
+                cancelAny();
+                return;
+            }
             throw new UpdateEngineException("Failed to trigger postinstall: " + e.getMessage());
         }
         long startTime = System.currentTimeMillis();
