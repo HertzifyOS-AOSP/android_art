@@ -398,6 +398,12 @@ void GarbageCollector::SweepArray(accounting::ObjectStack* allocations,
   }
 }
 
+double GarbageCollector::GetMeanCpuTime() const {
+  size_t iters = NumberOfIterations();
+  DCHECK_IMPLIES(iters == 0, GetTotalCpuTime() == 0);
+  return GetTotalCpuTime() / static_cast<double>(iters);
+}
+
 uint64_t GarbageCollector::GetEstimatedMeanThroughput() const {
   // Add 1ms to prevent possible division by 0.
   return (total_freed_bytes_ * 1000) / (NsToMs(GetTotalCpuTime()) + 1);

@@ -51,7 +51,7 @@ FuzzerCompiledMethodStorage storage;
 extern "C" int LLVMFuzzerInitialize([[maybe_unused]] int* argc, [[maybe_unused]] char*** argv) {
   callbacks.reset(new FuzzerCompilerCallbacks());
   FuzzerInitialize(callbacks.get());
-  compiler_options = CreateCompilerOptions(/*is_baseline=*/ false);
+  compiler_options = CreateCompilerOptions(/*is_baseline=*/ true);
   compiler.reset(CreateCompiler(*compiler_options, &storage));
   return 0;
 }

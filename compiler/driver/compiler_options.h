@@ -37,7 +37,7 @@ namespace art HIDDEN {
 class CompilerOptions;
 
 namespace fuzzer {
-std::unique_ptr<CompilerOptions> CreateCompilerOptions();
+std::unique_ptr<CompilerOptions> CreateCompilerOptions(bool is_baseline);
 }  // namespace fuzzer
 
 namespace jit {
@@ -511,7 +511,7 @@ class CompilerOptions final {
   friend class linker::Arm64RelativePatcherTest;
   friend class linker::Thumb2RelativePatcherTest;
 
-  friend std::unique_ptr<CompilerOptions> fuzzer::CreateCompilerOptions();
+  friend std::unique_ptr<CompilerOptions> fuzzer::CreateCompilerOptions(bool is_baseline);
 
   template <class Base>
   friend bool ReadCompilerOptions(Base& map, CompilerOptions* options, std::string* error_msg);

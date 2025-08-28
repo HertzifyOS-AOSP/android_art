@@ -25,7 +25,7 @@
 
 namespace art HIDDEN {
 
-inline uint32_t RegisterAllocator::GetSingleRegisterMask(LiveInterval* interval,
+inline uint32_t RegisterAllocator::GetNormalRegisterMask(LiveInterval* interval,
                                                          RegisterType register_type) {
   DCHECK(interval->HasRegisters());
   DCHECK_EQ(register_type == RegisterType::kFpRegister,
@@ -36,7 +36,7 @@ inline uint32_t RegisterAllocator::GetSingleRegisterMask(LiveInterval* interval,
 inline uint32_t RegisterAllocator::GetBlockedRegistersMask(
     LiveInterval* interval,
     ArrayRef<HInstruction* const> instructions_from_positions,
-    size_t number_of_registers,
+    size_t available_registers,
     uint32_t registers_blocked_for_call) {
   DCHECK(!interval->HasRegisters());
   DCHECK(interval->IsFixed());
@@ -45,7 +45,7 @@ inline uint32_t RegisterAllocator::GetBlockedRegistersMask(
   size_t start = interval->GetFirstRange()->GetStart();
   bool blocked_for_call =
       instructions_from_positions[start / kLivenessPositionsPerInstruction] != nullptr;
-  return blocked_for_call ? registers_blocked_for_call : MaxInt<uint32_t>(number_of_registers);
+  return blocked_for_call ? registers_blocked_for_call : available_registers;
 }
 
 }  // namespace art

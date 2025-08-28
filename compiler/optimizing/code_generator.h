@@ -295,6 +295,14 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
            !unimplemented_intrinsics_[static_cast<size_t>(invoke->GetIntrinsic())];
   }
 
+  uint32_t GetCoreCalleeSaveRegisters() const {
+    return core_callee_save_mask_;
+  }
+
+  uint32_t GetFloatingPointCalleeSaveRegisters() const {
+    return fpu_callee_save_mask_;
+  }
+
   size_t GetNumberOfCoreCalleeSaveRegisters() const {
     return POPCOUNT(core_callee_save_mask_);
   }

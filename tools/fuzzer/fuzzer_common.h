@@ -151,7 +151,19 @@ ALWAYS_INLINE bool CompileClasses(jobject class_loader,
 // Creates a compiler. As part of this, creates and sets `compiler_options`.
 Compiler* CreateCompiler(const CompilerOptions& compiler_options,
                          CompiledCodeStorage* storage);
-std::unique_ptr<CompilerOptions> CreateCompilerOptions();
+std::unique_ptr<CompilerOptions> CreateCompilerOptions(bool is_baseline);
+
+// Common compiler fuzzer main logic.
+ALWAYS_INLINE int CompilerFuzzerTestOneInput(
+    const uint8_t* data,
+    size_t size,
+    Compiler* compiler,
+    FuzzerCompilerCallbacks* callbacks,
+    int* skipped_gc_iterations,
+    int max_skip_gc_iterations,
+    bool debug_prints,
+    std::vector<std::unique_ptr<uint8_t[]>>& data_to_delete,
+    std::vector<std::unique_ptr<StandardDexFile>>& dex_files_to_delete);
 
 }  // namespace fuzzer
 }  // namespace art
