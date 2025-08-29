@@ -53,6 +53,8 @@
 namespace art {
 namespace artd {
 
+class Artd;
+
 struct Options {
   // If true, this artd instance is for Pre-reboot Dexopt. It runs in a chroot environment that is
   // set up by dexopt_chroot_setup.
@@ -98,6 +100,8 @@ class ArtdInjector {
 
   virtual android::base::Result<std::unique_ptr<art::tools::SystemProperties>>
   GetPreRebootBuildSystemProperties();
+
+  virtual android::base::Result<std::string> GetApexVersions(Artd* artd);
 };
 
 class ArtdCancellationSignal : public aidl::com::android::server::art::BnArtdCancellationSignal {
@@ -404,6 +408,8 @@ class Artd : public aidl::com::android::server::art::BnArtd {
   const std::unique_ptr<art::tools::SystemProperties> props_;
   const std::unique_ptr<ExecUtils> exec_utils_;
   std::unique_ptr<art::tools::SystemProperties> pre_reboot_build_props_ = nullptr;
+
+  friend class ArtdInjector;
 };
 
 // A class for getting system properties from a `build.prop` file.

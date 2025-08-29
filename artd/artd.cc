@@ -570,6 +570,10 @@ Result<std::unique_ptr<tools::SystemProperties>> ArtdInjector::GetPreRebootBuild
       OR_RETURN(BuildSystemProperties::Create("/system/build.prop")));
 }
 
+Result<std::string> ArtdInjector::GetApexVersions(Artd* artd) {
+  return OR_RETURN(artd->GetOatFileAssistantContext())->GetApexVersions();
+}
+
 ScopedAStatus Artd::isAlive(bool* _aidl_return) {
   *_aidl_return = true;
   return ScopedAStatus::ok();
@@ -1049,14 +1053,12 @@ ndk::ScopedAStatus Artd::maybeCreateSdc(const OutputSecureDexMetadataCompanion& 
         injector_->Restorecon(oat_dir_path, /*se_context=*/std::nullopt, /*recurse=*/true));
   }
 
-  OatFileAssistantContext* ofa_context = OR_RETURN_NON_FATAL(GetOatFileAssistantContext());
-
   std::unique_ptr<NewFile> sdc_file = OR_RETURN_NON_FATAL(
       NewFile::Create(sdc_path, in_outputSdc.permissionSettings.fileFsPermission));
   SdcWriter writer(File(DupCloexec(sdc_file->Fd()), sdc_file->TempPath(), /*check_usage=*/true));
 
   writer.SetSdmTimestampNs(TimeSpecToNs(sdm_st.st_mtim));
-  writer.SetApexVersions(ofa_context->GetApexVersions());
+  writer.SetApexVersions(OR_RETURN_NON_FATAL(injector_->GetApexVersions(this)));
 
   if (!writer.Save(&error_msg)) {
     return NonFatal(error_msg);

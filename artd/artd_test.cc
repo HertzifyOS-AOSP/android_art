@@ -369,6 +369,7 @@ class MockArtdInjector : public ArtdInjector {
               GetPreRebootBuildSystemProperties,
               (),
               (override));
+  MOCK_METHOD(Result<std::string>, GetApexVersions, (Artd * artd), (override));
 };
 
 class ArtdTest : public CommonArtTest {
@@ -747,8 +748,7 @@ TEST_F(ArtdTest, deleteArtifactsFileIsDir) {
 }
 
 TEST_F(ArtdTest, maybeCreateSdc) {
-  // Unable to create OatFileAssistantContext on host to get APEX versions.
-  TEST_DISABLED_FOR_HOST();
+  EXPECT_CALL(*mock_injector_, GetApexVersions).WillOnce(Return("123456"));
 
   std::string sdm_file = OR_FAIL(BuildSdmPath(sdm_sdc_paths_));
   std::string sdc_file = OR_FAIL(BuildSdcPath(sdm_sdc_paths_));
@@ -761,8 +761,7 @@ TEST_F(ArtdTest, maybeCreateSdc) {
 }
 
 TEST_F(ArtdTest, maybeCreateSdcAlreadyCreated) {
-  // Unable to create OatFileAssistantContext on host to get APEX versions.
-  TEST_DISABLED_FOR_HOST();
+  EXPECT_CALL(*mock_injector_, GetApexVersions).WillOnce(Return("123456"));
 
   std::string sdm_file = OR_FAIL(BuildSdmPath(sdm_sdc_paths_));
   std::string sdc_file = OR_FAIL(BuildSdcPath(sdm_sdc_paths_));
@@ -784,8 +783,7 @@ TEST_F(ArtdTest, maybeCreateSdcAlreadyCreated) {
 }
 
 TEST_F(ArtdTest, maybeCreateSdcOutdatedTimestamp) {
-  // Unable to create OatFileAssistantContext on host to get APEX versions.
-  TEST_DISABLED_FOR_HOST();
+  EXPECT_CALL(*mock_injector_, GetApexVersions).WillRepeatedly(Return("123456"));
 
   std::string sdm_file = OR_FAIL(BuildSdmPath(sdm_sdc_paths_));
   std::string sdc_file = OR_FAIL(BuildSdcPath(sdm_sdc_paths_));
