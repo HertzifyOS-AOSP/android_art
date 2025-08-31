@@ -155,7 +155,6 @@ using WritableProfilePath = ProfilePath::WritableProfilePath;
 constexpr const char* kServiceName = "artd";
 constexpr const char* kPreRebootServiceName = "artd_pre_reboot";
 constexpr const char* kArtdCancellationSignalType = "ArtdCancellationSignal";
-constexpr const char* kDefaultPreRebootTmpDir = "/mnt/artd_tmp";
 
 // Timeout for short operations, such as merging profiles.
 constexpr int kShortTimeoutSec = 60;  // 1 minute.
@@ -540,7 +539,7 @@ std::ostream& operator<<(std::ostream& os, const FdLogger& fd_logger) {
 #define RETURN_FATAL_IF_ARG_IS_PRE_REBOOT(arg, log_name) \
   RETURN_FATAL_IF_ARG_IS_PRE_REBOOT_IMPL(false, arg, log_name)
 
-Result<void> Restorecon(
+Result<void> ArtdInjector::Restorecon(
     const std::string& path,
     const std::optional<OutputArtifacts::PermissionSettings::SeContext>& se_context,
     bool recurse) {
@@ -560,6 +559,19 @@ Result<void> Restorecon(
     return ErrnoErrorf("Failed to restorecon directory '{}'", path);
   }
   return {};
+}
+
+const char* ArtdInjector::GetPreRebootTmpDir() { return "/mnt/artd_tmp"; }
+
+const char* ArtdInjector::GetInitEnvironRcPath() { return "/init.environ.rc"; }
+
+Result<std::unique_ptr<tools::SystemProperties>> ArtdInjector::GetPreRebootBuildSystemProperties() {
+  return std::make_unique<BuildSystemProperties>(
+      OR_RETURN(BuildSystemProperties::Create("/system/build.prop")));
+}
+
+Result<std::string> ArtdInjector::GetApexVersions(Artd* artd) {
+  return OR_RETURN(artd->GetOatFileAssistantContext())->GetApexVersions();
 }
 
 ScopedAStatus Artd::isAlive(bool* _aidl_return) {
@@ -1035,19 +1047,18 @@ ndk::ScopedAStatus Artd::maybeCreateSdc(const OutputSecureDexMetadataCompanion& 
                                              in_outputSdc.permissionSettings.dirFsPermission,
                                              &oat_dir_path));
 
-    // Unlike the two `restorecon_` calls in `dexopt`, we only need one restorecon here because SDM
+    // Unlike the two `Restorecon` calls in `dexopt`, we only need one restorecon here because SDM
     // files are for primary dex files, whose oat directory doesn't have an MLS label.
-    OR_RETURN_NON_FATAL(restorecon_(oat_dir_path, /*se_context=*/std::nullopt, /*recurse=*/true));
+    OR_RETURN_NON_FATAL(
+        injector_->Restorecon(oat_dir_path, /*se_context=*/std::nullopt, /*recurse=*/true));
   }
-
-  OatFileAssistantContext* ofa_context = OR_RETURN_NON_FATAL(GetOatFileAssistantContext());
 
   std::unique_ptr<NewFile> sdc_file = OR_RETURN_NON_FATAL(
       NewFile::Create(sdc_path, in_outputSdc.permissionSettings.fileFsPermission));
   SdcWriter writer(File(DupCloexec(sdc_file->Fd()), sdc_file->TempPath(), /*check_usage=*/true));
 
   writer.SetSdmTimestampNs(TimeSpecToNs(sdm_st.st_mtim));
-  writer.SetApexVersions(ofa_context->GetApexVersions());
+  writer.SetApexVersions(OR_RETURN_NON_FATAL(injector_->GetApexVersions(this)));
 
   if (!writer.Save(&error_msg)) {
     return NonFatal(error_msg);
@@ -1104,7 +1115,7 @@ ndk::ScopedAStatus Artd::dexopt(
     // First-round restorecon. artd doesn't have the permission to create files with the
     // `apk_data_file` label, so we need to restorecon the "oat" directory first so that files will
     // inherit `dalvikcache_data_file` rather than `apk_data_file`.
-    OR_RETURN_NON_FATAL(restorecon_(
+    OR_RETURN_NON_FATAL(injector_->Restorecon(
         oat_dir_path, in_outputArtifacts.permissionSettings.seContext, /*recurse=*/true));
   }
 
@@ -1233,7 +1244,7 @@ ndk::ScopedAStatus Artd::dexopt(
   // there's no need to restorecon because they inherits the SELinux context of the dalvik-cache
   // directory and they don't need to have MLS labels.
   if (!in_outputArtifacts.artifactsPath.isInDalvikCache) {
-    OR_RETURN_NON_FATAL(restorecon_(
+    OR_RETURN_NON_FATAL(injector_->Restorecon(
         oat_dir_path, in_outputArtifacts.permissionSettings.seContext, /*recurse=*/true));
   }
 
@@ -1300,7 +1311,7 @@ ScopedAStatus ArtdCancellationSignal::cancel() {
   is_cancelled_ = true;
   for (pid_t pid : pids_) {
     // Kill the whole process group.
-    int res = kill_(-pid, SIGKILL);
+    int res = injector_->Kill(-pid, SIGKILL);
     DCHECK_EQ(res, 0);
   }
   return ScopedAStatus::ok();
@@ -1319,7 +1330,7 @@ ExecCallbacks ArtdCancellationSignal::CreateExecCallbacks() {
             pids_.insert(pid);
             // Handle cancellation signals sent before the process starts.
             if (is_cancelled_) {
-              int res = kill_(-pid, SIGKILL);
+              int res = injector_->Kill(-pid, SIGKILL);
               DCHECK_EQ(res, 0);
             }
           },
@@ -1339,7 +1350,7 @@ bool ArtdCancellationSignal::IsCancelled() {
 
 ScopedAStatus Artd::createCancellationSignal(
     std::shared_ptr<IArtdCancellationSignal>* _aidl_return) {
-  *_aidl_return = ndk::SharedRefBase::make<ArtdCancellationSignal>(kill_);
+  *_aidl_return = ndk::SharedRefBase::make<ArtdCancellationSignal>(injector_.get());
   return ScopedAStatus::ok();
 }
 
@@ -1541,7 +1552,7 @@ ScopedAStatus Artd::initProfileSaveNotification(const PrimaryCurProfilePath& in_
   }
 
   *_aidl_return = ndk::SharedRefBase::make<ArtdNotification>(
-      poll_, path, std::move(inotify_fd), std::move(pidfd));
+      injector_.get(), path, std::move(inotify_fd), std::move(pidfd));
   return ScopedAStatus::ok();
 }
 
@@ -1577,7 +1588,7 @@ ScopedAStatus ArtdNotification::wait(int in_timeoutMs, bool* _aidl_return) {
   uint64_t start_time = MilliTime();
   int64_t remaining_time_ms = in_timeoutMs;
   while (remaining_time_ms > 0) {
-    int ret = TEMP_FAILURE_RETRY(poll_(pollfds, arraysize(pollfds), remaining_time_ms));
+    int ret = TEMP_FAILURE_RETRY(injector_->Poll(pollfds, arraysize(pollfds), remaining_time_ms));
     if (ret < 0) {
       return NonFatal(
           ART_FORMAT("Failed to poll to wait for notification '{}': {}", path_, strerror(errno)));
@@ -2009,7 +2020,7 @@ Result<int> Artd::ExecAndReturnCode(const std::vector<std::string>& args,
 
 Result<struct stat> Artd::Fstat(const File& file) const {
   struct stat st;
-  if (fstat_(file.Fd(), &st) != 0) {
+  if (injector_->Fstat(file.Fd(), &st) != 0) {
     return Errorf("Unable to fstat file '{}'", file.GetPath());
   }
   return st;
@@ -2018,16 +2029,16 @@ Result<struct stat> Artd::Fstat(const File& file) const {
 Result<void> Artd::BindMountNewDir(const std::string& source, const std::string& target) const {
   OR_RETURN(CreateDir(source));
   OR_RETURN(BindMount(source, target));
-  OR_RETURN(restorecon_(target, /*se_context=*/std::nullopt, /*recurse=*/false));
+  OR_RETURN(injector_->Restorecon(target, /*se_context=*/std::nullopt, /*recurse=*/false));
   return {};
 }
 
 Result<void> Artd::BindMount(const std::string& source, const std::string& target) const {
-  if (mount_(source.c_str(),
-             target.c_str(),
-             /*fs_type=*/nullptr,
-             MS_BIND | MS_PRIVATE,
-             /*data=*/nullptr) != 0) {
+  if (injector_->Mount(source.c_str(),
+                       target.c_str(),
+                       /*fs_type=*/nullptr,
+                       MS_BIND | MS_PRIVATE,
+                       /*data=*/nullptr) != 0) {
     return ErrnoErrorf("Failed to bind-mount '{}' at '{}'", source, target);
   }
   return {};
@@ -2037,7 +2048,7 @@ ScopedAStatus Artd::preRebootInit(
     const std::shared_ptr<IArtdCancellationSignal>& in_cancellationSignal, bool* _aidl_return) {
   RETURN_FATAL_IF_NOT_PRE_REBOOT(options_);
 
-  std::string tmp_dir = pre_reboot_tmp_dir_.value_or(kDefaultPreRebootTmpDir);
+  std::string tmp_dir = injector_->GetPreRebootTmpDir();
   std::string preparation_done_file = tmp_dir + "/preparation_done";
   std::string classpath_file = tmp_dir + "/classpath.txt";
   std::string art_apex_data_dir = tmp_dir + "/art_apex_data";
@@ -2058,11 +2069,9 @@ ScopedAStatus Artd::preRebootInit(
   }
 
   OR_RETURN_NON_FATAL(PreRebootInitClearEnvs());
-  OR_RETURN_NON_FATAL(
-      PreRebootInitSetEnvFromFile(init_environ_rc_path_.value_or("/init.environ.rc")));
+  OR_RETURN_NON_FATAL(PreRebootInitSetEnvFromFile(injector_->GetInitEnvironRcPath()));
   if (pre_reboot_build_props_ == nullptr) {
-    pre_reboot_build_props_ = std::make_unique<BuildSystemProperties>(
-        OR_RETURN_NON_FATAL(BuildSystemProperties::Create("/system/build.prop")));
+    pre_reboot_build_props_ = OR_RETURN_NON_FATAL(injector_->GetPreRebootBuildSystemProperties());
   }
   if (!preparation_done) {
     OR_RETURN_NON_FATAL(PreRebootInitDeriveClasspath(classpath_file));

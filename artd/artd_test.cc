@@ -117,6 +117,7 @@ using ::testing::_;
 using ::testing::AllOf;
 using ::testing::AnyNumber;
 using ::testing::AnyOf;
+using ::testing::AtMost;
 using ::testing::Contains;
 using ::testing::ContainsRegex;
 using ::testing::DoAll;
@@ -341,21 +342,55 @@ class MockExecUtils : public ExecUtils {
               (const));
 };
 
+class MockArtdInjector : public ArtdInjector {
+ public:
+  MOCK_METHOD(std::unique_ptr<tools::SystemProperties>, GetSystemProperties, (), (override));
+  MOCK_METHOD(std::unique_ptr<ExecUtils>, GetExecUtils, (), (override));
+  MOCK_METHOD(int, Kill, (pid_t pid, int sig), (override));
+  MOCK_METHOD(int, Fstat, (int fd, struct stat* statbuf), (override));
+  MOCK_METHOD(int, Poll, (struct pollfd * fds, nfds_t nfds, int timeout), (override));
+  MOCK_METHOD(int,
+              Mount,
+              (const char* source,
+               const char* target,
+               const char* filesystemtype,
+               unsigned long mountflags,  // NOLINT
+               const void* data),
+              (override));
+  MOCK_METHOD(Result<void>,
+              Restorecon,
+              (const std::string& path,
+               const std::optional<OutputArtifacts::PermissionSettings::SeContext>& se_context,
+               bool recurse),
+              (override));
+  MOCK_METHOD(const char*, GetPreRebootTmpDir, (), (override));
+  MOCK_METHOD(const char*, GetInitEnvironRcPath, (), (override));
+  MOCK_METHOD(Result<std::unique_ptr<tools::SystemProperties>>,
+              GetPreRebootBuildSystemProperties,
+              (),
+              (override));
+  MOCK_METHOD(Result<std::string>, GetApexVersions, (Artd * artd), (override));
+};
+
 class ArtdTest : public CommonArtTest {
  protected:
   void SetUp() override {
     CommonArtTest::SetUp();
+
+    auto mock_injector = std::make_unique<MockArtdInjector>();
+    mock_injector_ = mock_injector.get();
+
     auto mock_props = std::make_unique<MockSystemProperties>();
     mock_props_ = mock_props.get();
     EXPECT_CALL(*mock_props_, GetProperty).Times(AnyNumber()).WillRepeatedly(Return(""));
+    EXPECT_CALL(*mock_injector, GetSystemProperties).WillOnce(Return(std::move(mock_props)));
+
     auto mock_exec_utils = std::make_unique<MockExecUtils>();
     mock_exec_utils_ = mock_exec_utils.get();
-    artd_ = ndk::SharedRefBase::make<Artd>(Options(),
-                                           std::move(mock_props),
-                                           std::move(mock_exec_utils),
-                                           mock_kill_.AsStdFunction(),
-                                           mock_fstat_.AsStdFunction(),
-                                           mock_poll_.AsStdFunction());
+    EXPECT_CALL(*mock_injector, GetExecUtils).WillOnce(Return(std::move(mock_exec_utils)));
+
+    artd_ = ndk::SharedRefBase::make<Artd>(Options(), std::move(mock_injector));
+
     scratch_dir_ = std::make_unique<ScratchDir>();
     scratch_path_ = scratch_dir_->GetPath();
     // Remove the trailing '/';
@@ -363,7 +398,7 @@ class ArtdTest : public CommonArtTest {
 
     TestOnlySetListRootDir(scratch_path_);
 
-    ON_CALL(mock_fstat_, Call).WillByDefault(fstat);
+    ON_CALL(*mock_injector_, Fstat).WillByDefault(fstat);
 
     // Use an arbitrary existing directory as ART root.
     art_root_ = scratch_path_ + "/com.android.art";
@@ -549,11 +584,9 @@ class ArtdTest : public CommonArtTest {
   ScopedUnsetEnvironmentVariable android_data_env_ = ScopedUnsetEnvironmentVariable("ANDROID_DATA");
   ScopedUnsetEnvironmentVariable android_expand_env_ =
       ScopedUnsetEnvironmentVariable("ANDROID_EXPAND");
+  MockArtdInjector* mock_injector_;
   MockSystemProperties* mock_props_;
   MockExecUtils* mock_exec_utils_;
-  MockFunction<KillFn> mock_kill_;
-  MockFunction<FstatFn> mock_fstat_;
-  MockFunction<PollFn> mock_poll_;
 
   std::string dex_file_;
   std::string isa_;
@@ -715,8 +748,7 @@ TEST_F(ArtdTest, deleteArtifactsFileIsDir) {
 }
 
 TEST_F(ArtdTest, maybeCreateSdc) {
-  // Unable to create OatFileAssistantContext on host to get APEX versions.
-  TEST_DISABLED_FOR_HOST();
+  EXPECT_CALL(*mock_injector_, GetApexVersions).WillOnce(Return("123456"));
 
   std::string sdm_file = OR_FAIL(BuildSdmPath(sdm_sdc_paths_));
   std::string sdc_file = OR_FAIL(BuildSdcPath(sdm_sdc_paths_));
@@ -729,8 +761,7 @@ TEST_F(ArtdTest, maybeCreateSdc) {
 }
 
 TEST_F(ArtdTest, maybeCreateSdcAlreadyCreated) {
-  // Unable to create OatFileAssistantContext on host to get APEX versions.
-  TEST_DISABLED_FOR_HOST();
+  EXPECT_CALL(*mock_injector_, GetApexVersions).WillOnce(Return("123456"));
 
   std::string sdm_file = OR_FAIL(BuildSdmPath(sdm_sdc_paths_));
   std::string sdc_file = OR_FAIL(BuildSdcPath(sdm_sdc_paths_));
@@ -752,8 +783,7 @@ TEST_F(ArtdTest, maybeCreateSdcAlreadyCreated) {
 }
 
 TEST_F(ArtdTest, maybeCreateSdcOutdatedTimestamp) {
-  // Unable to create OatFileAssistantContext on host to get APEX versions.
-  TEST_DISABLED_FOR_HOST();
+  EXPECT_CALL(*mock_injector_, GetApexVersions).WillRepeatedly(Return("123456"));
 
   std::string sdm_file = OR_FAIL(BuildSdmPath(sdm_sdc_paths_));
   std::string sdc_file = OR_FAIL(BuildSdcPath(sdm_sdc_paths_));
@@ -1284,7 +1314,7 @@ TEST_F(ArtdTest, dexoptCancelledBeforeDex2oat) {
         callbacks.on_end(kPid);
         return Error();
       });
-  EXPECT_CALL(mock_kill_, Call(-kPid, SIGKILL));
+  EXPECT_CALL(*mock_injector_, Kill(-kPid, SIGKILL));
 
   cancellation_signal->cancel();
 
@@ -1317,7 +1347,7 @@ TEST_F(ArtdTest, dexoptCancelledDuringDex2oat) {
         return Error();
       });
 
-  EXPECT_CALL(mock_kill_, Call(-kPid, SIGKILL)).WillOnce([&](auto, auto) {
+  EXPECT_CALL(*mock_injector_, Kill(-kPid, SIGKILL)).WillOnce([&](auto, auto) {
     // Step 4.
     process_killed_cv.notify_one();
     return 0;
@@ -1357,7 +1387,7 @@ TEST_F(ArtdTest, dexoptCancelledAfterDex2oat) {
                         callbacks.on_end(kPid);
                         return 0;
                       }));
-  EXPECT_CALL(mock_kill_, Call).Times(0);
+  EXPECT_CALL(*mock_injector_, Kill).Times(0);
 
   RunDexopt(EX_NONE, Field(&ArtdDexoptResult::cancelled, false), cancellation_signal);
 
@@ -1418,8 +1448,8 @@ TEST_F(ArtdTest, dexoptGidMismatch) {
 TEST_F(ArtdTest, dexoptGidMatchesUid) {
   output_artifacts_.permissionSettings.fileFsPermission = {
       .uid = 123, .gid = 123, .isOtherReadable = false};
-  EXPECT_CALL(mock_fstat_, Call(_, _)).WillRepeatedly(fstat);  // For profile.
-  EXPECT_CALL(mock_fstat_, Call(FdOf(dex_file_), _))
+  EXPECT_CALL(*mock_injector_, Fstat(_, _)).WillRepeatedly(fstat);  // For profile.
+  EXPECT_CALL(*mock_injector_, Fstat(FdOf(dex_file_), _))
       .WillOnce(DoAll(SetArgPointee<1>((struct stat){
                           .st_mode = S_IRUSR | S_IRGRP, .st_uid = 123, .st_gid = 456}),
                       Return(0)));
@@ -1433,8 +1463,8 @@ TEST_F(ArtdTest, dexoptGidMatchesUid) {
 TEST_F(ArtdTest, dexoptGidMatchesGid) {
   output_artifacts_.permissionSettings.fileFsPermission = {
       .uid = 123, .gid = 456, .isOtherReadable = false};
-  EXPECT_CALL(mock_fstat_, Call(_, _)).WillRepeatedly(fstat);  // For profile.
-  EXPECT_CALL(mock_fstat_, Call(FdOf(dex_file_), _))
+  EXPECT_CALL(*mock_injector_, Fstat(_, _)).WillRepeatedly(fstat);  // For profile.
+  EXPECT_CALL(*mock_injector_, Fstat(FdOf(dex_file_), _))
       .WillOnce(DoAll(SetArgPointee<1>((struct stat){
                           .st_mode = S_IRUSR | S_IRGRP, .st_uid = 123, .st_gid = 456}),
                       Return(0)));
@@ -2732,7 +2762,7 @@ TEST_F(ArtdProfileSaveNotificationTest, initAndWaitSuccess) {
   std::condition_variable wait_started_cv;
   std::mutex mu;
 
-  EXPECT_CALL(mock_poll_, Call)
+  EXPECT_CALL(*mock_injector_, Poll)
       .Times(2)
       .WillRepeatedly(DoAll(
           [&](auto, auto, auto) {
@@ -2772,7 +2802,7 @@ TEST_F(ArtdProfileSaveNotificationTest, initAndWaitSuccess) {
 }
 
 TEST_F(ArtdProfileSaveNotificationTest, initAndWaitProcessGone) {
-  EXPECT_CALL(mock_poll_, Call).WillOnce(poll);
+  EXPECT_CALL(*mock_injector_, Poll).WillOnce(poll);
 
   std::shared_ptr<IArtdNotification> notification;
   ASSERT_STATUS_OK(artd_->initProfileSaveNotification(profile_path_, pid_, &notification));
@@ -2789,7 +2819,7 @@ TEST_F(ArtdProfileSaveNotificationTest, initAndWaitProcessGone) {
 }
 
 TEST_F(ArtdProfileSaveNotificationTest, initAndWaitTimeout) {
-  EXPECT_CALL(mock_poll_, Call).WillOnce(poll).WillOnce(Return(0));
+  EXPECT_CALL(*mock_injector_, Poll).WillOnce(poll).WillOnce(Return(0));
 
   std::shared_ptr<IArtdNotification> notification;
   ASSERT_STATUS_OK(artd_->initProfileSaveNotification(profile_path_, pid_, &notification));
@@ -2807,7 +2837,7 @@ TEST_F(ArtdProfileSaveNotificationTest, initProcessGone) {
   // Kill the process before pidfd_open.
   scope_guard_.reset();
 
-  EXPECT_CALL(mock_poll_, Call).Times(0);
+  EXPECT_CALL(*mock_injector_, Poll).Times(0);
 
   std::shared_ptr<IArtdNotification> notification;
   ASSERT_STATUS_OK(artd_->initProfileSaveNotification(profile_path_, pid_, &notification));
@@ -2973,17 +3003,31 @@ class ArtdPreRebootTest : public ArtdTest {
   void SetUp() override {
     ArtdTest::SetUp();
 
+    auto mock_injector = std::make_unique<MockArtdInjector>();
+    mock_injector_ = mock_injector.get();
+
     pre_reboot_tmp_dir_ = scratch_path_ + "/artd_tmp";
     std::filesystem::create_directories(pre_reboot_tmp_dir_);
+    ON_CALL(*mock_injector_, GetPreRebootTmpDir).WillByDefault(Return(pre_reboot_tmp_dir_.c_str()));
+
     init_environ_rc_path_ = scratch_path_ + "/init.environ.rc";
+    ON_CALL(*mock_injector_, GetInitEnvironRcPath)
+        .WillByDefault(Return(init_environ_rc_path_.c_str()));
 
     auto mock_props = std::make_unique<NiceMock<MockSystemProperties>>();
     mock_props_ = mock_props.get();
     ON_CALL(*mock_props_, GetProperty).WillByDefault(Return(""));
+    EXPECT_CALL(*mock_injector_, GetSystemProperties).WillOnce(Return(std::move(mock_props)));
+
     auto mock_exec_utils = std::make_unique<MockExecUtils>();
     mock_exec_utils_ = mock_exec_utils.get();
+    EXPECT_CALL(*mock_injector_, GetExecUtils).WillOnce(Return(std::move(mock_exec_utils)));
+
     auto mock_pre_reboot_build_props = std::make_unique<NiceMock<MockSystemProperties>>();
     mock_pre_reboot_build_props_ = mock_pre_reboot_build_props.get();
+    EXPECT_CALL(*mock_injector_, GetPreRebootBuildSystemProperties)
+        .Times(AtMost(1))
+        .WillOnce(Return(std::move(mock_pre_reboot_build_props)));
 
     ON_CALL(*mock_pre_reboot_build_props_, GetProperty).WillByDefault(Return(""));
     ON_CALL(*mock_pre_reboot_build_props_, GetProperty("ro.build.version.sdk"))
@@ -2993,19 +3037,11 @@ class ArtdPreRebootTest : public ArtdTest {
     ON_CALL(*mock_pre_reboot_build_props_, GetProperty("ro.build.version.known_codenames"))
         .WillByDefault(Return("VanillaIceCream,Baklava"));
 
-    artd_ = ndk::SharedRefBase::make<Artd>(Options{.is_pre_reboot = true},
-                                           std::move(mock_props),
-                                           std::move(mock_exec_utils),
-                                           mock_kill_.AsStdFunction(),
-                                           mock_fstat_.AsStdFunction(),
-                                           mock_poll_.AsStdFunction(),
-                                           mock_mount_.AsStdFunction(),
-                                           mock_restorecon_.AsStdFunction(),
-                                           pre_reboot_tmp_dir_,
-                                           init_environ_rc_path_,
-                                           std::move(mock_pre_reboot_build_props));
+    artd_ =
+        ndk::SharedRefBase::make<Artd>(Options{.is_pre_reboot = true}, std::move(mock_injector));
 
-    ON_CALL(mock_restorecon_, Call).WillByDefault(Return(Result<void>()));
+    ON_CALL(*mock_injector_, Fstat).WillByDefault(fstat);
+    ON_CALL(*mock_injector_, Restorecon).WillByDefault(Return(Result<void>()));
 
     constexpr const char* kInitEnvironRcTmpl = R"(
       on early-init
@@ -3019,13 +3055,47 @@ class ArtdPreRebootTest : public ArtdTest {
     output_artifacts_.artifactsPath.isPreReboot = true;
   }
 
+  void SetUpDefaultsForInit() {
+    EXPECT_CALL(
+        *mock_exec_utils_,
+        DoExecAndReturnCode(Contains("/apex/com.android.sdkext/bin/derive_classpath"), _, _))
+        .Times(AtMost(1))
+        .WillOnce(
+            DoAll(WithArg<0>(WriteToFdFlag("/proc/self/fd/", "export BOOTCLASSPATH /foo:/bar")),
+                  Return(0)));
+
+    EXPECT_CALL(*mock_injector_, Mount).Times(AtMost(2)).WillRepeatedly(Return(0));
+
+    EXPECT_CALL(*mock_exec_utils_,
+                DoExecAndReturnCode(Contains(art_root_ + "/bin/odrefresh"), _, _))
+        .Times(AtMost(1))
+        .WillOnce(Return(0));
+  }
+
+  template <bool kExpectOk = true>
+  Result<ndk::ScopedAStatus> RunPreRebootInit() {
+    std::shared_ptr<IArtdCancellationSignal> cancellation_signal;
+    ndk::ScopedAStatus status = artd_->createCancellationSignal(&cancellation_signal);
+    if (!status.isOk()) {
+      return Error() << status.getMessage();
+    }
+
+    bool aidl_return;
+    status = artd_->preRebootInit(cancellation_signal, &aidl_return);
+    if constexpr (kExpectOk) {
+      if (!status.isOk()) {
+        return Error() << status.getMessage();
+      }
+      if (!aidl_return) {
+        return Errorf("Expected aidl_return to be true");
+      }
+    }
+
+    return status;
+  }
+
   std::string pre_reboot_tmp_dir_;
   std::string init_environ_rc_path_;
-  MockFunction<int(const char*, const char*, const char*, uint32_t, const void*)> mock_mount_;
-  MockFunction<Result<void>(const std::string&,
-                            const std::optional<OutputArtifacts::PermissionSettings::SeContext>&,
-                            bool)>
-      mock_restorecon_;
   MockSystemProperties* mock_pre_reboot_build_props_;
 };
 
@@ -3058,20 +3128,20 @@ TEST_F(ArtdPreRebootTest, preRebootInit) {
       .WillOnce(DoAll(WithArg<0>(WriteToFdFlag("/proc/self/fd/", "export BOOTCLASSPATH /foo:/bar")),
                       Return(0)));
 
-  EXPECT_CALL(mock_mount_,
-              Call(StrEq(pre_reboot_tmp_dir_ + "/art_apex_data"),
-                   StrEq("/data/misc/apexdata/com.android.art"),
-                   /*fs_type=*/nullptr,
-                   MS_BIND | MS_PRIVATE,
-                   /*data=*/nullptr))
+  EXPECT_CALL(*mock_injector_,
+              Mount(StrEq(pre_reboot_tmp_dir_ + "/art_apex_data"),
+                    StrEq("/data/misc/apexdata/com.android.art"),
+                    /*fs_type=*/nullptr,
+                    MS_BIND | MS_PRIVATE,
+                    /*data=*/nullptr))
       .WillOnce(Return(0));
 
-  EXPECT_CALL(mock_mount_,
-              Call(StrEq(pre_reboot_tmp_dir_ + "/odrefresh"),
-                   StrEq("/data/misc/odrefresh"),
-                   /*fs_type=*/nullptr,
-                   MS_BIND | MS_PRIVATE,
-                   /*data=*/nullptr))
+  EXPECT_CALL(*mock_injector_,
+              Mount(StrEq(pre_reboot_tmp_dir_ + "/odrefresh"),
+                    StrEq("/data/misc/odrefresh"),
+                    /*fs_type=*/nullptr,
+                    MS_BIND | MS_PRIVATE,
+                    /*data=*/nullptr))
       .WillOnce(Return(0));
 
   EXPECT_CALL(*mock_exec_utils_,
@@ -3085,12 +3155,7 @@ TEST_F(ArtdPreRebootTest, preRebootInit) {
                                   _))
       .WillOnce(Return(0));
 
-  std::shared_ptr<IArtdCancellationSignal> cancellation_signal;
-  ASSERT_STATUS_OK(artd_->createCancellationSignal(&cancellation_signal));
-
-  bool aidl_return;
-  ASSERT_STATUS_OK(artd_->preRebootInit(cancellation_signal, &aidl_return));
-  EXPECT_TRUE(aidl_return);
+  OR_FAIL(RunPreRebootInit());
 
   auto env_var_count = []() {
     int count = 0;
@@ -3113,6 +3178,7 @@ TEST_F(ArtdPreRebootTest, preRebootInit) {
 
   // Calling again will not involve `mount`, `derive_classpath`, or `odrefresh` but only restore env
   // vars.
+  bool aidl_return;
   ASSERT_STATUS_OK(artd_->preRebootInit(/*in_cancellationSignal=*/nullptr, &aidl_return));
   EXPECT_TRUE(aidl_return);
   EXPECT_EQ(getenv("ANDROID_ART_ROOT"), art_root_);
@@ -3122,21 +3188,12 @@ TEST_F(ArtdPreRebootTest, preRebootInit) {
 }
 
 TEST_F(ArtdPreRebootTest, preRebootInitFailed) {
-  EXPECT_CALL(*mock_exec_utils_,
-              DoExecAndReturnCode(Contains("/apex/com.android.sdkext/bin/derive_classpath"), _, _))
-      .WillOnce(DoAll(WithArg<0>(WriteToFdFlag("/proc/self/fd/", "export BOOTCLASSPATH /foo:/bar")),
-                      Return(0)));
-
-  EXPECT_CALL(mock_mount_, Call).Times(2).WillRepeatedly(Return(0));
+  SetUpDefaultsForInit();
 
   EXPECT_CALL(*mock_exec_utils_, DoExecAndReturnCode(Contains(art_root_ + "/bin/odrefresh"), _, _))
       .WillOnce(Return(1));
 
-  std::shared_ptr<IArtdCancellationSignal> cancellation_signal;
-  ASSERT_STATUS_OK(artd_->createCancellationSignal(&cancellation_signal));
-
-  bool aidl_return;
-  ndk::ScopedAStatus status = artd_->preRebootInit(cancellation_signal, &aidl_return);
+  ndk::ScopedAStatus status = OR_FAIL(RunPreRebootInit</*kExpectOk=*/false>());
   EXPECT_FALSE(status.isOk());
   EXPECT_EQ(status.getExceptionCode(), EX_SERVICE_SPECIFIC);
   EXPECT_STREQ(status.getMessage(), "odrefresh returned an unexpected code: 1");
@@ -3156,12 +3213,7 @@ TEST_F(ArtdPreRebootTest, preRebootInitNoRetry) {
 }
 
 TEST_F(ArtdPreRebootTest, preRebootInitCancelled) {
-  EXPECT_CALL(*mock_exec_utils_,
-              DoExecAndReturnCode(Contains("/apex/com.android.sdkext/bin/derive_classpath"), _, _))
-      .WillOnce(DoAll(WithArg<0>(WriteToFdFlag("/proc/self/fd/", "export BOOTCLASSPATH /foo:/bar")),
-                      Return(0)));
-
-  EXPECT_CALL(mock_mount_, Call).Times(2).WillRepeatedly(Return(0));
+  SetUpDefaultsForInit();
 
   std::shared_ptr<IArtdCancellationSignal> cancellation_signal;
   ASSERT_STATUS_OK(artd_->createCancellationSignal(&cancellation_signal));
@@ -3184,7 +3236,7 @@ TEST_F(ArtdPreRebootTest, preRebootInitCancelled) {
         return Error();
       });
 
-  EXPECT_CALL(mock_kill_, Call(-kPid, SIGKILL)).WillOnce([&](auto, auto) {
+  EXPECT_CALL(*mock_injector_, Kill(-kPid, SIGKILL)).WillOnce([&](auto, auto) {
     // Step 4.
     process_killed_cv.notify_one();
     return 0;
@@ -3209,6 +3261,9 @@ TEST_F(ArtdPreRebootTest, preRebootInitCancelled) {
 }
 
 TEST_F(ArtdPreRebootTest, dexopt) {
+  SetUpDefaultsForInit();
+  OR_FAIL(RunPreRebootInit());
+
   std::string profile_file = OR_FATAL(BuildProfileOrDmPath(profile_path_.value()));
   std::string assume_value_sdk_int =
       std::string("Landroid/os/Build$VERSION;->SDK_INT:") + kDefaultBuildVersionSdk;
@@ -3237,6 +3292,9 @@ TEST_F(ArtdPreRebootTest, dexopt) {
 }
 
 TEST_F(ArtdPreRebootTest, dexoptPreRebootProfile) {
+  SetUpDefaultsForInit();
+  OR_FAIL(RunPreRebootInit());
+
   profile_path_->get<ProfilePath::tmpProfilePath>()
       .finalPath.get<WritableProfilePath::forPrimary>()
       .isPreReboot = true;
@@ -3260,6 +3318,9 @@ TEST_F(ArtdPreRebootTest, dexoptPreRebootProfile) {
 }
 
 TEST_F(ArtdPreRebootTest, copyAndRewriteProfile) {
+  SetUpDefaultsForInit();
+  OR_FAIL(RunPreRebootInit());
+
   std::string src_file = OR_FATAL(BuildProfileOrDmPath(profile_path_.value()));
   CreateFile(src_file, "valid_profile");
 
@@ -3279,6 +3340,9 @@ TEST_F(ArtdPreRebootTest, copyAndRewriteProfile) {
 TEST_F(ArtdPreRebootTest, copyAndRewriteEmbeddedProfile) {
   TEST_DISABLED_FOR_SHELL_WITHOUT_MEMFD_ACCESS();
 
+  SetUpDefaultsForInit();
+  OR_FAIL(RunPreRebootInit());
+
   CreateZipWithSingleEntry(dex_file_, "assets/art-profile/baseline.prof", "valid_profile");
 
   EXPECT_CALL(*mock_exec_utils_, DoExecAndReturnCode)
@@ -3293,6 +3357,9 @@ TEST_F(ArtdPreRebootTest, copyAndRewriteEmbeddedProfile) {
 }
 
 TEST_F(ArtdPreRebootTest, mergeProfiles) {
+  SetUpDefaultsForInit();
+  OR_FAIL(RunPreRebootInit());
+
   std::string reference_profile_file = OR_FATAL(BuildProfileOrDmPath(profile_path_.value()));
   CreateFile(reference_profile_file, "abc");
 
@@ -3335,6 +3402,9 @@ TEST_F(ArtdPreRebootTest, mergeProfiles) {
 }
 
 TEST_F(ArtdPreRebootTest, mergeProfilesPreRebootReference) {
+  SetUpDefaultsForInit();
+  OR_FAIL(RunPreRebootInit());
+
   profile_path_->get<ProfilePath::tmpProfilePath>()
       .finalPath.get<WritableProfilePath::forPrimary>()
       .isPreReboot = true;
