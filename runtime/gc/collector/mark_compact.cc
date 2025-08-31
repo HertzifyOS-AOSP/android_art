@@ -3277,8 +3277,8 @@ bool MarkCompact::FreeFromSpacePages(size_t cur_page_idx, int mode, size_t end_i
       // This for the black-allocations pages so that madvise is not missed.
       all_mapped = true;
     }
-    // If not all pages are mapped, then take it as a hint that mmap_lock is
-    // contended and hence don't madvise as that also needs the same lock.
+    // If not all pages are mapped, then we cannot free those pages yet as some
+    // page(s) are not mapped yet and will be needed eventually.
     if (all_mapped) {
       if (!use_move_ioctl_) {
         // Retain a few pages for subsequent compactions.
@@ -3300,12 +3300,29 @@ bool MarkCompact::FreeFromSpacePages(size_t cur_page_idx, int mode, size_t end_i
   if (reclaim_begin < last_reclaimable_page_.load(std::memory_order_relaxed) &&
       (!use_move_ioctl_ || reclaim_begin >= black_dense_end_)) {
     last_reclaimable_page_.store(reclaim_begin, std::memory_order_relaxed);
+    if (use_move_ioctl_) {
+      ptrdiff_t available = cur_reclaimable_page_.load(std::memory_order_relaxed) - reclaim_begin;
+      // We should retain more pages in case of MOVE ioctl (as compared to COPY
+      // ioctl) as mutators also use pages from here.
+      ssize_t gBufferPages = 128 * gPageSize;
+      DCHECK_LT(gBufferPages, kMinFromSpaceMadviseSize);
+      while (available >= kMinFromSpaceMadviseSize) {
+        size = available - gBufferPages;
+        uint8_t* addr = GetRecyclablePages(size, /*atomic=*/true);
+        if (addr != nullptr) {
+          int ret = madvise(addr + from_space_slide_diff_, size, MADV_DONTNEED);
+          CHECK(ret == 0) << "madvise of from-space failed: " << strerror(errno);
+          break;
+        }
+        available = cur_reclaimable_page_.load(std::memory_order_relaxed) - reclaim_begin;
+      }
+    }
   }
   last_checked_reclaim_page_idx_ = idx;
   return all_mapped;
 }
 
-uint8_t* MarkCompact::GetFreePagesForMapping(size_t size, bool atomic) {
+uint8_t* MarkCompact::GetRecyclablePages(size_t size, bool atomic) {
   DCHECK_ALIGNED_PARAM(size, gPageSize);
   uint8_t* expected = cur_reclaimable_page_.load(std::memory_order_relaxed);
   if (atomic) {
@@ -3402,7 +3419,7 @@ void MarkCompact::CompactMovingSpace(uint8_t* page) {
       page = to_space_end;
     } else {
       DCHECK_EQ(kMode, kUffdMode);
-      page = GetFreePagesForMapping(gPageSize, use_move_ioctl_);
+      page = GetRecyclablePages(gPageSize, use_move_ioctl_);
       if (page == nullptr) {
         page = reserve_page;
       } else {
@@ -4563,7 +4580,7 @@ bool MarkCompact::SigbusHandler(siginfo_t* info) {
 
 size_t MarkCompact::ZeroAndMoveFreePage(uint8_t* dst, bool tolerate_einval) {
   DCHECK(use_move_ioctl_);
-  uint8_t* free_page = GetFreePagesForMapping(gPageSize, /*atomic=*/true);
+  uint8_t* free_page = GetRecyclablePages(gPageSize, /*atomic=*/true);
   if (free_page != nullptr) {
     DCHECK_ALIGNED_PARAM(free_page, gPageSize);
     free_page += from_space_slide_diff_;
@@ -4689,7 +4706,7 @@ void MarkCompact::ConcurrentlyProcessMovingPage(uint8_t* fault_page,
 
           if (fault_page < post_compact_end_) {
             if (use_move_ioctl_) {
-              uint8_t* free_page = GetFreePagesForMapping(gPageSize, /*atomic=*/true);
+              uint8_t* free_page = GetRecyclablePages(gPageSize, /*atomic=*/true);
               if (free_page != nullptr) {
                 buf = free_page + from_space_slide_diff_;
               } else {

@@ -708,10 +708,10 @@ class MarkCompact final : public GarbageCollector {
   // Scan old-gen for young GCs by looking for cards that are at least 'aged' in
   // the card-table corresponding to moving and non-moving spaces.
   void ScanOldGenObjects() REQUIRES(Locks::heap_bitmap_lock_) REQUIRES_SHARED(Locks::mutator_lock_);
-  // Return free pages from 'from-space' that can be used to copy objects into
-  // and then passed onto userfaultfd ioctls. Return nullptr if no page is
-  // available. Size must be a multiple of page-size.
-  uint8_t* GetFreePagesForMapping(size_t size, bool atomic);
+  // Return free pages from 'from-space' to be reused. Returns nullptr if 'size'
+  // worth of contiguous pages are not available. 'size' must be a multiple of
+  // page-size.
+  uint8_t* GetRecyclablePages(size_t size, bool atomic);
 
   // Verify that cards corresponding to objects containing references to
   // young-gen are dirty.
