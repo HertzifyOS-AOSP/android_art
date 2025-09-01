@@ -572,6 +572,27 @@ def create_setup_script(is64: bool):
 # We generate distinct scripts for all of the pre-defined variants.
 def create_ci_runner_scripts(out, mode, test_names):
   out.mkdir(parents=True)
+
+  # Very simple wrapper to isolate the test execution.
+  # It is not full/proper chroot, and uses simpler solution for now.
+  # It runs in 'unshare' and makes the mount points independent for this process.
+  # This means we keep most of the file system as-is, but re-mount only ART apex.
+  # (which is visible only to this process, so there is no unmount needed later)
+  chroot = out / "chroot.sh"
+  chroot.write_text("\n".join([
+    "DIR=`dirname -- $0`",
+    "chmod +x $DIR/apex/com.android.art/bin/*",
+    "unshare --mount sh $DIR/chroot2.sh $@",
+  ]))
+  chroot2 = out / "chroot2.sh"
+  chroot2.write_text("\n".join([
+    "DIR=`dirname -- $0`",
+    "mount --bind $DIR/apex/com.android.art /apex/com.android.art",
+    "script=$1",
+    "shift",
+    "sh $script $@",
+  ]))
+
   setup = out / "setup.sh"
   setup_script = create_setup_script(False) + create_setup_script(True)
   setup.write_text("\n".join(setup_script))
@@ -596,28 +617,32 @@ def create_ci_runner_scripts(out, mode, test_names):
     f"--{mode}",
   ]
   run([python, script] + args + test_names, env=envs, check=True)
+  DEVICE_DIR = "/data/local/tmp/art"
   tests = {
     "setup#compile-boot-image": {
       "adb push": [
-        [str(setup.relative_to(out)), "/data/local/tmp/art/setup.sh"]
+        ["../apex/com.android.art", f"{DEVICE_DIR}/apex/com.android.art"],
+        ["chroot.sh", f"{DEVICE_DIR}/chroot.sh"],
+        ["chroot2.sh", f"{DEVICE_DIR}/chroot2.sh"],
+        ["setup.sh", f"{DEVICE_DIR}/setup.sh"],
       ],
       "adb shell": [
-        ["rm", "-rf", "/data/local/tmp/art/test"],
-        ["sh", "/data/local/tmp/art/setup.sh"],
+        ["rm", "-rf", f"{DEVICE_DIR}/test"],
+        ["sh", f"{DEVICE_DIR}/chroot.sh", f"{DEVICE_DIR}/setup.sh"],
       ],
     },
   }
   for runner in Path(out).glob("*/*.sh"):
     test_name = runner.parent.name
     test_hash = runner.stem
-    target_dir = f"/data/local/tmp/art/test/{test_hash}"
+    target_dir = f"{DEVICE_DIR}/test/{test_hash}"
     tests[f"{test_name}#{test_hash}"] = {
       "dependencies": ["setup#compile-boot-image"],
       "adb push": [
         [f"../{mode}/{test_name}", f"{target_dir}"],
         [str(runner.relative_to(out)), f"{target_dir}/run.sh"]
       ],
-      "adb shell": [["sh", f"{target_dir}/run.sh"]],
+      "adb shell": [["sh", f"{DEVICE_DIR}/chroot.sh", f"{target_dir}/run.sh"]],
     }
   return tests
 
