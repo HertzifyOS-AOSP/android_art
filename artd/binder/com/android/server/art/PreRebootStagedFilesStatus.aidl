@@ -18,6 +18,16 @@ package com.android.server.art;
 
 /** @hide */
 parcelable PreRebootStagedFilesStatus {
+    /**
+     * The staged files were created for the same platform build and APEXes as what the device
+     * currently has.
+     */
+    boolean isCommittable;
+    /**
+     * A string describing why the staged files are not committable. Only applicable if
+     * {@code isCommittable} is false.
+     */
+    @utf8InCpp String reason;
     /** When the staged files were created, in milliseconds. */
     long createdAtMillis;
 }

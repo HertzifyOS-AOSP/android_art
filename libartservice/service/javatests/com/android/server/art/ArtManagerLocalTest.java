@@ -1665,11 +1665,19 @@ public class ArtManagerLocalTest {
     public void testCommitPreRebootStagedFiles() throws Exception {
         when(mSnapshot.getPackageStates()).thenReturn(Map.of(PKG_NAME_1, mPkgState1));
 
+        when(mArtd.checkPreRebootStagedFilesStatus())
+                .thenReturn(TestingUtils.createPreRebootStagedFilesStatus(
+                        true /* isCommittable */, 200 /* createdAtMillis */));
+
         mArtManagerLocal.onBoot(ReasonMapping.REASON_BOOT_AFTER_OTA,
                 null /* progressCallbackExecutor */, null /* progressCallback */);
 
+        InOrder inOrder = inOrder(mArtd);
+
+        inOrder.verify(mArtd).deletePreRebootStagedMetadata();
+
         // It should commit files for primary dex files on boot.
-        verify(mArtd).commitPreRebootStagedFiles(
+        inOrder.verify(mArtd).commitPreRebootStagedFiles(
                 inAnyOrderDeepEquals(
                         AidlUtils.buildArtifactsPathAsInput(
                                 "/somewhere/app/foo/base.apk", "arm64", mIsInDalvikCache),
@@ -1695,7 +1703,7 @@ public class ArtManagerLocalTest {
         simulateBroadcast(Intent.ACTION_BOOT_COMPLETED);
 
         // It should commit files for secondary dex files on boot complete.
-        verify(mArtd).commitPreRebootStagedFiles(
+        inOrder.verify(mArtd).commitPreRebootStagedFiles(
                 inAnyOrderDeepEquals(AidlUtils.buildArtifactsPathAsInput(
                         "/data/user/0/foo/1.apk", "arm64", false /* isInDalvikCache */)),
                 inAnyOrderDeepEquals(AidlUtils.toWritableProfilePath(
@@ -1705,10 +1713,47 @@ public class ArtManagerLocalTest {
     }
 
     @Test
+    public void testCommitPreRebootStagedFilesMissing() throws Exception {
+        lenient().when(mSnapshot.getPackageStates()).thenReturn(Map.of(PKG_NAME_1, mPkgState1));
+
+        when(mArtd.checkPreRebootStagedFilesStatus()).thenReturn(null);
+
+        mArtManagerLocal.onBoot(ReasonMapping.REASON_BOOT_AFTER_OTA,
+                null /* progressCallbackExecutor */, null /* progressCallback */);
+
+        mArtManagerLocal.systemReady();
+        simulateBroadcast(Intent.ACTION_BOOT_COMPLETED);
+
+        verify(mContext, never()).registerReceiver(any(), any());
+        verify(mArtd, never()).commitPreRebootStagedFiles(any(), any());
+    }
+
+    @Test
+    public void testCommitPreRebootStagedFilesObsolete() throws Exception {
+        lenient().when(mSnapshot.getPackageStates()).thenReturn(Map.of(PKG_NAME_1, mPkgState1));
+
+        when(mArtd.checkPreRebootStagedFilesStatus())
+                .thenReturn(TestingUtils.createPreRebootStagedFilesStatus(
+                        false /* isCommittable */, 200 /* createdAtMillis */));
+
+        mArtManagerLocal.onBoot(ReasonMapping.REASON_BOOT_AFTER_OTA,
+                null /* progressCallbackExecutor */, null /* progressCallback */);
+
+        verify(mArtd).cleanUpPreRebootStagedFiles();
+
+        mArtManagerLocal.systemReady();
+        simulateBroadcast(Intent.ACTION_BOOT_COMPLETED);
+
+        verify(mContext, never()).registerReceiver(any(), any());
+        verify(mArtd, never()).commitPreRebootStagedFiles(any(), any());
+    }
+
+    @Test
     public void testCommitPreRebootStagedFilesOnBootNotCalled() throws Exception {
         mArtManagerLocal.systemReady();
 
         verify(mContext, never()).registerReceiver(any(), any());
+        verify(mArtd, never()).commitPreRebootStagedFiles(any(), any());
     }
 
     @Test

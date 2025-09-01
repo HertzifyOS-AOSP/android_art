@@ -557,7 +557,8 @@ public class PreRebootDexoptJobTest {
         when(SystemProperties.getInt(eq("dalvik.vm.pr_dexopt_retention"), anyInt())).thenReturn(30);
         Duration createdAt = Duration.ofMillis(CURRENT_TIME_MS).minusDays(30).plusMillis(1);
         when(mArtd.checkPreRebootStagedFilesStatus())
-                .thenReturn(TestingUtils.createPreRebootStagedFilesStatus(createdAt.toMillis()));
+                .thenReturn(TestingUtils.createPreRebootStagedFilesStatus(
+                        false /* isCommittable */, createdAt.toMillis()));
 
         assertThat(mPreRebootDexoptJob.checkStagedFilesAge())
                 .isEqualTo(new StagedFilesAge(
@@ -569,7 +570,8 @@ public class PreRebootDexoptJobTest {
         when(SystemProperties.getInt(eq("dalvik.vm.pr_dexopt_retention"), anyInt())).thenReturn(30);
         Duration createdAt = Duration.ofMillis(CURRENT_TIME_MS).minusDays(30);
         when(mArtd.checkPreRebootStagedFilesStatus())
-                .thenReturn(TestingUtils.createPreRebootStagedFilesStatus(createdAt.toMillis()));
+                .thenReturn(TestingUtils.createPreRebootStagedFilesStatus(
+                        false /* isCommittable */, createdAt.toMillis()));
 
         assertThat(mPreRebootDexoptJob.checkStagedFilesAge())
                 .isEqualTo(new StagedFilesAge(Duration.ofDays(30) /* age */, true /* isExpired */));

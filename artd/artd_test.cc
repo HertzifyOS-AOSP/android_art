@@ -3083,6 +3083,11 @@ class ArtdPreRebootTest : public ArtdTest {
                 DoExecAndReturnCode(Contains(art_root_ + "/bin/odrefresh"), _, _))
         .Times(AtMost(1))
         .WillOnce(Return(0));
+
+    EXPECT_CALL(*mock_injector_, GetApexVersions)
+        .Times(AnyNumber())
+        .WillRepeatedly(Return("123456"));
+    EXPECT_CALL(*mock_pre_reboot_build_props_, GetProperty).Times(AnyNumber());
   }
 
   template <bool kExpectOk = true>
@@ -3171,6 +3176,8 @@ TEST_F(ArtdPreRebootTest, preRebootInit) {
                                   _,
                                   _))
       .WillOnce(Return(0));
+
+  EXPECT_CALL(*mock_injector_, GetApexVersions).WillOnce(Return("123456"));
 
   OR_FAIL(RunPreRebootInit());
 
@@ -3468,6 +3475,11 @@ TEST_F(ArtdPreRebootTest, mergeProfilesPreRebootReference) {
 
 TEST_F(ArtdPreRebootTest, checkPreRebootStagedFilesStatus) {
   SetUpDefaultsForInit();
+
+  EXPECT_CALL(*mock_pre_reboot_build_props_, GetProperty("ro.system.build.fingerprint"))
+      .WillOnce(Return("abcdefg"));
+  EXPECT_CALL(*mock_injector_, GetApexVersions).WillOnce(Return("123456/654321"));
+
   OR_FAIL(RunPreRebootInit());
 
   timespec mtime;
@@ -3476,11 +3488,17 @@ TEST_F(ArtdPreRebootTest, checkPreRebootStagedFilesStatus) {
               Fstat(FdOf(OR_FAIL(GetPreRebootStagedMetadataFile())), _))
       .WillOnce(DoAll(SetArgPointee<1>((struct stat){.st_mtim = mtime}), Return(0)));
 
+  EXPECT_CALL(*post_reboot_mock_props_, GetProperty("ro.system.build.fingerprint"))
+      .WillOnce(Return("abcdefg"));
+  EXPECT_CALL(*post_reboot_mock_injector_, GetApexVersions).WillOnce(Return("123456/654321"));
+
   std::optional<PreRebootStagedFilesStatus> aidl_return;
   ASSERT_STATUS_OK(post_reboot_artd_->checkPreRebootStagedFilesStatus(&aidl_return));
 
   // Check the result.
-  EXPECT_THAT(aidl_return, Optional(PreRebootStagedFilesStatus{.createdAtMillis = 1234567890}));
+  EXPECT_THAT(aidl_return,
+              Optional(AllOf(Field(&PreRebootStagedFilesStatus::isCommittable, true),
+                             Field(&PreRebootStagedFilesStatus::createdAtMillis, 1234567890))));
 
   // Test file deletion.
   ASSERT_TRUE(std::filesystem::exists(android_data_ + "/dalvik-cache/staged_metadata.txt.staged"));
@@ -3504,6 +3522,68 @@ TEST_F(ArtdPreRebootTest, checkPreRebootStagedFilesStatusError) {
 
   EXPECT_FALSE(status.isOk());
   EXPECT_EQ(status.getExceptionCode(), EX_SERVICE_SPECIFIC);
+}
+
+TEST_F(ArtdPreRebootTest, checkPreRebootStagedFilesStatusDifferentVersion) {
+  std::string file = OR_FAIL(GetPreRebootStagedMetadataFile());
+  ASSERT_NO_FATAL_FAILURE(CreateFile(file, "PRE_REBOOT_STAGED_METADATA_000"));
+
+  std::optional<PreRebootStagedFilesStatus> aidl_return;
+  ASSERT_STATUS_OK(post_reboot_artd_->checkPreRebootStagedFilesStatus(&aidl_return));
+
+  EXPECT_THAT(
+      aidl_return,
+      Optional(AllOf(Field(&PreRebootStagedFilesStatus::isCommittable, false),
+                     Field(&PreRebootStagedFilesStatus::reason,
+                           HasSubstr("Magic mismatch: Expected 'PRE_REBOOT_STAGED_METADATA_001', "
+                                     "got 'PRE_REBOOT_STAGED_METADATA_000'")))));
+}
+
+TEST_F(ArtdPreRebootTest, checkPreRebootStagedFilesStatusDifferentBuildFingerprint) {
+  SetUpDefaultsForInit();
+
+  EXPECT_CALL(*mock_pre_reboot_build_props_, GetProperty("ro.system.build.fingerprint"))
+      .WillOnce(Return("abcdefg"));
+  EXPECT_CALL(*mock_injector_, GetApexVersions).WillOnce(Return("123456/654321"));
+
+  OR_FAIL(RunPreRebootInit());
+
+  EXPECT_CALL(*post_reboot_mock_props_, GetProperty("ro.system.build.fingerprint"))
+      .WillOnce(Return("other"));
+
+  std::optional<PreRebootStagedFilesStatus> aidl_return;
+  ASSERT_STATUS_OK(post_reboot_artd_->checkPreRebootStagedFilesStatus(&aidl_return));
+
+  EXPECT_THAT(
+      aidl_return,
+      Optional(
+          AllOf(Field(&PreRebootStagedFilesStatus::isCommittable, false),
+                Field(&PreRebootStagedFilesStatus::reason,
+                      HasSubstr("Build fingerprint mismatch: Expected 'other', got 'abcdefg'")))));
+}
+
+TEST_F(ArtdPreRebootTest, checkPreRebootStagedFilesStatusDifferentApexTimestamps) {
+  SetUpDefaultsForInit();
+
+  EXPECT_CALL(*mock_pre_reboot_build_props_, GetProperty("ro.system.build.fingerprint"))
+      .WillOnce(Return("abcdefg"));
+  EXPECT_CALL(*mock_injector_, GetApexVersions).WillOnce(Return("123456/654321"));
+
+  OR_FAIL(RunPreRebootInit());
+
+  EXPECT_CALL(*post_reboot_mock_props_, GetProperty("ro.system.build.fingerprint"))
+      .WillOnce(Return("abcdefg"));
+  EXPECT_CALL(*post_reboot_mock_injector_, GetApexVersions).WillOnce(Return("other"));
+
+  std::optional<PreRebootStagedFilesStatus> aidl_return;
+  ASSERT_STATUS_OK(post_reboot_artd_->checkPreRebootStagedFilesStatus(&aidl_return));
+
+  EXPECT_THAT(
+      aidl_return,
+      Optional(AllOf(
+          Field(&PreRebootStagedFilesStatus::isCommittable, false),
+          Field(&PreRebootStagedFilesStatus::reason,
+                HasSubstr("APEX timestamps mismatch: Expected 'other', got '123456/654321'")))));
 }
 
 }  // namespace

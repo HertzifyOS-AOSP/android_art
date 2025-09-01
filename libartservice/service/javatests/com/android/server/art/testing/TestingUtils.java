@@ -188,8 +188,9 @@ public final class TestingUtils {
     }
 
     public static PreRebootStagedFilesStatus createPreRebootStagedFilesStatus(
-            long createdAtMillis) {
+            boolean isCommittable, long createdAtMillis) {
         var result = new PreRebootStagedFilesStatus();
+        result.isCommittable = isCommittable;
         result.createdAtMillis = createdAtMillis;
         return result;
     }

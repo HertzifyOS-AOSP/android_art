@@ -511,6 +511,97 @@ std::ostream& operator<<(std::ostream& os, const FdLogger& fd_logger) {
   return os;
 }
 
+// A helper class for handling the Pre-reboot staged metadata file.
+//
+// An older version of ART may access this file, but it doesn't need to understand its content.
+// Specifically, the file can be created by a new version of ART during Pre-reboot Dexopt and
+// checked by an old version of ART during background dexopt before the reboot. In this case,
+// background dexopt only needs to know the file creation time.
+//
+// The full file content only needs to be understood by the same version of ART.
+//
+// File format:
+//   <magic>
+//   <build_fingerprint>
+//   <apex_timestamps>
+class PreRebootStagedMetadata {
+ public:
+  static Result<PreRebootStagedFilesStatus> Check(ArtdInjector* injector,
+                                                  const std::string& path,
+                                                  std::string_view expected_build_fingerprint,
+                                                  std::string_view expected_apex_timestamps) {
+    std::unique_ptr<File> staged_metadata_file = OR_RETURN(OpenFileForReading(path));
+
+    struct stat st = OR_RETURN(injector->Fstat(*staged_metadata_file));
+    PreRebootStagedFilesStatus ret = {
+        .isCommittable = true,
+        .createdAtMillis = static_cast<int64_t>(NsToMs(TimeSpecToNs(st.st_mtim)))};
+
+    std::string content;
+    if (!ReadFileToString(path, &content)) {
+      return ErrnoErrorf("Failed to read '{}'", path);
+    }
+
+    std::vector<std::string_view> lines;
+    art::Split(content, '\n', &lines);
+
+    if (lines.size() > 0 && lines[0] != kMagic) {
+      ret.isCommittable = false;
+      ret.reason = ART_FORMAT("Magic mismatch: Expected '{}', got '{}'", kMagic, lines[0]);
+      return std::move(ret);
+    }
+
+    if (lines.size() != 3) {
+      return Errorf("Malformed content:\n{}", content);
+    }
+
+    std::string_view build_fingerprint = lines[1];
+    if (build_fingerprint != expected_build_fingerprint) {
+      ret.isCommittable = false;
+      ret.reason = ART_FORMAT("Build fingerprint mismatch: Expected '{}', got '{}'",
+                              expected_build_fingerprint,
+                              build_fingerprint);
+      return std::move(ret);
+    }
+
+    std::string_view apex_timestamps = lines[2];
+    if (apex_timestamps != expected_apex_timestamps) {
+      ret.isCommittable = false;
+      ret.reason = ART_FORMAT("APEX timestamps mismatch: Expected '{}', got '{}'",
+                              expected_apex_timestamps,
+                              apex_timestamps);
+      return std::move(ret);
+    }
+
+    return std::move(ret);
+  }
+
+  static Result<void> Save(const std::string& path,
+                           std::string_view build_fingerprint,
+                           std::string_view apex_timestamps) {
+    if (build_fingerprint.find('\n') != std::string::npos ||
+        apex_timestamps.find('\n') != std::string::npos) {
+      return Errorf("build_fingerprint and apex_timestamps cannot contain linebreaks");
+    }
+
+    std::string content = Join(std::array{kMagic, build_fingerprint, apex_timestamps}, '\n');
+
+    std::unique_ptr<NewFile> file =
+        OR_RETURN(NewFile::Create(path, FsPermission{.uid = -1, .gid = -1}));
+
+    if (!WriteStringToFd(content, file->Fd())) {
+      return ErrnoErrorf("Failed to write '{}'", path);
+    }
+
+    return file->CommitOrAbandon();
+  }
+
+ private:
+  static constexpr std::string_view kMagic = "PRE_REBOOT_STAGED_METADATA_001";
+
+  PreRebootStagedMetadata() {}
+};
+
 }  // namespace
 
 #define RETURN_FATAL_IF_PRE_REBOOT(options)                                 \
@@ -539,6 +630,14 @@ std::ostream& operator<<(std::ostream& os, const FdLogger& fd_logger) {
 
 #define RETURN_FATAL_IF_ARG_IS_PRE_REBOOT(arg, log_name) \
   RETURN_FATAL_IF_ARG_IS_PRE_REBOOT_IMPL(false, arg, log_name)
+
+Result<struct stat> ArtdInjector::Fstat(const File& file) {
+  struct stat st;
+  if (Fstat(file.Fd(), &st) != 0) {
+    return ErrnoErrorf("Unable to fstat file '{}'", file.GetPath());
+  }
+  return st;
+}
 
 Result<void> ArtdInjector::Restorecon(
     const std::string& path,
@@ -1032,7 +1131,7 @@ ndk::ScopedAStatus Artd::maybeCreateSdc(const OutputSecureDexMetadataCompanion& 
     }
     return NonFatal(sdm_file.error().message());
   }
-  struct stat sdm_st = OR_RETURN_NON_FATAL(Fstat(*sdm_file.value()));
+  struct stat sdm_st = OR_RETURN_NON_FATAL(injector_->Fstat(*sdm_file.value()));
 
   std::string error_msg;
   std::unique_ptr<SdcReader> sdc_reader = SdcReader::Load(sdc_path, &error_msg);
@@ -1132,7 +1231,7 @@ ndk::ScopedAStatus Artd::dexopt(
   std::unique_ptr<File> dex_file = OR_RETURN_NON_FATAL(OpenFileForReading(in_dexFile));
   args.Add("--zip-fd=%d", dex_file->Fd()).Add("--zip-location=%s", in_dexFile);
   fd_logger.Add(*dex_file);
-  struct stat dex_st = OR_RETURN_NON_FATAL(Fstat(*dex_file));
+  struct stat dex_st = OR_RETURN_NON_FATAL(injector_->Fstat(*dex_file));
   if ((dex_st.st_mode & S_IROTH) == 0) {
     if (fs_permission.isOtherReadable) {
       return NonFatal(ART_FORMAT(
@@ -1229,7 +1328,7 @@ ndk::ScopedAStatus Artd::dexopt(
     profile_file = OR_RETURN_NON_FATAL(OpenFileForReading(profile_path.value()));
     args.Add("--profile-file-fd=%d", profile_file->Fd());
     fd_logger.Add(*profile_file);
-    struct stat profile_st = OR_RETURN_NON_FATAL(Fstat(*profile_file));
+    struct stat profile_st = OR_RETURN_NON_FATAL(injector_->Fstat(*profile_file));
     if (fs_permission.isOtherReadable && (profile_st.st_mode & S_IROTH) == 0) {
       return NonFatal(ART_FORMAT(
           "Outputs cannot be other-readable because the profile '{}' is not other-readable",
@@ -1733,21 +1832,21 @@ ScopedAStatus Artd::checkPreRebootStagedFilesStatus(
   RETURN_FATAL_IF_PRE_REBOOT(options_);
 
   std::string staged_metadata_file_path = OR_RETURN_NON_FATAL(GetPreRebootStagedMetadataFile());
-  Result<std::unique_ptr<File>> file = OpenFileForReading(staged_metadata_file_path);
-  if (!file.ok()) {
-    if (errno == ENOENT) {
+  std::string build_fingerprint = props_->GetOrEmpty("ro.system.build.fingerprint");
+  std::string apex_timestamps = OR_RETURN_NON_FATAL(injector_->GetApexVersions(this));
+
+  Result<PreRebootStagedFilesStatus> status = PreRebootStagedMetadata::Check(
+      injector_.get(), staged_metadata_file_path, build_fingerprint, apex_timestamps);
+  if (!status.ok()) {
+    if (status.error().code() == ENOENT) {
       *_aidl_return = std::nullopt;
       return ScopedAStatus::ok();
     }
     return NonFatal(
-        ART_FORMAT("Failed to load Pre-reboot staged metadata: {}", file.error().message()));
+        ART_FORMAT("Failed to load Pre-reboot staged metadata: {}", status.error().message()));
   }
 
-  struct stat st = OR_RETURN_NON_FATAL(Fstat(**file));
-
-  *_aidl_return = PreRebootStagedFilesStatus{
-      .createdAtMillis = static_cast<int64_t>(NsToMs(TimeSpecToNs(st.st_mtim)))};
-
+  *_aidl_return = std::move(*status);
   return ScopedAStatus::ok();
 }
 
@@ -2047,14 +2146,6 @@ Result<int> Artd::ExecAndReturnCode(const std::vector<std::string>& args,
   return result.exit_code;
 }
 
-Result<struct stat> Artd::Fstat(const File& file) const {
-  struct stat st;
-  if (injector_->Fstat(file.Fd(), &st) != 0) {
-    return Errorf("Unable to fstat file '{}'", file.GetPath());
-  }
-  return st;
-}
-
 Result<void> Artd::BindMountNewDir(const std::string& source, const std::string& target) const {
   OR_RETURN(CreateDir(source));
   OR_RETURN(BindMount(source, target));
@@ -2119,10 +2210,11 @@ ScopedAStatus Artd::preRebootInit(
 
   if (!preparation_done) {
     std::string staged_metadata_file = OR_RETURN_NON_FATAL(GetPreRebootStagedMetadataFile());
-    if (!WriteStringToFile(/*content=*/"", staged_metadata_file)) {
-      return NonFatal(
-          ART_FORMAT("Failed to write '{}': {}", staged_metadata_file, strerror(errno)));
-    }
+    std::string apex_timestamps = OR_RETURN_NON_FATAL(injector_->GetApexVersions(this));
+    OR_RETURN_NON_FATAL(PreRebootStagedMetadata::Save(
+        staged_metadata_file,
+        pre_reboot_build_props_->GetOrEmpty("ro.system.build.fingerprint"),
+        apex_timestamps));
 
     if (!WriteStringToFile(/*content=*/"", preparation_done_file)) {
       return NonFatal(
