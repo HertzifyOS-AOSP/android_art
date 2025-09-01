@@ -144,69 +144,58 @@ class RegisterAllocatorLinearScan::SpillSlotData {
 
 class RegisterAllocatorLinearScan::LinearScan {
  public:
-  LinearScan(RegisterAllocatorLinearScan* register_allocator, RegisterType register_type)
-      : LinearScan(register_allocator,
-                   register_type,
-                   register_allocator->codegen_,
-                   register_allocator->allocator_) {}
+  struct CoreRegisterTag {};
+  struct FpRegisterTag {};
+
+  LinearScan(RegisterAllocatorLinearScan* register_allocator, CoreRegisterTag /*tag*/)
+      : codegen_(register_allocator->codegen_),
+        number_of_registers_(codegen_->GetNumberOfCoreRegisters()),
+        register_type_(RegisterType::kCoreRegister),
+        registers_blocked_for_call_(register_allocator->core_registers_blocked_for_call_),
+        available_registers_(register_allocator->available_core_registers_),
+        spill_slots_(&register_allocator->int_spill_slots_),
+        wide_spill_slots_(&register_allocator->long_spill_slots_),
+        unhandled_(TakeUnhandledIntervals(&register_allocator->unhandled_core_intervals_)),
+        handled_(register_allocator->allocator_->Adapter(kArenaAllocRegisterAllocator)),
+        active_(register_allocator->allocator_->Adapter(kArenaAllocRegisterAllocator)),
+        inactive_(register_allocator->allocator_->Adapter(kArenaAllocRegisterAllocator)),
+        instructions_from_positions_(register_allocator->liveness_.GetInstructionsFromPositions()),
+        registers_array_(register_allocator->allocator_->AllocArray<size_t>(
+            number_of_registers_, kArenaAllocRegisterAllocator)),
+        safepoints_(register_allocator->safepoints_) {
+    Init(register_allocator, register_allocator->physical_core_register_intervals_);
+  }
+
+  LinearScan(RegisterAllocatorLinearScan* register_allocator, FpRegisterTag /*tag*/)
+      : codegen_(register_allocator->codegen_),
+        number_of_registers_(codegen_->GetNumberOfFloatingPointRegisters()),
+        register_type_(RegisterType::kFpRegister),
+        registers_blocked_for_call_(register_allocator->fp_registers_blocked_for_call_),
+        available_registers_(register_allocator->available_fp_registers_),
+        spill_slots_(&register_allocator->float_spill_slots_),
+        wide_spill_slots_(&register_allocator->double_spill_slots_),
+        unhandled_(TakeUnhandledIntervals(&register_allocator->unhandled_fp_intervals_)),
+        handled_(register_allocator->allocator_->Adapter(kArenaAllocRegisterAllocator)),
+        active_(register_allocator->allocator_->Adapter(kArenaAllocRegisterAllocator)),
+        inactive_(register_allocator->allocator_->Adapter(kArenaAllocRegisterAllocator)),
+        instructions_from_positions_(register_allocator->liveness_.GetInstructionsFromPositions()),
+        registers_array_(register_allocator->allocator_->AllocArray<size_t>(
+            number_of_registers_, kArenaAllocRegisterAllocator)),
+        safepoints_(register_allocator->safepoints_) {
+    Init(register_allocator, register_allocator->physical_fp_register_intervals_);
+  }
 
   void Run();
 
  private:
-  LinearScan(RegisterAllocatorLinearScan* register_allocator,
-             RegisterType register_type,
-             CodeGenerator* codegen,
-             ScopedArenaAllocator* allocator);
-
-  static size_t GetNumberOfRegisters(CodeGenerator* codegen, RegisterType register_type) {
-    return register_type == RegisterType::kCoreRegister
-        ? codegen->GetNumberOfCoreRegisters()
-        : codegen->GetNumberOfFloatingPointRegisters();
-  }
-
-  static size_t GetRegistersBlockedForCall(
-      RegisterAllocatorLinearScan* register_allocator, RegisterType register_type) {
-    return register_type == RegisterType::kCoreRegister
-        ? register_allocator->core_registers_blocked_for_call_
-        : register_allocator->fp_registers_blocked_for_call_;
-  }
-
-  static uint32_t GetAvailableRegisters(
-      RegisterAllocatorLinearScan* register_allocator, RegisterType register_type) {
-     return register_type == RegisterType::kCoreRegister
-        ? register_allocator->available_core_registers_
-        : register_allocator->available_fp_registers_;
-  }
-
-  static ScopedArenaVector<SpillSlotData>* GetSpillSlots(
-      RegisterAllocatorLinearScan* register_allocator, RegisterType register_type) {
-    return register_type == RegisterType::kCoreRegister
-        ? &register_allocator->int_spill_slots_
-        : &register_allocator->float_spill_slots_;
-  }
-
-  static ScopedArenaVector<SpillSlotData>* GetWideSpillSlots(
-      RegisterAllocatorLinearScan* register_allocator, RegisterType register_type) {
-    return register_type == RegisterType::kCoreRegister
-        ? &register_allocator->long_spill_slots_
-        : &register_allocator->double_spill_slots_;
-  }
+  void Init(RegisterAllocatorLinearScan* register_allocator,
+            const ScopedArenaVector<LiveInterval*>& physical_register_intervals);
 
   static ScopedArenaVector<LiveInterval*> TakeUnhandledIntervals(
-      RegisterAllocatorLinearScan* register_allocator, RegisterType register_type) {
-    ScopedArenaVector<LiveInterval*>* source = register_type == RegisterType::kCoreRegister
-        ? &register_allocator->unhandled_core_intervals_
-        : &register_allocator->unhandled_fp_intervals_;
+      ScopedArenaVector<LiveInterval*>* source) {
     ScopedArenaVector<LiveInterval*> result(source->get_allocator());
     result.swap(*source);
     return result;
-  }
-
-  static ScopedArenaVector<LiveInterval*>* GetPhysicalRegisterIntervals(
-      RegisterAllocatorLinearScan* register_allocator, RegisterType register_type) {
-    return register_type == RegisterType::kCoreRegister
-        ? &register_allocator->physical_core_register_intervals_
-        : &register_allocator->physical_fp_register_intervals_;
   }
 
   ALWAYS_INLINE ScopedArenaVector<SpillSlotData>* GetSpillSlotsForType(DataType::Type type) {
@@ -477,34 +466,17 @@ void RegisterAllocatorLinearScan::AllocateRegistersInternal() {
   reserved_out_slots_ += static_cast<size_t>(pointer_size) / kVRegSize;
 
   // Most methods have some core register intervals, so run the core register pass unconditionally.
-  LinearScan(this, RegisterType::kCoreRegister).Run();
+  LinearScan(this, LinearScan::CoreRegisterTag()).Run();
   // Most methods do not have any FP register intervals, so try to avoid the overhead
   // of constructing the `LinearScan` object for the FP registers pass.
   if (!unhandled_fp_intervals_.empty()) {
-    LinearScan(this, RegisterType::kFpRegister).Run();
+    LinearScan(this, LinearScan::FpRegisterTag()).Run();
   }
 }
 
-RegisterAllocatorLinearScan::LinearScan::LinearScan(
+void RegisterAllocatorLinearScan::LinearScan::Init(
     RegisterAllocatorLinearScan* register_allocator,
-    RegisterType register_type,
-    CodeGenerator* codegen,
-    ScopedArenaAllocator* allocator)
-    : codegen_(codegen),
-      number_of_registers_(GetNumberOfRegisters(codegen, register_type)),
-      register_type_(register_type),
-      registers_blocked_for_call_(GetRegistersBlockedForCall(register_allocator, register_type)),
-      available_registers_(GetAvailableRegisters(register_allocator, register_type)),
-      spill_slots_(GetSpillSlots(register_allocator, register_type)),
-      wide_spill_slots_(GetWideSpillSlots(register_allocator, register_type)),
-      unhandled_(TakeUnhandledIntervals(register_allocator, register_type)),
-      handled_(allocator->Adapter(kArenaAllocRegisterAllocator)),
-      active_(allocator->Adapter(kArenaAllocRegisterAllocator)),
-      inactive_(allocator->Adapter(kArenaAllocRegisterAllocator)),
-      instructions_from_positions_(register_allocator->liveness_.GetInstructionsFromPositions()),
-      registers_array_(
-          allocator->AllocArray<size_t>(number_of_registers_, kArenaAllocRegisterAllocator)),
-      safepoints_(register_allocator->safepoints_) {
+    const ScopedArenaVector<LiveInterval*>& physical_register_intervals) {
   // Add intervals representing groups of physical registers blocked for calls,
   // catch blocks and irreducible loop headers.
   LiveInterval* block_registers_intervals[] = {
@@ -517,7 +489,7 @@ RegisterAllocatorLinearScan::LinearScan::LinearScan(
       inactive_.push_back(block_registers_interval);
     }
   }
-  for (LiveInterval* fixed : *GetPhysicalRegisterIntervals(register_allocator, register_type)) {
+  for (LiveInterval* fixed : physical_register_intervals) {
     if (fixed != nullptr) {
       // Fixed interval is added to inactive_ instead of unhandled_.
       // It's also the only type of inactive interval whose start position
