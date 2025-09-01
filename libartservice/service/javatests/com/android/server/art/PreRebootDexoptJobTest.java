@@ -22,6 +22,7 @@ import static com.google.common.truth.Truth.assertThat;
 
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.anyBoolean;
+import static org.mockito.Mockito.anyInt;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.isNull;
@@ -35,6 +36,7 @@ import android.app.job.JobInfo;
 import android.app.job.JobParameters;
 import android.app.job.JobScheduler;
 import android.os.CancellationSignal;
+import android.os.ServiceSpecificException;
 import android.os.SystemProperties;
 import android.os.UpdateEngine;
 import android.platform.test.annotations.DisableFlags;
@@ -44,12 +46,14 @@ import android.provider.DeviceConfig;
 
 import androidx.test.filters.SmallTest;
 
+import com.android.server.art.PreRebootDexoptJob.StagedFilesAge;
 import com.android.server.art.model.ArtFlags;
 import com.android.server.art.prereboot.PreRebootDriver;
 import com.android.server.art.prereboot.PreRebootDriver.PreRebootResult;
 import com.android.server.art.prereboot.PreRebootStatsReporter;
 import com.android.server.art.proto.PreRebootStats.Status;
 import com.android.server.art.testing.StaticMockitoRule;
+import com.android.server.art.testing.TestingUtils;
 
 import org.junit.Before;
 import org.junit.Rule;
@@ -59,6 +63,7 @@ import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnitRunner;
 
 import java.io.File;
+import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
@@ -68,16 +73,18 @@ import java.util.function.Supplier;
 @RunWith(MockitoJUnitRunner.StrictStubs.class)
 public class PreRebootDexoptJobTest {
     private static final long TIMEOUT_SEC = 10;
+    private static final long CURRENT_TIME_MS = 10000000000l;
 
     @Rule
-    public StaticMockitoRule mockitoRule = new StaticMockitoRule(
-            SystemProperties.class, BackgroundDexoptJobService.class, ArtJni.class);
+    public StaticMockitoRule mockitoRule =
+            new StaticMockitoRule(SystemProperties.class, BackgroundDexoptJobService.class);
     @Rule public final SetFlagsRule mSetFlagsRule = new SetFlagsRule();
 
     @Mock private PreRebootDexoptJob.Injector mInjector;
     @Mock private JobScheduler mJobScheduler;
     @Mock private PreRebootDriver mPreRebootDriver;
     @Mock private BackgroundDexoptJobService mJobService;
+    @Mock private IArtd mArtd;
     @Mock private UpdateEngine mUpdateEngine;
     @Mock private PreRebootStatsReporter.Injector mPreRebootStatsReporterInjector;
     private PreRebootDexoptJob mPreRebootDexoptJob;
@@ -98,18 +105,15 @@ public class PreRebootDexoptJobTest {
                         eq(DeviceConfig.NAMESPACE_RUNTIME), eq("enable_pr_dexopt"), anyBoolean()))
                 .thenReturn(false);
 
-        lenient()
-                .when(SystemProperties.getBoolean(
-                        eq("dalvik.vm.pre-reboot.has-started"), anyBoolean()))
-                .thenReturn(false);
-
         lenient().when(mInjector.getJobScheduler()).thenReturn(mJobScheduler);
         lenient().when(mInjector.getPreRebootDriver()).thenReturn(mPreRebootDriver);
         lenient()
                 .when(mInjector.getStatsReporter())
                 .thenAnswer(
                         invocation -> new PreRebootStatsReporter(mPreRebootStatsReporterInjector));
+        lenient().when(mInjector.getArtd()).thenReturn(mArtd);
         lenient().when(mInjector.getUpdateEngine()).thenReturn(mUpdateEngine);
+        lenient().when(mInjector.getCurrentTimeMillis()).thenReturn(CURRENT_TIME_MS);
 
         File tempFile = File.createTempFile("pre-reboot-stats", ".pb");
         tempFile.deleteOnExit();
@@ -257,19 +261,9 @@ public class PreRebootDexoptJobTest {
                     return new PreRebootResult(Status.STATUS_FINISHED);
                 });
 
-        when(ArtJni.setProperty("dalvik.vm.pre-reboot.has-started", "true"))
-                .thenAnswer(invocation -> {
-                    when(SystemProperties.getBoolean(
-                                 eq("dalvik.vm.pre-reboot.has-started"), anyBoolean()))
-                            .thenReturn(true);
-                    return null;
-                });
-
-        assertThat(mPreRebootDexoptJob.hasStarted()).isFalse();
         mPreRebootDexoptJob.onUpdateReadyImpl(otaSlot);
         mPreRebootDexoptJob.onStartJobImpl(mJobService, mJobParameters);
         assertThat(jobStarted.tryAcquire(TIMEOUT_SEC, TimeUnit.SECONDS)).isTrue();
-        assertThat(mPreRebootDexoptJob.hasStarted()).isTrue();
 
         mPreRebootDexoptJob.waitForRunningJob();
     }
@@ -556,5 +550,48 @@ public class PreRebootDexoptJobTest {
 
         // Now the new job should be cancelled.
         assertThat(jobExited.tryAcquire()).isTrue();
+    }
+
+    @Test
+    public void testCheckStagedFilesAge() throws Exception {
+        when(SystemProperties.getInt(eq("dalvik.vm.pr_dexopt_retention"), anyInt())).thenReturn(30);
+        Duration createdAt = Duration.ofMillis(CURRENT_TIME_MS).minusDays(30).plusMillis(1);
+        when(mArtd.checkPreRebootStagedFilesStatus())
+                .thenReturn(TestingUtils.createPreRebootStagedFilesStatus(createdAt.toMillis()));
+
+        assertThat(mPreRebootDexoptJob.checkStagedFilesAge())
+                .isEqualTo(new StagedFilesAge(
+                        Duration.ofDays(30).minusMillis(1) /* age */, false /* isExpired */));
+    }
+
+    @Test
+    public void testCheckStagedFilesAgeExpired() throws Exception {
+        when(SystemProperties.getInt(eq("dalvik.vm.pr_dexopt_retention"), anyInt())).thenReturn(30);
+        Duration createdAt = Duration.ofMillis(CURRENT_TIME_MS).minusDays(30);
+        when(mArtd.checkPreRebootStagedFilesStatus())
+                .thenReturn(TestingUtils.createPreRebootStagedFilesStatus(createdAt.toMillis()));
+
+        assertThat(mPreRebootDexoptJob.checkStagedFilesAge())
+                .isEqualTo(new StagedFilesAge(Duration.ofDays(30) /* age */, true /* isExpired */));
+    }
+
+    @Test
+    public void testCheckStagedFilesAgeMissing() throws Exception {
+        lenient()
+                .when(SystemProperties.getInt(eq("dalvik.vm.pr_dexopt_retention"), anyInt()))
+                .thenReturn(30);
+        when(mArtd.checkPreRebootStagedFilesStatus()).thenReturn(null);
+
+        assertThat(mPreRebootDexoptJob.checkStagedFilesAge()).isEqualTo(null);
+    }
+
+    @Test
+    public void testCheckStagedFilesAgeError() throws Exception {
+        lenient()
+                .when(SystemProperties.getInt(eq("dalvik.vm.pr_dexopt_retention"), anyInt()))
+                .thenReturn(30);
+        when(mArtd.checkPreRebootStagedFilesStatus()).thenThrow(ServiceSpecificException.class);
+
+        assertThat(mPreRebootDexoptJob.checkStagedFilesAge()).isEqualTo(null);
     }
 }

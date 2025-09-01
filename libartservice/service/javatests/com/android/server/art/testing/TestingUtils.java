@@ -23,6 +23,7 @@ import android.annotation.Nullable;
 import android.util.Log;
 
 import com.android.server.art.CopyAndRewriteProfileResult;
+import com.android.server.art.PreRebootStagedFilesStatus;
 
 import com.google.common.truth.Correspondence;
 import com.google.common.truth.Truth;
@@ -183,6 +184,13 @@ public final class TestingUtils {
         var result = new CopyAndRewriteProfileResult();
         result.status = CopyAndRewriteProfileResult.Status.BAD_PROFILE;
         result.errorMsg = errorMsg;
+        return result;
+    }
+
+    public static PreRebootStagedFilesStatus createPreRebootStagedFilesStatus(
+            long createdAtMillis) {
+        var result = new PreRebootStagedFilesStatus();
+        result.createdAtMillis = createdAtMillis;
         return result;
     }
 

@@ -78,6 +78,7 @@ public class ArtShellCommandTest {
     @Mock private PreRebootDriver mPreRebootDriver;
     @Mock private PreRebootStatsReporter mPreRebootStatsReporter;
     @Mock private JobScheduler mJobScheduler;
+    @Mock private IArtd mArtd;
     @Mock private UpdateEngine mUpdateEngine;
     @Mock private PreRebootDexoptJob.Injector mPreRebootDexoptJobInjector;
     @Mock private ArtManagerLocal.Injector mArtManagerLocalInjector;
@@ -123,6 +124,7 @@ public class ArtShellCommandTest {
                 .when(mPreRebootDexoptJobInjector.getStatsReporter())
                 .thenReturn(mPreRebootStatsReporter);
         lenient().when(mPreRebootDexoptJobInjector.getJobScheduler()).thenReturn(mJobScheduler);
+        lenient().when(mPreRebootDexoptJobInjector.getArtd()).thenReturn(mArtd);
         lenient().when(mPreRebootDexoptJobInjector.getUpdateEngine()).thenReturn(mUpdateEngine);
         mPreRebootDexoptJob = new PreRebootDexoptJob(mPreRebootDexoptJobInjector);
 

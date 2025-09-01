@@ -71,6 +71,7 @@ import com.android.internal.annotations.GuardedBy;
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.modules.utils.build.SdkLevel;
 import com.android.server.LocalManagerRegistry;
+import com.android.server.art.PreRebootDexoptJob.StagedFilesAge;
 import com.android.server.art.model.ArtFlags;
 import com.android.server.art.model.ArtManagedFileStats;
 import com.android.server.art.model.BatchDexoptParams;
@@ -1217,9 +1218,16 @@ public final class ArtManagerLocal {
                     runtimeArtifactsToKeep.addAll(artifactLists.runtimeArtifacts());
                 }
             }
+            boolean keepPreRebootStagedFiles = false;
+            if (SdkLevel.isAtLeastV()) {
+                StagedFilesAge stagedFilesAge =
+                        mInjector.getPreRebootDexoptJob().checkStagedFilesAge();
+                if (stagedFilesAge != null && !stagedFilesAge.isExpired()) {
+                    keepPreRebootStagedFiles = true;
+                }
+            }
             return mInjector.getArtd().cleanup(profilesToKeep, artifactsToKeep, vdexFilesToKeep,
-                    sdmSdcFilesToKeep, runtimeArtifactsToKeep,
-                    SdkLevel.isAtLeastV() && mInjector.getPreRebootDexoptJob().hasStarted());
+                    sdmSdcFilesToKeep, runtimeArtifactsToKeep, keepPreRebootStagedFiles);
         } catch (RemoteException e) {
             Utils.logArtdException(e);
             return 0;

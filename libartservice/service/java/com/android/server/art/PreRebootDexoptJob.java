@@ -16,6 +16,8 @@
 
 package com.android.server.art;
 
+import static com.android.server.art.IDexoptChrootSetup.CHROOT_DIR;
+
 import android.annotation.NonNull;
 import android.annotation.Nullable;
 import android.annotation.SuppressLint;
@@ -47,6 +49,8 @@ import com.android.server.art.prereboot.PreRebootStatsReporter;
 import com.android.server.art.proto.PreRebootStats.FailureReason;
 import com.android.server.art.proto.PreRebootStats.Status;
 
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.UUID;
@@ -137,9 +141,7 @@ public class PreRebootDexoptJob implements ArtServiceJobInterface {
         // Recycle the thread if it's not used for `keepAliveTime`.
         mSerializedExecutor.allowsCoreThreadTimeOut();
         mExecutor.allowsCoreThreadTimeOut();
-        if (hasStarted()) {
-            maybeCleanUpChrootAsyncForStartup();
-        }
+        maybeCleanUpChrootAsyncForStartup();
     }
 
     @Override
@@ -269,6 +271,9 @@ public class PreRebootDexoptJob implements ArtServiceJobInterface {
 
     /** Cleans up chroot if it exists. Only expected to be called on system server startup. */
     private synchronized void maybeCleanUpChrootAsyncForStartup() {
+        if (!Files.exists(Paths.get(CHROOT_DIR))) {
+            return;
+        }
         // We only get here when there was a system server restart (probably due to a crash). In
         // this case, it's possible that a previous Pre-reboot Dexopt job didn't end normally and
         // left over a chroot, so we need to clean it up.
@@ -388,7 +393,6 @@ public class PreRebootDexoptJob implements ArtServiceJobInterface {
         var cancellationSignal = mCancellationSignal = new CancellationSignal();
         mIsUpdateEngineReady = isUpdateEngineReady;
         mRunningJob = new CompletableFuture().runAsync(() -> {
-            markHasStarted(true);
             PreRebootStatsReporter statsReporter = mInjector.getStatsReporter();
             try {
                 statsReporter.recordJobStarted();
@@ -614,28 +618,37 @@ public class PreRebootDexoptJob implements ArtServiceJobInterface {
     @GuardedBy("this")
     private void resetLocked() {
         mInjector.getStatsReporter().delete();
-        if (hasStarted()) {
-            try {
+        try {
+            if (mInjector.getArtd().checkPreRebootStagedFilesStatus() != null) {
                 mInjector.getArtd().cleanUpPreRebootStagedFiles();
-            } catch (ServiceSpecificException | RemoteException e) {
-                AsLog.e("Failed to clean up obsolete Pre-reboot staged files", e);
             }
-            markHasStarted(false);
+        } catch (ServiceSpecificException | RemoteException e) {
+            AsLog.e("Failed to clean up obsolete Pre-reboot staged files", e);
         }
     }
 
     /**
-     * Whether the job has started at least once, meaning the device is expected to have staged
-     * files, no matter it succeed, failed, or cancelled.
-     *
-     * This flag is survives across system server restarts, but not device reboots.
+     * Returns the age of the staged files and whether they are expired.
      */
-    public boolean hasStarted() {
-        return SystemProperties.getBoolean("dalvik.vm.pre-reboot.has-started", false /* def */);
-    }
-
-    private void markHasStarted(boolean value) {
-        ArtJni.setProperty("dalvik.vm.pre-reboot.has-started", String.valueOf(value));
+    public StagedFilesAge checkStagedFilesAge() {
+        int retentionDays = SystemProperties.getInt("dalvik.vm.pr_dexopt_retention", 30 /* def */);
+        Duration retentionPeriod = Duration.ofDays(Math.max(retentionDays, 0));
+        try {
+            PreRebootStagedFilesStatus status =
+                    mInjector.getArtd().checkPreRebootStagedFilesStatus();
+            if (status == null) {
+                return null;
+            }
+            Duration age =
+                    Duration.ofMillis(mInjector.getCurrentTimeMillis() - status.createdAtMillis);
+            return new StagedFilesAge(age, age.compareTo(retentionPeriod) >= 0);
+        } catch (ServiceSpecificException | RemoteException e) {
+            AsLog.e("Failed to check Pre-reboot staged files status", e);
+            // This method is for deciding whether we should keep the staged files. If we get an
+            // error here, we will probably get the same when committing the staged files, so
+            // there's no point to keep them. We return null here to get them removed.
+            return null;
+        }
     }
 
     @GuardedBy("this")
@@ -648,6 +661,8 @@ public class PreRebootDexoptJob implements ArtServiceJobInterface {
             super(message);
         }
     }
+
+    public record StagedFilesAge(Duration age, boolean isExpired) {}
 
     /**
      * Injector pattern for testing purpose.
@@ -695,6 +710,10 @@ public class PreRebootDexoptJob implements ArtServiceJobInterface {
         @NonNull
         public UpdateEngine getUpdateEngine() {
             return new UpdateEngine();
+        }
+
+        public long getCurrentTimeMillis() {
+            return System.currentTimeMillis();
         }
     }
 }

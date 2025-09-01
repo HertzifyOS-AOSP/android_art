@@ -310,6 +310,12 @@ class Artd : public aidl::com::android::server::art::BnArtd {
   ndk::ScopedAStatus checkPreRebootSystemRequirements(const std::string& in_chrootDir,
                                                       bool* _aidl_return) override;
 
+  ndk::ScopedAStatus checkPreRebootStagedFilesStatus(
+      std::optional<aidl::com::android::server::art::PreRebootStagedFilesStatus>* _aidl_return)
+      override;
+
+  ndk::ScopedAStatus deletePreRebootStagedMetadata() override;
+
   ndk::ScopedAStatus preRebootInit(
       const std::shared_ptr<aidl::com::android::server::art::IArtdCancellationSignal>&
           in_cancellationSignal,

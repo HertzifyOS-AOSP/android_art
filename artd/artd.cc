@@ -118,6 +118,7 @@ using ::aidl::com::android::server::art::MergeProfileOptions;
 using ::aidl::com::android::server::art::OutputArtifacts;
 using ::aidl::com::android::server::art::OutputProfile;
 using ::aidl::com::android::server::art::OutputSecureDexMetadataCompanion;
+using ::aidl::com::android::server::art::PreRebootStagedFilesStatus;
 using ::aidl::com::android::server::art::PriorityClass;
 using ::aidl::com::android::server::art::ProfilePath;
 using ::aidl::com::android::server::art::RuntimeArtifactsPath;
@@ -1727,6 +1728,34 @@ ScopedAStatus Artd::checkPreRebootSystemRequirements(const std::string& in_chroo
   return ScopedAStatus::ok();
 }
 
+ScopedAStatus Artd::checkPreRebootStagedFilesStatus(
+    std::optional<PreRebootStagedFilesStatus>* _aidl_return) {
+  RETURN_FATAL_IF_PRE_REBOOT(options_);
+
+  std::string staged_metadata_file_path = OR_RETURN_NON_FATAL(GetPreRebootStagedMetadataFile());
+  Result<std::unique_ptr<File>> file = OpenFileForReading(staged_metadata_file_path);
+  if (!file.ok()) {
+    if (errno == ENOENT) {
+      *_aidl_return = std::nullopt;
+      return ScopedAStatus::ok();
+    }
+    return NonFatal(
+        ART_FORMAT("Failed to load Pre-reboot staged metadata: {}", file.error().message()));
+  }
+
+  struct stat st = OR_RETURN_NON_FATAL(Fstat(**file));
+
+  *_aidl_return = PreRebootStagedFilesStatus{
+      .createdAtMillis = static_cast<int64_t>(NsToMs(TimeSpecToNs(st.st_mtim)))};
+
+  return ScopedAStatus::ok();
+}
+
+ScopedAStatus Artd::deletePreRebootStagedMetadata() {
+  DeleteFile(OR_RETURN_NON_FATAL(GetPreRebootStagedMetadataFile()));
+  return ScopedAStatus::ok();
+}
+
 Result<void> Artd::Start() {
   OR_RETURN(SetLogVerbosity());
   MemMap::Init();
@@ -2089,6 +2118,12 @@ ScopedAStatus Artd::preRebootInit(
   }
 
   if (!preparation_done) {
+    std::string staged_metadata_file = OR_RETURN_NON_FATAL(GetPreRebootStagedMetadataFile());
+    if (!WriteStringToFile(/*content=*/"", staged_metadata_file)) {
+      return NonFatal(
+          ART_FORMAT("Failed to write '{}': {}", staged_metadata_file, strerror(errno)));
+    }
+
     if (!WriteStringToFile(/*content=*/"", preparation_done_file)) {
       return NonFatal(
           ART_FORMAT("Failed to write '{}': {}", preparation_done_file, strerror(errno)));

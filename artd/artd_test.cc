@@ -29,6 +29,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -93,6 +94,7 @@ using ::aidl::com::android::server::art::IArtdCancellationSignal;
 using ::aidl::com::android::server::art::IArtdNotification;
 using ::aidl::com::android::server::art::OutputArtifacts;
 using ::aidl::com::android::server::art::OutputProfile;
+using ::aidl::com::android::server::art::PreRebootStagedFilesStatus;
 using ::aidl::com::android::server::art::PriorityClass;
 using ::aidl::com::android::server::art::ProfilePath;
 using ::aidl::com::android::server::art::RuntimeArtifactsPath;
@@ -130,6 +132,7 @@ using ::testing::Matcher;
 using ::testing::MockFunction;
 using ::testing::NiceMock;
 using ::testing::Not;
+using ::testing::Optional;
 using ::testing::Property;
 using ::testing::ResultOf;
 using ::testing::Return;
@@ -408,6 +411,7 @@ class ArtdTest : public CommonArtTest {
     // Use an arbitrary existing directory as Android data.
     android_data_ = scratch_path_ + "/data";
     std::filesystem::create_directories(android_data_);
+    std::filesystem::create_directories(android_data_ + "/dalvik-cache");
     setenv("ANDROID_DATA", android_data_.c_str(), /*overwrite=*/1);
 
     // Use an arbitrary existing directory as Android expand.
@@ -2457,6 +2461,7 @@ TEST_F(ArtdCleanupTest, cleanupKeepingPreRebootStagedFiles) {
       android_expand_ +
       "/123456-7890/app/~~nkfeankfna==/com.android.bar-jfoeaofiew==/oat/arm64/base.odex.staged");
   CreateGcKeptFile(android_data_ + "/user_de/0/com.android.foo/aaa/oat/arm64/2.odex.staged");
+  CreateGcKeptFile(android_data_ + "/dalvik-cache/staged_metadata.txt.staged");
 
   ASSERT_NO_FATAL_FAILURE(RunCleanup(/*keepPreRebootStagedFiles=*/true));
   Verify();
@@ -2468,6 +2473,7 @@ TEST_F(ArtdCleanupTest, cleanupRemovingPreRebootStagedFiles) {
       android_expand_ +
       "/123456-7890/app/~~nkfeankfna==/com.android.bar-jfoeaofiew==/oat/arm64/base.odex.staged");
   CreateGcRemovedFile(android_data_ + "/user_de/0/com.android.foo/aaa/oat/arm64/2.odex.staged");
+  CreateGcRemovedFile(android_data_ + "/dalvik-cache/staged_metadata.txt.staged");
 
   ASSERT_NO_FATAL_FAILURE(RunCleanup(/*keepPreRebootStagedFiles=*/false));
   Verify();
@@ -2490,6 +2496,9 @@ TEST_F(ArtdCleanupTest, cleanUpPreRebootStagedFiles) {
       android_expand_ +
       "/123456-7890/app/~~nkfeankfna==/com.android.bar-jfoeaofiew==/oat/arm64/base.odex.staged");
   CreateGcRemovedFile(android_data_ + "/user_de/0/com.android.foo/aaa/oat/arm64/2.odex.staged");
+
+  // Pre-reboot staged metadata file.
+  CreateGcRemovedFile(android_data_ + "/dalvik-cache/staged_metadata.txt.staged");
 
   ASSERT_STATUS_OK(artd_->cleanUpPreRebootStagedFiles());
   Verify();
@@ -3003,6 +3012,7 @@ class ArtdPreRebootTest : public ArtdTest {
   void SetUp() override {
     ArtdTest::SetUp();
 
+    post_reboot_mock_injector_ = mock_injector_;
     auto mock_injector = std::make_unique<MockArtdInjector>();
     mock_injector_ = mock_injector.get();
 
@@ -3014,6 +3024,7 @@ class ArtdPreRebootTest : public ArtdTest {
     ON_CALL(*mock_injector_, GetInitEnvironRcPath)
         .WillByDefault(Return(init_environ_rc_path_.c_str()));
 
+    post_reboot_mock_props_ = mock_props_;
     auto mock_props = std::make_unique<NiceMock<MockSystemProperties>>();
     mock_props_ = mock_props.get();
     ON_CALL(*mock_props_, GetProperty).WillByDefault(Return(""));
@@ -3037,6 +3048,8 @@ class ArtdPreRebootTest : public ArtdTest {
     ON_CALL(*mock_pre_reboot_build_props_, GetProperty("ro.build.version.known_codenames"))
         .WillByDefault(Return("VanillaIceCream,Baklava"));
 
+    // Backup the post-reboot artd and create a pre-reboot artd.
+    post_reboot_artd_ = artd_;
     artd_ =
         ndk::SharedRefBase::make<Artd>(Options{.is_pre_reboot = true}, std::move(mock_injector));
 
@@ -3093,6 +3106,10 @@ class ArtdPreRebootTest : public ArtdTest {
 
     return status;
   }
+
+  MockArtdInjector* post_reboot_mock_injector_;
+  MockSystemProperties* post_reboot_mock_props_;
+  std::shared_ptr<Artd> post_reboot_artd_;
 
   std::string pre_reboot_tmp_dir_;
   std::string init_environ_rc_path_;
@@ -3447,6 +3464,46 @@ TEST_F(ArtdPreRebootTest, mergeProfilesPreRebootReference) {
   EXPECT_THAT(output_profile.profilePath.tmpPath,
               ContainsRegex(R"re(/primary\.prof\.staged\.\w+\.tmp$)re"));
   CheckContent(output_profile.profilePath.tmpPath, "merged");
+}
+
+TEST_F(ArtdPreRebootTest, checkPreRebootStagedFilesStatus) {
+  SetUpDefaultsForInit();
+  OR_FAIL(RunPreRebootInit());
+
+  timespec mtime;
+  InitTimeSpec(/*absolute=*/false, /*clock=*/0, /*ms=*/1234567890, /*ns=*/0, &mtime);
+  EXPECT_CALL(*post_reboot_mock_injector_,
+              Fstat(FdOf(OR_FAIL(GetPreRebootStagedMetadataFile())), _))
+      .WillOnce(DoAll(SetArgPointee<1>((struct stat){.st_mtim = mtime}), Return(0)));
+
+  std::optional<PreRebootStagedFilesStatus> aidl_return;
+  ASSERT_STATUS_OK(post_reboot_artd_->checkPreRebootStagedFilesStatus(&aidl_return));
+
+  // Check the result.
+  EXPECT_THAT(aidl_return, Optional(PreRebootStagedFilesStatus{.createdAtMillis = 1234567890}));
+
+  // Test file deletion.
+  ASSERT_TRUE(std::filesystem::exists(android_data_ + "/dalvik-cache/staged_metadata.txt.staged"));
+  ASSERT_STATUS_OK(post_reboot_artd_->deletePreRebootStagedMetadata());
+  ASSERT_FALSE(std::filesystem::exists(android_data_ + "/dalvik-cache/staged_metadata.txt.staged"));
+}
+
+TEST_F(ArtdPreRebootTest, checkPreRebootStagedFilesStatusMissing) {
+  std::optional<PreRebootStagedFilesStatus> aidl_return;
+  ASSERT_STATUS_OK(post_reboot_artd_->checkPreRebootStagedFilesStatus(&aidl_return));
+
+  EXPECT_EQ(aidl_return, std::nullopt);
+}
+
+TEST_F(ArtdPreRebootTest, checkPreRebootStagedFilesStatusError) {
+  auto scoped_inaccessible = ScopedInaccessible(android_data_ + "/dalvik-cache");
+  auto scoped_unroot = ScopedUnroot();
+
+  std::optional<PreRebootStagedFilesStatus> aidl_return;
+  ndk::ScopedAStatus status = post_reboot_artd_->checkPreRebootStagedFilesStatus(&aidl_return);
+
+  EXPECT_FALSE(status.isOk());
+  EXPECT_EQ(status.getExceptionCode(), EX_SERVICE_SPECIFIC);
 }
 
 }  // namespace

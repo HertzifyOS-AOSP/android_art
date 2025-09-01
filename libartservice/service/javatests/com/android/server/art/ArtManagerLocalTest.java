@@ -79,6 +79,7 @@ import androidx.test.filters.SmallTest;
 import com.android.art.flags.Flags;
 import com.android.modules.utils.pm.PackageStateModulesUtils;
 import com.android.server.art.DexUseManagerLocal.DexLoader;
+import com.android.server.art.PreRebootDexoptJob.StagedFilesAge;
 import com.android.server.art.model.ArtFlags;
 import com.android.server.art.model.ArtManagedFileStats;
 import com.android.server.art.model.BatchDexoptParams;
@@ -116,6 +117,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -1291,13 +1293,15 @@ public class ArtManagerLocalTest {
 
     @Test
     public void testCleanupKeepPreRebootStagedFiles() throws Exception {
-        when(mPreRebootDexoptJob.hasStarted()).thenReturn(true);
+        when(mPreRebootDexoptJob.checkStagedFilesAge())
+                .thenReturn(new StagedFilesAge(Duration.ZERO /* age */, false /* isExpired */));
         testCleanup(true /* keepPreRebootStagedFiles */);
     }
 
     @Test
     public void testCleanupRemovePreRebootStagedFiles() throws Exception {
-        when(mPreRebootDexoptJob.hasStarted()).thenReturn(false);
+        when(mPreRebootDexoptJob.checkStagedFilesAge())
+                .thenReturn(new StagedFilesAge(Duration.ZERO /* age */, true /* isExpired */));
         testCleanup(false /* keepPreRebootStagedFiles */);
     }
 
@@ -1373,7 +1377,7 @@ public class ArtManagerLocalTest {
 
     @Test
     public void testCleanupDmAndSdm() throws Exception {
-        when(mPreRebootDexoptJob.hasStarted()).thenReturn(false);
+        when(mPreRebootDexoptJob.checkStagedFilesAge()).thenReturn(null);
 
         // It should keep the SDM file, but not runtime images.
         doReturn(createGetDexoptStatusResult("speed-profile", "cloud", "location",
