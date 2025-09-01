@@ -408,6 +408,12 @@ void RegisterAllocatorLinearScan::BlockRegister(Location location,
                                                 bool will_call) {
   DCHECK(location.IsRegister() || location.IsFpuRegister());
   int reg = location.reg();
+  // Ensure that an explicit input/output/temporary register is marked as being allocated.
+  if (location.IsRegister()) {
+    codegen_->AddAllocatedCoreRegister(reg);
+  } else {
+    codegen_->AddAllocatedFpuRegister(reg);
+  }
   if (will_call) {
     uint32_t registers_blocked_for_call =
         location.IsRegister() ? core_registers_blocked_for_call_ : fp_registers_blocked_for_call_;
@@ -587,8 +593,6 @@ void RegisterAllocatorLinearScan::CheckForTempLiveIntervals(HInstruction* instru
     Location temp = locations->GetTemp(i);
     if (temp.IsRegister() || temp.IsFpuRegister()) {
       BlockRegister(temp, position, will_call);
-      // Ensure that an explicit temporary register is marked as being allocated.
-      codegen_->AddAllocatedRegister(temp);
     } else {
       DCHECK(temp.IsUnallocated());
       switch (temp.GetPolicy()) {
@@ -630,14 +634,9 @@ void RegisterAllocatorLinearScan::CheckForFixedInputs(HInstruction* instruction,
     Location input = locations->InAt(i);
     if (input.IsRegister() || input.IsFpuRegister()) {
       BlockRegister(input, position, will_call);
-      // Ensure that an explicit input register is marked as being allocated.
-      codegen_->AddAllocatedRegister(input);
     } else if (input.IsPair()) {
       BlockRegister(input.ToLow(), position, will_call);
       BlockRegister(input.ToHigh(), position, will_call);
-      // Ensure that an explicit input register pair is marked as being allocated.
-      codegen_->AddAllocatedRegister(input.ToLow());
-      codegen_->AddAllocatedRegister(input.ToHigh());
     }
   }
 }
@@ -674,16 +673,11 @@ void RegisterAllocatorLinearScan::CheckForFixedOutput(HInstruction* instruction,
     current->SetFrom(position + kLivenessPositionOfFixedOutput);
     current->SetRegisters(1u << output.reg());
     BlockRegister(output, position, will_call);
-    // Ensure that an explicit output register is marked as being allocated.
-    codegen_->AddAllocatedRegister(output);
   } else if (output.IsPair()) {
     current->SetFrom(position + kLivenessPositionOfFixedOutput);
     current->SetRegisters((1u << output.low()) | (1u << output.high()));
     BlockRegister(output.ToLow(), position, will_call);
     BlockRegister(output.ToHigh(), position, will_call);
-    // Ensure that an explicit output register pair is marked as being allocated.
-    codegen_->AddAllocatedRegister(output.ToLow());
-    codegen_->AddAllocatedRegister(output.ToHigh());
   } else if (output.IsStackSlot() || output.IsDoubleStackSlot()) {
     current->SetSpillSlot(output.GetStackIndex());
   } else {
@@ -963,9 +957,9 @@ void RegisterAllocatorLinearScan::LinearScan::Run() {
     }
   }
   if (register_type_ == RegisterType::kCoreRegister) {
-    codegen_->AddAllocatedCoreRegisters(allocated_registers);
+    codegen_->AddAllocatedCoreRegisterSet(allocated_registers);
   } else {
-    codegen_->AddAllocatedFpuRegisters(allocated_registers);
+    codegen_->AddAllocatedFpuRegisterSet(allocated_registers);
   }
 }
 

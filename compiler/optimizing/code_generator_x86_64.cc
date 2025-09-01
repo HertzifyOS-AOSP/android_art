@@ -70,7 +70,7 @@ static constexpr int kC2ConditionMask = 0x400;
 static RegisterSet OneRegInReferenceOutSaveEverythingCallerSaves() {
   // Custom calling convention: RAX serves as both input and output.
   RegisterSet caller_saves = RegisterSet::Empty();
-  caller_saves.Add(Location::RegisterLocation(RAX));
+  caller_saves.AddCoreRegister(RAX);
   return caller_saves;
 }
 
@@ -1632,7 +1632,7 @@ CodeGeneratorX86_64::CodeGeneratorX86_64(HGraph* graph,
       jit_method_type_patches_(graph->GetAllocator()->Adapter(kArenaAllocCodeGenerator)),
       fixups_to_jump_tables_(graph->GetAllocator()->Adapter(kArenaAllocCodeGenerator)) {
   SetupBlockedRegisters();
-  AddAllocatedRegister(Location::RegisterLocation(kFakeReturnRegister));
+  AddAllocatedCoreRegister(kFakeReturnRegister);
 }
 
 InstructionCodeGeneratorX86_64::InstructionCodeGeneratorX86_64(HGraph* graph,
@@ -2404,7 +2404,7 @@ void LocationsBuilderX86_64::VisitDeoptimize(HDeoptimize* deoptimize) {
       LocationSummary::Create(allocator_, deoptimize, LocationSummary::kCallOnSlowPath);
   InvokeRuntimeCallingConvention calling_convention;
   RegisterSet caller_saves = RegisterSet::Empty();
-  caller_saves.Add(Location::RegisterLocation(calling_convention.GetRegisterAt(0)));
+  caller_saves.AddCoreRegister(calling_convention.GetRegisterAt(0));
   locations->SetCustomSlowPathCallerSaves(caller_saves);
   if (IsBooleanValueOrMaterializedCondition(deoptimize->InputAt(0))) {
     locations->SetInAt(0, Location::Any());
@@ -6173,8 +6173,8 @@ void InstructionCodeGeneratorX86_64::VisitArrayLength(HArrayLength* instruction)
 void LocationsBuilderX86_64::VisitBoundsCheck(HBoundsCheck* instruction) {
   RegisterSet caller_saves = RegisterSet::Empty();
   InvokeRuntimeCallingConvention calling_convention;
-  caller_saves.Add(Location::RegisterLocation(calling_convention.GetRegisterAt(0)));
-  caller_saves.Add(Location::RegisterLocation(calling_convention.GetRegisterAt(1)));
+  caller_saves.AddCoreRegister(calling_convention.GetRegisterAt(0));
+  caller_saves.AddCoreRegister(calling_convention.GetRegisterAt(1));
   LocationSummary* locations = codegen_->CreateThrowingSlowPathLocations(instruction, caller_saves);
   locations->SetInAt(0, Location::RegisterOrConstant(instruction->InputAt(0)));
   HInstruction* length = instruction->InputAt(1);

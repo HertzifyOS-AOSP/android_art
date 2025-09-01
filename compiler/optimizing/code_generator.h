@@ -264,9 +264,9 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
   size_t GetNumberOfFloatingPointRegisters() const { return number_of_fpu_registers_; }
 
   virtual void ComputeSpillMask() {
-    core_spill_mask_ = allocated_registers_.GetCoreRegisters() & core_callee_save_mask_;
+    core_spill_mask_ = allocated_registers_.GetCoreRegisterSet() & core_callee_save_mask_;
     DCHECK_NE(core_spill_mask_, 0u) << "At least the return address register must be saved";
-    fpu_spill_mask_ = allocated_registers_.GetFloatingPointRegisters() & fpu_callee_save_mask_;
+    fpu_spill_mask_ = allocated_registers_.GetFloatingPointRegisterSet() & fpu_callee_save_mask_;
   }
 
   virtual void DumpCoreRegister(std::ostream& stream, int reg) const = 0;
@@ -325,13 +325,13 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
            (locations->Intrinsified() && locations->CallsOnMainAndSlowPath() &&
                !locations->HasCustomSlowPathCallingConvention()));
     uint32_t live_registers = core_registers
-        ? locations->GetLiveRegisters()->GetCoreRegisters()
-        : locations->GetLiveRegisters()->GetFloatingPointRegisters();
+        ? locations->GetLiveRegisters()->GetCoreRegisterSet()
+        : locations->GetLiveRegisters()->GetFloatingPointRegisterSet();
     if (locations->HasCustomSlowPathCallingConvention()) {
       // Save only the live registers that the custom calling convention wants us to save.
       uint32_t caller_saves = core_registers
-          ? locations->GetCustomSlowPathCallerSaves().GetCoreRegisters()
-          : locations->GetCustomSlowPathCallerSaves().GetFloatingPointRegisters();
+          ? locations->GetCustomSlowPathCallerSaves().GetCoreRegisterSet()
+          : locations->GetCustomSlowPathCallerSaves().GetFloatingPointRegisterSet();
       return live_registers & caller_saves;
     } else {
       // Default ABI, we need to spill non-callee-save live registers.
@@ -546,16 +546,20 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
   static void ValidateInvokeRuntimeWithoutRecordingPcInfo(HInstruction* instruction,
                                                           SlowPathCode* slow_path);
 
-  void AddAllocatedCoreRegisters(uint32_t registers) {
-    allocated_registers_.AddCoreRegisters(registers);
+  void AddAllocatedCoreRegisterSet(uint32_t registers) {
+    allocated_registers_.AddCoreRegisterSet(registers);
   }
 
-  void AddAllocatedFpuRegisters(uint32_t registers) {
-    allocated_registers_.AddFpuRegisters(registers);
+  void AddAllocatedFpuRegisterSet(uint32_t registers) {
+    allocated_registers_.AddFpuRegisterSet(registers);
   }
 
-  void AddAllocatedRegister(Location location) {
-    allocated_registers_.Add(location);
+  void AddAllocatedCoreRegister(uint32_t reg) {
+    allocated_registers_.AddCoreRegister(reg);
+  }
+
+  void AddAllocatedFpuRegister(uint32_t reg) {
+    allocated_registers_.AddFpuRegister(reg);
   }
 
   bool HasAllocatedRegister(bool is_core, int reg) const {
@@ -813,8 +817,8 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
 
   virtual bool HasAllocatedCalleeSaveRegisters() const {
     // We check the core registers against 1 because it always comprises the return PC.
-    return (POPCOUNT(allocated_registers_.GetCoreRegisters() & core_callee_save_mask_) != 1)
-      || (POPCOUNT(allocated_registers_.GetFloatingPointRegisters() & fpu_callee_save_mask_) != 0);
+    return (POPCOUNT(allocated_registers_.GetCoreRegisterSet() & core_callee_save_mask_) != 1) ||
+        (POPCOUNT(allocated_registers_.GetFloatingPointRegisterSet() & fpu_callee_save_mask_) != 0);
   }
 
   bool CallPushesPC() const {
@@ -1067,10 +1071,10 @@ class SlowPathGenerator {
     const uint32_t fpu_spill = ~codegen_->GetFpuSpillMask();
     RegisterSet* live1 = i1->GetLocations()->GetLiveRegisters();
     RegisterSet* live2 = i2->GetLocations()->GetLiveRegisters();
-    return (((live1->GetCoreRegisters() & core_spill) ==
-             (live2->GetCoreRegisters() & core_spill)) &&
-            ((live1->GetFloatingPointRegisters() & fpu_spill) ==
-             (live2->GetFloatingPointRegisters() & fpu_spill)));
+    return (((live1->GetCoreRegisterSet() & core_spill) ==
+             (live2->GetCoreRegisterSet() & core_spill)) &&
+            ((live1->GetFloatingPointRegisterSet() & fpu_spill) ==
+             (live2->GetFloatingPointRegisterSet() & fpu_spill)));
   }
 
   // Tests if both instructions have the same stack map. This ensures the interpreter

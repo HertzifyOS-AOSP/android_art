@@ -170,7 +170,7 @@ Location InvokeRuntimeCallingConvention::GetReturnLocation(DataType::Type return
 static RegisterSet OneRegInReferenceOutSaveEverythingCallerSaves() {
   InvokeRuntimeCallingConvention calling_convention;
   RegisterSet caller_saves = RegisterSet::Empty();
-  caller_saves.Add(Location::RegisterLocation(calling_convention.GetRegisterAt(0).GetCode()));
+  caller_saves.AddCoreRegister(calling_convention.GetRegisterAt(0).GetCode());
   DCHECK_EQ(calling_convention.GetRegisterAt(0).GetCode(),
             RegisterFrom(calling_convention.GetReturnLocation(DataType::Type::kReference),
                          DataType::Type::kReference).GetCode());
@@ -1088,7 +1088,7 @@ CodeGeneratorARM64::CodeGeneratorARM64(HGraph* graph,
                                          graph->GetAllocator()->Adapter(kArenaAllocCodeGenerator)) {
   SetupBlockedRegisters();
   // Save the link register (containing the return address) to mimic Quick.
-  AddAllocatedRegister(LocationFrom(lr));
+  AddAllocatedCoreRegister(lr.GetCode());
 
   bool use_sve = ShouldUseSVE();
   if (use_sve) {
@@ -3246,8 +3246,8 @@ void InstructionCodeGeneratorARM64::VisitArraySet(HArraySet* instruction) {
 void LocationsBuilderARM64::VisitBoundsCheck(HBoundsCheck* instruction) {
   RegisterSet caller_saves = RegisterSet::Empty();
   InvokeRuntimeCallingConvention calling_convention;
-  caller_saves.Add(Location::RegisterLocation(calling_convention.GetRegisterAt(0).GetCode()));
-  caller_saves.Add(Location::RegisterLocation(calling_convention.GetRegisterAt(1).GetCode()));
+  caller_saves.AddCoreRegister(calling_convention.GetRegisterAt(0).GetCode());
+  caller_saves.AddCoreRegister(calling_convention.GetRegisterAt(1).GetCode());
   LocationSummary* locations = codegen_->CreateThrowingSlowPathLocations(instruction, caller_saves);
 
   // If both index and length are constant, we can check the bounds statically and
@@ -4099,7 +4099,7 @@ void LocationsBuilderARM64::VisitDeoptimize(HDeoptimize* deoptimize) {
       LocationSummary::Create(allocator_, deoptimize, LocationSummary::kCallOnSlowPath);
   InvokeRuntimeCallingConvention calling_convention;
   RegisterSet caller_saves = RegisterSet::Empty();
-  caller_saves.Add(Location::RegisterLocation(calling_convention.GetRegisterAt(0).GetCode()));
+  caller_saves.AddCoreRegister(calling_convention.GetRegisterAt(0).GetCode());
   locations->SetCustomSlowPathCallerSaves(caller_saves);
   if (IsBooleanValueOrMaterializedCondition(deoptimize->InputAt(0))) {
     locations->SetInAt(0, Location::RequiresRegister());

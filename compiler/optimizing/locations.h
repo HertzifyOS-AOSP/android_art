@@ -457,30 +457,22 @@ class RegisterSet : public ValueObject {
   static RegisterSet Empty() { return RegisterSet(); }
   static RegisterSet AllFpu() { return RegisterSet(0, -1); }
 
-  void AddCoreRegisters(uint32_t registers) {
+  void AddCoreRegisterSet(uint32_t registers) {
     core_registers_ |= registers;
   }
 
-  void AddFpuRegisters(uint32_t registers) {
+  void AddFpuRegisterSet(uint32_t registers) {
     floating_point_registers_ |= registers;
   }
 
-  void Add(Location loc) {
-    if (loc.IsRegister()) {
-      core_registers_ |= (1 << loc.reg());
-    } else {
-      DCHECK(loc.IsFpuRegister());
-      floating_point_registers_ |= (1 << loc.reg());
-    }
+  void AddCoreRegister(uint32_t reg) {
+    DCHECK_LT(reg, BitSizeOf<uint32_t>());
+    core_registers_ |= 1u << reg;
   }
 
-  void Remove(Location loc) {
-    if (loc.IsRegister()) {
-      core_registers_ &= ~(1 << loc.reg());
-    } else {
-      DCHECK(loc.IsFpuRegister()) << loc;
-      floating_point_registers_ &= ~(1 << loc.reg());
-    }
+  void AddFpuRegister(uint32_t reg) {
+    DCHECK_LT(reg, BitSizeOf<uint32_t>());
+    floating_point_registers_ |= 1u << reg;
   }
 
   bool ContainsCoreRegister(uint32_t id) const {
@@ -495,32 +487,15 @@ class RegisterSet : public ValueObject {
     return (register_set & (1 << reg)) != 0;
   }
 
-  bool OverlapsRegisters(Location out) {
-    DCHECK(out.IsRegisterKind());
-    switch (out.GetKind()) {
-      case Location::Kind::kRegister:
-        return ContainsCoreRegister(out.reg());
-      case Location::Kind::kFpuRegister:
-        return ContainsFloatingPointRegister(out.reg());
-      case Location::Kind::kRegisterPair:
-        return ContainsCoreRegister(out.low()) || ContainsCoreRegister(out.high());
-      case Location::Kind::kFpuRegisterPair:
-        return ContainsFloatingPointRegister(out.low()) ||
-               ContainsFloatingPointRegister(out.high());
-      default:
-        return false;
-    }
-  }
-
   size_t GetNumberOfRegisters() const {
     return POPCOUNT(core_registers_) + POPCOUNT(floating_point_registers_);
   }
 
-  uint32_t GetCoreRegisters() const {
+  uint32_t GetCoreRegisterSet() const {
     return core_registers_;
   }
 
-  uint32_t GetFloatingPointRegisters() const {
+  uint32_t GetFloatingPointRegisterSet() const {
     return floating_point_registers_;
   }
 

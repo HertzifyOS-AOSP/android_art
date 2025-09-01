@@ -127,7 +127,7 @@ Location Riscv64ReturnLocation(DataType::Type return_type) {
 static RegisterSet OneRegInReferenceOutSaveEverythingCallerSaves() {
   InvokeRuntimeCallingConvention calling_convention;
   RegisterSet caller_saves = RegisterSet::Empty();
-  caller_saves.Add(Location::RegisterLocation(calling_convention.GetRegisterAt(0)));
+  caller_saves.AddCoreRegister(calling_convention.GetRegisterAt(0));
   DCHECK_EQ(
       calling_convention.GetRegisterAt(0),
       calling_convention.GetReturnLocation(DataType::Type::kReference).AsRegister<XRegister>());
@@ -3093,8 +3093,8 @@ void InstructionCodeGeneratorRISCV64::VisitBooleanNot(HBooleanNot* instruction) 
 void LocationsBuilderRISCV64::VisitBoundsCheck(HBoundsCheck* instruction) {
   RegisterSet caller_saves = RegisterSet::Empty();
   InvokeRuntimeCallingConvention calling_convention;
-  caller_saves.Add(Location::RegisterLocation(calling_convention.GetRegisterAt(0)));
-  caller_saves.Add(Location::RegisterLocation(calling_convention.GetRegisterAt(1)));
+  caller_saves.AddCoreRegister(calling_convention.GetRegisterAt(0));
+  caller_saves.AddCoreRegister(calling_convention.GetRegisterAt(1));
   LocationSummary* locations = codegen_->CreateThrowingSlowPathLocations(instruction, caller_saves);
 
   HInstruction* index = instruction->InputAt(0);
@@ -3610,7 +3610,7 @@ void LocationsBuilderRISCV64::VisitDeoptimize(HDeoptimize* instruction) {
       LocationSummary::Create(allocator_, instruction, LocationSummary::kCallOnSlowPath);
   InvokeRuntimeCallingConvention calling_convention;
   RegisterSet caller_saves = RegisterSet::Empty();
-  caller_saves.Add(Location::RegisterLocation(calling_convention.GetRegisterAt(0)));
+  caller_saves.AddCoreRegister(calling_convention.GetRegisterAt(0));
   locations->SetCustomSlowPathCallerSaves(caller_saves);
   if (IsBooleanValueOrMaterializedCondition(instruction->InputAt(0))) {
     locations->SetInAt(0, Location::RequiresRegister());
@@ -6064,7 +6064,7 @@ CodeGeneratorRISCV64::CodeGeneratorRISCV64(HGraph* graph,
                          graph->GetAllocator()->Adapter(kArenaAllocCodeGenerator)) {
   SetupBlockedRegisters();
   // Always mark the RA register to be saved.
-  AddAllocatedRegister(Location::RegisterLocation(RA));
+  AddAllocatedCoreRegister(RA);
 }
 
 void CodeGeneratorRISCV64::MaybeIncrementHotness(HSuspendCheck* suspend_check,

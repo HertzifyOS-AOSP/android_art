@@ -91,8 +91,8 @@ class TestCodeGeneratorARMVIXL : public arm::CodeGeneratorARMVIXL {
  public:
   TestCodeGeneratorARMVIXL(HGraph* graph, const CompilerOptions& compiler_options)
       : arm::CodeGeneratorARMVIXL(graph, compiler_options) {
-    AddAllocatedRegister(Location::RegisterLocation(arm::R6));
-    AddAllocatedRegister(Location::RegisterLocation(arm::R7));
+    AddAllocatedCoreRegister(arm::R6);
+    AddAllocatedCoreRegister(arm::R7);
     blocked_core_registers_ |= (1u << arm::R4) | (1u << arm::R6) | (1u << arm::R7);
   }
 
@@ -146,7 +146,7 @@ class TestCodeGeneratorX86 : public x86::CodeGeneratorX86 {
   TestCodeGeneratorX86(HGraph* graph, const CompilerOptions& compiler_options)
       : x86::CodeGeneratorX86(graph, compiler_options) {
     // Save edi, we need it for getting enough registers for long multiplication.
-    AddAllocatedRegister(Location::RegisterLocation(x86::EDI));
+    AddAllocatedCoreRegister(x86::EDI);
     // ebx is a callee-save register in C, but caller-save for ART.
     blocked_core_registers_ |= 1u << x86::EBX;
     // Make edi available.
