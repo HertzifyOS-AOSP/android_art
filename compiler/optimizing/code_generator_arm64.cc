@@ -183,8 +183,8 @@ static RegisterSet OneRegInReferenceOutSaveEverythingCallerSaves() {
 
 void SlowPathCodeARM64::SaveLiveRegisters(CodeGenerator* codegen, LocationSummary* locations) {
   size_t stack_offset = codegen->GetFirstRegisterSlotInSlowPath();
-  const uint32_t core_spills = codegen->GetSlowPathSpills(locations, /* core_registers= */ true);
-  for (uint32_t i : LowToHighBits(core_spills)) {
+  const RegisterSet spills = codegen->GetSlowPathSpills(locations);
+  for (uint32_t i : LowToHighBits(spills.GetCoreRegisterSet())) {
     // If the register holds an object, update the stack mask.
     if (locations->RegisterContainsObject(i)) {
       locations->SetStackBit(stack_offset / kVRegSize);
@@ -196,8 +196,7 @@ void SlowPathCodeARM64::SaveLiveRegisters(CodeGenerator* codegen, LocationSummar
   }
 
   const size_t fp_reg_size = codegen->GetSlowPathFPWidth();
-  const uint32_t fp_spills = codegen->GetSlowPathSpills(locations, /* core_registers= */ false);
-  for (uint32_t i : LowToHighBits(fp_spills)) {
+  for (uint32_t i : LowToHighBits(spills.GetFloatingPointRegisterSet())) {
     DCHECK_LT(stack_offset, codegen->GetFrameSize() - codegen->FrameEntrySpillSize());
     DCHECK_LT(i, kMaximumNumberOfExpectedRegisters);
     saved_fpu_stack_offsets_[i] = stack_offset;
@@ -1054,8 +1053,7 @@ CodeGeneratorARM64::CodeGeneratorARM64(HGraph* graph,
                     kNumberOfAllocatableRegisters,
                     kNumberOfAllocatableFPRegisters,
                     kNumberOfAllocatableRegisterPairs,
-                    dchecked_integral_cast<uint32_t>(callee_saved_core_registers.GetList()),
-                    dchecked_integral_cast<uint32_t>(callee_saved_fp_registers.GetList()),
+                    ComputeCalleeSaves(),
                     compiler_options,
                     stats,
                     ArrayRef<const bool>(detail::kIsIntrinsicUnimplemented)),
@@ -1086,7 +1084,7 @@ CodeGeneratorARM64::CodeGeneratorARM64(HGraph* graph,
       jit_patches_(&assembler_, graph->GetAllocator()),
       jit_baker_read_barrier_slow_paths_(std::less<uint32_t>(),
                                          graph->GetAllocator()->Adapter(kArenaAllocCodeGenerator)) {
-  SetupBlockedRegisters();
+  blocked_registers_ = ComputeBlockedRegisters(graph);
   // Save the link register (containing the return address) to mimic Quick.
   AddAllocatedCoreRegister(lr.GetCode());
 
@@ -1604,16 +1602,14 @@ void CodeGeneratorARM64::PopFrameAndReturn(Arm64Assembler* assembler,
 }
 
 CPURegList CodeGeneratorARM64::GetFramePreservedCoreRegisters() const {
-  DCHECK(ArtVixlRegCodeCoherentForRegSet(core_spill_mask_, GetNumberOfCoreRegisters(), 0, 0));
-  return CPURegList(CPURegister::kRegister, kXRegSize,
-                    core_spill_mask_);
+  DCHECK(ArtVixlRegCodeCoherentForRegSet(GetCoreSpillMask(), GetNumberOfCoreRegisters(), 0, 0));
+  return CPURegList(CPURegister::kRegister, kXRegSize, GetCoreSpillMask());
 }
 
 CPURegList CodeGeneratorARM64::GetFramePreservedFPRegisters() const {
-  DCHECK(ArtVixlRegCodeCoherentForRegSet(0, 0, fpu_spill_mask_,
-                                         GetNumberOfFloatingPointRegisters()));
-  return CPURegList(CPURegister::kVRegister, kDRegSize,
-                    fpu_spill_mask_);
+  DCHECK(ArtVixlRegCodeCoherentForRegSet(
+      0, 0, GetFpuSpillMask(), GetNumberOfFloatingPointRegisters()));
+  return CPURegList(CPURegister::kVRegister, kDRegSize, GetFpuSpillMask());
 }
 
 void CodeGeneratorARM64::Bind(HBasicBlock* block) {
@@ -1686,7 +1682,16 @@ void CodeGeneratorARM64::CheckGCCardIsValid(Register object) {
   __ Bind(&done);
 }
 
-inline void CodeGeneratorARM64::SetupBlockedRegisters() {
+inline RegisterSet CodeGeneratorARM64::ComputeCalleeSaves() {
+  RegisterSet callee_saves = RegisterSet::Empty();
+  callee_saves.AddCoreRegisterSet(
+      dchecked_integral_cast<uint32_t>(callee_saved_core_registers.GetList()));
+  callee_saves.AddFpuRegisterSet(
+      dchecked_integral_cast<uint32_t>(callee_saved_fp_registers.GetList()));
+  return callee_saves;
+}
+
+inline RegisterSet CodeGeneratorARM64::ComputeBlockedRegisters(HGraph* graph) {
   // Blocked core registers:
   //      lr        : Runtime reserved.
   //      tr (x19)  : Runtime reserved.
@@ -1701,16 +1706,20 @@ inline void CodeGeneratorARM64::SetupBlockedRegisters() {
   CPURegList reserved_core_registers = vixl_reserved_core_registers;
   reserved_core_registers.Combine(runtime_reserved_core_registers);
   reserved_core_registers.Combine(vixl::aarch64::x18);
-  blocked_core_registers_ = dchecked_integral_cast<uint32_t>(reserved_core_registers.GetList());
+  RegisterSet blocked_registers = RegisterSet::Empty();
+  blocked_registers.AddCoreRegisterSet(
+      dchecked_integral_cast<uint32_t>(reserved_core_registers.GetList()));
 
   CPURegList reserved_fp_registers = vixl_reserved_fp_registers;
-  if (GetGraph()->IsDebuggable()) {
+  if (graph->IsDebuggable()) {
     // Stubs do not save callee-save floating point registers. If the graph
     // is debuggable, we need to deal with these registers differently. For
     // now, just block them.
     reserved_fp_registers.Combine(callee_saved_fp_registers);
   }
-  blocked_fpu_registers_ = dchecked_integral_cast<uint32_t>(reserved_fp_registers.GetList());
+  blocked_registers.AddFpuRegisterSet(
+      dchecked_integral_cast<uint32_t>(reserved_fp_registers.GetList()));
+  return blocked_registers;
 }
 
 size_t CodeGeneratorARM64::SaveCoreRegister(size_t stack_index, uint32_t reg_id) {

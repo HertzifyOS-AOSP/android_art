@@ -304,8 +304,8 @@ void SlowPathCodeARMVIXL::SaveLiveRegisters(CodeGenerator* codegen, LocationSumm
   size_t stack_offset = codegen->GetFirstRegisterSlotInSlowPath();
   size_t orig_offset = stack_offset;
 
-  const uint32_t core_spills = codegen->GetSlowPathSpills(locations, /* core_registers= */ true);
-  for (uint32_t i : LowToHighBits(core_spills)) {
+  const RegisterSet spills = codegen->GetSlowPathSpills(locations);
+  for (uint32_t i : LowToHighBits(spills.GetCoreRegisterSet())) {
     // If the register holds an object, update the stack mask.
     if (locations->RegisterContainsObject(i)) {
       locations->SetStackBit(stack_offset / kVRegSize);
@@ -317,9 +317,9 @@ void SlowPathCodeARMVIXL::SaveLiveRegisters(CodeGenerator* codegen, LocationSumm
   }
 
   CodeGeneratorARMVIXL* arm_codegen = down_cast<CodeGeneratorARMVIXL*>(codegen);
-  arm_codegen->GetAssembler()->StoreRegisterList(core_spills, orig_offset);
+  arm_codegen->GetAssembler()->StoreRegisterList(spills.GetCoreRegisterSet(), orig_offset);
 
-  uint32_t fp_spills = codegen->GetSlowPathSpills(locations, /* core_registers= */ false);
+  uint32_t fp_spills = spills.GetFloatingPointRegisterSet();
   orig_offset = stack_offset;
   for (uint32_t i : LowToHighBits(fp_spills)) {
     DCHECK_LT(i, kMaximumNumberOfExpectedRegisters);
@@ -342,8 +342,8 @@ void SlowPathCodeARMVIXL::RestoreLiveRegisters(CodeGenerator* codegen, LocationS
   size_t stack_offset = codegen->GetFirstRegisterSlotInSlowPath();
   size_t orig_offset = stack_offset;
 
-  const uint32_t core_spills = codegen->GetSlowPathSpills(locations, /* core_registers= */ true);
-  for (uint32_t i : LowToHighBits(core_spills)) {
+  const RegisterSet spills = codegen->GetSlowPathSpills(locations);
+  for (uint32_t i : LowToHighBits(spills.GetCoreRegisterSet())) {
     DCHECK_LT(stack_offset, codegen->GetFrameSize() - codegen->FrameEntrySpillSize());
     DCHECK_LT(i, kMaximumNumberOfExpectedRegisters);
     stack_offset += kArmWordSize;
@@ -351,9 +351,9 @@ void SlowPathCodeARMVIXL::RestoreLiveRegisters(CodeGenerator* codegen, LocationS
 
   // TODO(VIXL): Check the coherency of stack_offset after this with a test.
   CodeGeneratorARMVIXL* arm_codegen = down_cast<CodeGeneratorARMVIXL*>(codegen);
-  arm_codegen->GetAssembler()->LoadRegisterList(core_spills, orig_offset);
+  arm_codegen->GetAssembler()->LoadRegisterList(spills.GetCoreRegisterSet(), orig_offset);
 
-  uint32_t fp_spills = codegen->GetSlowPathSpills(locations, /* core_registers= */ false);
+  uint32_t fp_spills = spills.GetFloatingPointRegisterSet();
   while (fp_spills != 0u) {
     uint32_t begin = CTZ(fp_spills);
     uint32_t tmp = fp_spills + (1u << begin);
@@ -1919,8 +1919,7 @@ CodeGeneratorARMVIXL::CodeGeneratorARMVIXL(HGraph* graph,
                     kNumberOfCoreRegisters,
                     kNumberOfSRegisters,
                     kNumberOfRegisterPairs,
-                    kCoreCalleeSaves.GetList(),
-                    ComputeSRegisterListMask(kFpuCalleeSaves),
+                    ComputeCalleeSaves(),
                     compiler_options,
                     stats,
                     ArrayRef<const bool>(detail::kIsIntrinsicUnimplemented)),
@@ -1955,7 +1954,7 @@ CodeGeneratorARMVIXL::CodeGeneratorARMVIXL(HGraph* graph,
   data_types_requiring_register_pair_ =
       (1u << enum_cast<>(DataType::Type::kFloat64)) | (1u << enum_cast<>(DataType::Type::kInt64));
 
-  SetupBlockedRegisters();
+  blocked_registers_ = ComputeBlockedRegisters(graph);
   // Always save the LR register to mimic Quick.
   AddAllocatedCoreRegister(LR);
   // Give D30 and D31 as scratch register to VIXL. The register allocator only works on
@@ -2111,8 +2110,16 @@ void CodeGeneratorARMVIXL::Finalize() {
   }
 }
 
-inline void CodeGeneratorARMVIXL::SetupBlockedRegisters() {
-  blocked_core_registers_ =
+inline RegisterSet CodeGeneratorARMVIXL::ComputeCalleeSaves() {
+  RegisterSet callee_saves = RegisterSet::Empty();
+  callee_saves.AddCoreRegisterSet(kCoreCalleeSaves.GetList());
+  callee_saves.AddFpuRegisterSet(ComputeSRegisterListMask(kFpuCalleeSaves));
+  return callee_saves;
+}
+
+inline RegisterSet CodeGeneratorARMVIXL::ComputeBlockedRegisters(HGraph* graph) {
+  RegisterSet blocked_registers = RegisterSet::Empty();
+  blocked_registers.AddCoreRegisterSet(
       // Stack register, LR and PC are always reserved.
       (1u << SP) | (1u << LR) | (1u << PC) |
       // Reserve marking register.
@@ -2123,15 +2130,15 @@ inline void CodeGeneratorARMVIXL::SetupBlockedRegisters() {
       // Reserve thread register.
       (1u << TR) |
       // Reserve temp register.
-      (1u << IP);
-  DCHECK_EQ(blocked_fpu_registers_, 0u);
+      (1u << IP));
 
-  if (GetGraph()->IsDebuggable()) {
+  if (graph->IsDebuggable()) {
     // Stubs do not save callee-save floating point registers. If the graph
     // is debuggable, we need to deal with these registers differently. For
     // now, just block them.
-    blocked_fpu_registers_ = ComputeSRegisterListMask(kFpuCalleeSaves);
+    blocked_registers.AddFpuRegisterSet(ComputeSRegisterListMask(kFpuCalleeSaves));
   }
+  return blocked_registers;
 }
 
 InstructionCodeGeneratorARMVIXL::InstructionCodeGeneratorARMVIXL(HGraph* graph,
@@ -2141,22 +2148,20 @@ InstructionCodeGeneratorARMVIXL::InstructionCodeGeneratorARMVIXL(HGraph* graph,
         codegen_(codegen) {}
 
 void CodeGeneratorARMVIXL::ComputeSpillMask() {
-  core_spill_mask_ = allocated_registers_.GetCoreRegisterSet() & core_callee_save_mask_;
-  DCHECK_NE(core_spill_mask_ & (1u << kLrCode), 0u)
+  CodeGenerator::ComputeSpillMask();
+  DCHECK_NE(GetCoreSpillMask() & (1u << kLrCode), 0u)
       << "At least the return address register must be saved";
   // 16-bit PUSH/POP (T1) can save/restore just the LR/PC.
   DCHECK(GetVIXLAssembler()->IsUsingT32());
-  fpu_spill_mask_ = allocated_registers_.GetFloatingPointRegisterSet() & fpu_callee_save_mask_;
   // We use vpush and vpop for saving and restoring floating point registers, which take
   // a SRegister and the number of registers to save/restore after that SRegister. We
-  // therefore update the `fpu_spill_mask_` to also contain those registers not allocated,
-  // but in the range.
-  if (fpu_spill_mask_ != 0) {
-    uint32_t least_significant_bit = LeastSignificantBit(fpu_spill_mask_);
-    uint32_t most_significant_bit = MostSignificantBit(fpu_spill_mask_);
-    for (uint32_t i = least_significant_bit + 1 ; i < most_significant_bit; ++i) {
-      fpu_spill_mask_ |= (1 << i);
-    }
+  // therefore update the spilled FP register set to also contain those registers not
+  // allocated, but in the range.
+  if (GetFpuSpillMask() != 0u) {
+    uint32_t least_significant_bit = LeastSignificantBit(GetFpuSpillMask());
+    uint32_t most_significant_bit = MostSignificantBit(GetFpuSpillMask());
+    spilled_registers_.AddFpuRegisterSet(
+        (1u << most_significant_bit) - (1u << least_significant_bit));
   }
 }
 
@@ -2409,7 +2414,7 @@ void CodeGeneratorARMVIXL::GenerateFrameEntry() {
   uint32_t frame_size = GetFrameSize();
   uint32_t core_spills_offset = frame_size - GetCoreSpillSize();
   uint32_t fp_spills_offset = frame_size - FrameEntrySpillSize();
-  if ((fpu_spill_mask_ == 0u || IsPowerOfTwo(fpu_spill_mask_)) &&
+  if ((GetFpuSpillMask() == 0u || IsPowerOfTwo(GetFpuSpillMask())) &&
       core_spills_offset <= 3u * kArmWordSize) {
     // Do a single PUSH for core registers including the method and up to two
     // filler registers. Then store the single FP spill if any.
@@ -2418,37 +2423,38 @@ void CodeGeneratorARMVIXL::GenerateFrameEntry() {
     // aligned 16-byte chunk where we're already writing anyway.)
     DCHECK_EQ(kMethodRegister.GetCode(), 0u);
     uint32_t extra_regs = MaxInt<uint32_t>(core_spills_offset / kArmWordSize);
-    DCHECK_LT(MostSignificantBit(extra_regs), LeastSignificantBit(core_spill_mask_));
-    __ Push(RegisterList(core_spill_mask_ | extra_regs));
+    DCHECK_LT(MostSignificantBit(extra_regs), LeastSignificantBit(GetCoreSpillMask()));
+    __ Push(RegisterList(GetCoreSpillMask() | extra_regs));
     GetAssembler()->cfi().AdjustCFAOffset(frame_size);
     GetAssembler()->cfi().RelOffsetForMany(DWARFReg(kMethodRegister),
                                            core_spills_offset,
-                                           core_spill_mask_,
+                                           GetCoreSpillMask(),
                                            kArmWordSize);
-    if (fpu_spill_mask_ != 0u) {
-      DCHECK(IsPowerOfTwo(fpu_spill_mask_));
-      vixl::aarch32::SRegister sreg(LeastSignificantBit(fpu_spill_mask_));
+    if (GetFpuSpillMask() != 0u) {
+      DCHECK(IsPowerOfTwo(GetFpuSpillMask()));
+      vixl::aarch32::SRegister sreg(LeastSignificantBit(GetFpuSpillMask()));
       GetAssembler()->StoreSToOffset(sreg, sp, fp_spills_offset);
       GetAssembler()->cfi().RelOffset(DWARFReg(sreg), /*offset=*/ fp_spills_offset);
     }
   } else {
-    __ Push(RegisterList(core_spill_mask_));
-    GetAssembler()->cfi().AdjustCFAOffset(kArmWordSize * POPCOUNT(core_spill_mask_));
+    __ Push(RegisterList(GetCoreSpillMask()));
+    GetAssembler()->cfi().AdjustCFAOffset(kArmWordSize * POPCOUNT(GetCoreSpillMask()));
     GetAssembler()->cfi().RelOffsetForMany(DWARFReg(kMethodRegister),
                                            /*offset=*/ 0,
-                                           core_spill_mask_,
+                                           GetCoreSpillMask(),
                                            kArmWordSize);
-    if (fpu_spill_mask_ != 0) {
-      uint32_t first = LeastSignificantBit(fpu_spill_mask_);
+    if (GetFpuSpillMask() != 0) {
+      uint32_t first = LeastSignificantBit(GetFpuSpillMask());
 
       // Check that list is contiguous.
-      DCHECK_EQ(fpu_spill_mask_ >> CTZ(fpu_spill_mask_), ~0u >> (32 - POPCOUNT(fpu_spill_mask_)));
+      DCHECK_EQ(GetFpuSpillMask() >> CTZ(GetFpuSpillMask()),
+                ~0u >> (32 - POPCOUNT(GetFpuSpillMask())));
 
-      __ Vpush(SRegisterList(vixl32::SRegister(first), POPCOUNT(fpu_spill_mask_)));
-      GetAssembler()->cfi().AdjustCFAOffset(kArmWordSize * POPCOUNT(fpu_spill_mask_));
+      __ Vpush(SRegisterList(vixl32::SRegister(first), POPCOUNT(GetFpuSpillMask())));
+      GetAssembler()->cfi().AdjustCFAOffset(kArmWordSize * POPCOUNT(GetFpuSpillMask()));
       GetAssembler()->cfi().RelOffsetForMany(DWARFReg(s0),
                                              /*offset=*/ 0,
-                                             fpu_spill_mask_,
+                                             GetFpuSpillMask(),
                                              kArmWordSize);
     }
 
@@ -2486,21 +2492,21 @@ void CodeGeneratorARMVIXL::GenerateFrameExit() {
   }
 
   // Pop LR into PC to return.
-  DCHECK_NE(core_spill_mask_ & (1 << kLrCode), 0U);
-  uint32_t pop_mask = (core_spill_mask_ & (~(1 << kLrCode))) | 1 << kPcCode;
+  DCHECK_NE(GetCoreSpillMask() & (1 << kLrCode), 0U);
+  uint32_t pop_mask = (GetCoreSpillMask() & (~(1 << kLrCode))) | 1 << kPcCode;
 
   uint32_t frame_size = GetFrameSize();
   uint32_t core_spills_offset = frame_size - GetCoreSpillSize();
   uint32_t fp_spills_offset = frame_size - FrameEntrySpillSize();
-  if ((fpu_spill_mask_ == 0u || IsPowerOfTwo(fpu_spill_mask_)) &&
+  if ((GetFpuSpillMask() == 0u || IsPowerOfTwo(GetFpuSpillMask())) &&
       // r4 is blocked by TestCodeGeneratorARMVIXL used by some tests.
       core_spills_offset <= (IsBlockedCoreRegister(R4) ? 2u : 3u) * kArmWordSize) {
     // Load the FP spill if any and then do a single POP including the method
     // and up to two filler registers. If we have no FP spills, this also has
     // the advantage that we do not need to emit CFI directives.
-    if (fpu_spill_mask_ != 0u) {
-      DCHECK(IsPowerOfTwo(fpu_spill_mask_));
-      vixl::aarch32::SRegister sreg(LeastSignificantBit(fpu_spill_mask_));
+    if (GetFpuSpillMask() != 0u) {
+      DCHECK(IsPowerOfTwo(GetFpuSpillMask()));
+      vixl::aarch32::SRegister sreg(LeastSignificantBit(GetFpuSpillMask()));
       GetAssembler()->cfi().RememberState();
       GetAssembler()->LoadSFromOffset(sreg, sp, fp_spills_offset);
       GetAssembler()->cfi().Restore(DWARFReg(sreg));
@@ -2511,22 +2517,23 @@ void CodeGeneratorARMVIXL::GenerateFrameExit() {
     DCHECK_EQ(extra_regs & kCoreCalleeSaves.GetList(), 0u);
     DCHECK_LT(MostSignificantBit(extra_regs), LeastSignificantBit(pop_mask));
     __ Pop(RegisterList(pop_mask | extra_regs));
-    if (fpu_spill_mask_ != 0u) {
+    if (GetFpuSpillMask() != 0u) {
       GetAssembler()->cfi().RestoreState();
     }
   } else {
     GetAssembler()->cfi().RememberState();
     DecreaseFrame(fp_spills_offset);
-    if (fpu_spill_mask_ != 0) {
-      uint32_t first = LeastSignificantBit(fpu_spill_mask_);
+    if (GetFpuSpillMask() != 0) {
+      uint32_t first = LeastSignificantBit(GetFpuSpillMask());
 
       // Check that list is contiguous.
-      DCHECK_EQ(fpu_spill_mask_ >> CTZ(fpu_spill_mask_), ~0u >> (32 - POPCOUNT(fpu_spill_mask_)));
+      DCHECK_EQ(GetFpuSpillMask() >> CTZ(GetFpuSpillMask()),
+                ~0u >> (32 - POPCOUNT(GetFpuSpillMask())));
 
-      __ Vpop(SRegisterList(vixl32::SRegister(first), POPCOUNT(fpu_spill_mask_)));
+      __ Vpop(SRegisterList(vixl32::SRegister(first), POPCOUNT(GetFpuSpillMask())));
       GetAssembler()->cfi().AdjustCFAOffset(
-          -static_cast<int>(kArmWordSize) * POPCOUNT(fpu_spill_mask_));
-      GetAssembler()->cfi().RestoreMany(DWARFReg(vixl32::SRegister(0)), fpu_spill_mask_);
+          -static_cast<int>(kArmWordSize) * POPCOUNT(GetFpuSpillMask()));
+      GetAssembler()->cfi().RestoreMany(DWARFReg(vixl32::SRegister(0)), GetFpuSpillMask());
     }
     __ Pop(RegisterList(pop_mask));
     GetAssembler()->cfi().RestoreState();

@@ -75,6 +75,21 @@ class RegisterSet : public ValueObject {
     return fp ? &RegisterSet::floating_point_registers_ : &RegisterSet::core_registers_;
   }
 
+  RegisterSet Union(const RegisterSet& other) const {
+    return {core_registers_ | other.core_registers_,
+            floating_point_registers_ | other.floating_point_registers_};
+  }
+
+  RegisterSet Intersect(const RegisterSet& other) const {
+    return {core_registers_ & other.core_registers_,
+            floating_point_registers_ & other.floating_point_registers_};
+  }
+
+  RegisterSet Subtract(const RegisterSet& other) const {
+    return {core_registers_ & ~other.core_registers_,
+            floating_point_registers_ & ~other.floating_point_registers_};
+  }
+
  private:
   RegisterSet() : core_registers_(0), floating_point_registers_(0) {}
   RegisterSet(uint32_t core, uint32_t fp) : core_registers_(core), floating_point_registers_(fp) {}
