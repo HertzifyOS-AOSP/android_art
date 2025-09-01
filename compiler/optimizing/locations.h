@@ -26,6 +26,7 @@
 #include "base/bit_vector.h"
 #include "base/macros.h"
 #include "base/value_object.h"
+#include "register_set.h"
 
 namespace art HIDDEN {
 
@@ -451,65 +452,6 @@ class Location : public ValueObject {
 };
 std::ostream& operator<<(std::ostream& os, Location::Kind rhs);
 std::ostream& operator<<(std::ostream& os, Location::Policy rhs);
-
-class RegisterSet : public ValueObject {
- public:
-  static RegisterSet Empty() { return RegisterSet(); }
-  static RegisterSet AllFpu() { return RegisterSet(0, -1); }
-
-  void AddCoreRegisterSet(uint32_t registers) {
-    core_registers_ |= registers;
-  }
-
-  void AddFpuRegisterSet(uint32_t registers) {
-    floating_point_registers_ |= registers;
-  }
-
-  void AddCoreRegister(uint32_t reg) {
-    DCHECK_LT(reg, BitSizeOf<uint32_t>());
-    core_registers_ |= 1u << reg;
-  }
-
-  void AddFpuRegister(uint32_t reg) {
-    DCHECK_LT(reg, BitSizeOf<uint32_t>());
-    floating_point_registers_ |= 1u << reg;
-  }
-
-  bool ContainsCoreRegister(uint32_t id) const {
-    return Contains(core_registers_, id);
-  }
-
-  bool ContainsFloatingPointRegister(uint32_t id) const {
-    return Contains(floating_point_registers_, id);
-  }
-
-  static bool Contains(uint32_t register_set, uint32_t reg) {
-    return (register_set & (1 << reg)) != 0;
-  }
-
-  size_t GetNumberOfRegisters() const {
-    return POPCOUNT(core_registers_) + POPCOUNT(floating_point_registers_);
-  }
-
-  uint32_t GetCoreRegisterSet() const {
-    return core_registers_;
-  }
-
-  uint32_t GetFloatingPointRegisterSet() const {
-    return floating_point_registers_;
-  }
-
-  static uint32_t RegisterSet::* GetRegisterFieldAccessor(bool fp) {
-    return fp ? &RegisterSet::floating_point_registers_ : &RegisterSet::core_registers_;
-  }
-
- private:
-  RegisterSet() : core_registers_(0), floating_point_registers_(0) {}
-  RegisterSet(uint32_t core, uint32_t fp) : core_registers_(core), floating_point_registers_(fp) {}
-
-  uint32_t core_registers_;
-  uint32_t floating_point_registers_;
-};
 
 static constexpr bool kIntrinsified = true;
 
