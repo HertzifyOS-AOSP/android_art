@@ -979,16 +979,8 @@ CodeGenerator::CodeGenerator(HGraph* graph,
   if (GetGraph()->IsCompilingOsr()) {
     // Make OSR methods have all registers spilled, this simplifies the logic of
     // jumping to the compiled code directly.
-    for (size_t i = 0; i < number_of_core_registers_; ++i) {
-      if (IsCoreCalleeSaveRegister(i)) {
-        AddAllocatedRegister(Location::RegisterLocation(i));
-      }
-    }
-    for (size_t i = 0; i < number_of_fpu_registers_; ++i) {
-      if (IsFloatingPointCalleeSaveRegister(i)) {
-        AddAllocatedRegister(Location::FpuRegisterLocation(i));
-      }
-    }
+    AddAllocatedCoreRegisterSet(core_callee_save_mask_);
+    AddAllocatedFpuRegisterSet(fpu_callee_save_mask_);
   }
 }
 
@@ -1129,7 +1121,7 @@ void CodeGenerator::RecordPcInfo(HInstruction* instruction,
   if (locations->CanCall()) {
     stack_mask = locations->GetStackMask();
     register_mask = locations->GetRegisterMask();
-    DCHECK_EQ(register_mask & ~locations->GetLiveRegisters()->GetCoreRegisters(), 0u);
+    DCHECK_EQ(register_mask & ~locations->GetLiveRegisters()->GetCoreRegisterSet(), 0u);
     if (locations->OnlyCallsOnSlowPath()) {
       // In case of slow path, we currently set the location of caller-save registers
       // to register (instead of their stack location when pushed before the slow-path

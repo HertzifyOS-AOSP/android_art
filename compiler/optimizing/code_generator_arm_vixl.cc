@@ -150,7 +150,7 @@ class EmitAdrCode {
 static RegisterSet OneRegInReferenceOutSaveEverythingCallerSaves() {
   InvokeRuntimeCallingConventionARMVIXL calling_convention;
   RegisterSet caller_saves = RegisterSet::Empty();
-  caller_saves.Add(LocationFrom(calling_convention.GetRegisterAt(0)));
+  caller_saves.AddCoreRegister(calling_convention.GetRegisterAt(0).GetCode());
   // TODO: Add GetReturnLocation() to the calling convention so that we can DCHECK()
   // that the kPrimNot result register is the same as the first argument register.
   return caller_saves;
@@ -1957,7 +1957,7 @@ CodeGeneratorARMVIXL::CodeGeneratorARMVIXL(HGraph* graph,
 
   SetupBlockedRegisters();
   // Always save the LR register to mimic Quick.
-  AddAllocatedRegister(Location::RegisterLocation(LR));
+  AddAllocatedCoreRegister(LR);
   // Give D30 and D31 as scratch register to VIXL. The register allocator only works on
   // S0-S31, which alias to D0-D15.
   GetVIXLAssembler()->GetScratchVRegisterList()->Combine(d31);
@@ -2141,12 +2141,12 @@ InstructionCodeGeneratorARMVIXL::InstructionCodeGeneratorARMVIXL(HGraph* graph,
         codegen_(codegen) {}
 
 void CodeGeneratorARMVIXL::ComputeSpillMask() {
-  core_spill_mask_ = allocated_registers_.GetCoreRegisters() & core_callee_save_mask_;
+  core_spill_mask_ = allocated_registers_.GetCoreRegisterSet() & core_callee_save_mask_;
   DCHECK_NE(core_spill_mask_ & (1u << kLrCode), 0u)
       << "At least the return address register must be saved";
   // 16-bit PUSH/POP (T1) can save/restore just the LR/PC.
   DCHECK(GetVIXLAssembler()->IsUsingT32());
-  fpu_spill_mask_ = allocated_registers_.GetFloatingPointRegisters() & fpu_callee_save_mask_;
+  fpu_spill_mask_ = allocated_registers_.GetFloatingPointRegisterSet() & fpu_callee_save_mask_;
   // We use vpush and vpop for saving and restoring floating point registers, which take
   // a SRegister and the number of registers to save/restore after that SRegister. We
   // therefore update the `fpu_spill_mask_` to also contain those registers not allocated,
@@ -3046,7 +3046,7 @@ void LocationsBuilderARMVIXL::VisitDeoptimize(HDeoptimize* deoptimize) {
       LocationSummary::Create(allocator_, deoptimize, LocationSummary::kCallOnSlowPath);
   InvokeRuntimeCallingConventionARMVIXL calling_convention;
   RegisterSet caller_saves = RegisterSet::Empty();
-  caller_saves.Add(LocationFrom(calling_convention.GetRegisterAt(0)));
+  caller_saves.AddCoreRegister(calling_convention.GetRegisterAt(0).GetCode());
   locations->SetCustomSlowPathCallerSaves(caller_saves);
   if (IsBooleanValueOrMaterializedCondition(deoptimize->InputAt(0))) {
     locations->SetInAt(0, Location::RequiresRegister());
@@ -7236,8 +7236,8 @@ void InstructionCodeGeneratorARMVIXL::VisitIntermediateAddressIndex(
 void LocationsBuilderARMVIXL::VisitBoundsCheck(HBoundsCheck* instruction) {
   RegisterSet caller_saves = RegisterSet::Empty();
   InvokeRuntimeCallingConventionARMVIXL calling_convention;
-  caller_saves.Add(LocationFrom(calling_convention.GetRegisterAt(0)));
-  caller_saves.Add(LocationFrom(calling_convention.GetRegisterAt(1)));
+  caller_saves.AddCoreRegister(calling_convention.GetRegisterAt(0).GetCode());
+  caller_saves.AddCoreRegister(calling_convention.GetRegisterAt(1).GetCode());
   LocationSummary* locations = codegen_->CreateThrowingSlowPathLocations(instruction, caller_saves);
 
   HInstruction* index = instruction->InputAt(0);

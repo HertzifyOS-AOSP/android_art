@@ -26,6 +26,7 @@
 #include "base/bit_vector.h"
 #include "base/macros.h"
 #include "base/value_object.h"
+#include "register_set.h"
 
 namespace art HIDDEN {
 
@@ -451,90 +452,6 @@ class Location : public ValueObject {
 };
 std::ostream& operator<<(std::ostream& os, Location::Kind rhs);
 std::ostream& operator<<(std::ostream& os, Location::Policy rhs);
-
-class RegisterSet : public ValueObject {
- public:
-  static RegisterSet Empty() { return RegisterSet(); }
-  static RegisterSet AllFpu() { return RegisterSet(0, -1); }
-
-  void AddCoreRegisters(uint32_t registers) {
-    core_registers_ |= registers;
-  }
-
-  void AddFpuRegisters(uint32_t registers) {
-    floating_point_registers_ |= registers;
-  }
-
-  void Add(Location loc) {
-    if (loc.IsRegister()) {
-      core_registers_ |= (1 << loc.reg());
-    } else {
-      DCHECK(loc.IsFpuRegister());
-      floating_point_registers_ |= (1 << loc.reg());
-    }
-  }
-
-  void Remove(Location loc) {
-    if (loc.IsRegister()) {
-      core_registers_ &= ~(1 << loc.reg());
-    } else {
-      DCHECK(loc.IsFpuRegister()) << loc;
-      floating_point_registers_ &= ~(1 << loc.reg());
-    }
-  }
-
-  bool ContainsCoreRegister(uint32_t id) const {
-    return Contains(core_registers_, id);
-  }
-
-  bool ContainsFloatingPointRegister(uint32_t id) const {
-    return Contains(floating_point_registers_, id);
-  }
-
-  static bool Contains(uint32_t register_set, uint32_t reg) {
-    return (register_set & (1 << reg)) != 0;
-  }
-
-  bool OverlapsRegisters(Location out) {
-    DCHECK(out.IsRegisterKind());
-    switch (out.GetKind()) {
-      case Location::Kind::kRegister:
-        return ContainsCoreRegister(out.reg());
-      case Location::Kind::kFpuRegister:
-        return ContainsFloatingPointRegister(out.reg());
-      case Location::Kind::kRegisterPair:
-        return ContainsCoreRegister(out.low()) || ContainsCoreRegister(out.high());
-      case Location::Kind::kFpuRegisterPair:
-        return ContainsFloatingPointRegister(out.low()) ||
-               ContainsFloatingPointRegister(out.high());
-      default:
-        return false;
-    }
-  }
-
-  size_t GetNumberOfRegisters() const {
-    return POPCOUNT(core_registers_) + POPCOUNT(floating_point_registers_);
-  }
-
-  uint32_t GetCoreRegisters() const {
-    return core_registers_;
-  }
-
-  uint32_t GetFloatingPointRegisters() const {
-    return floating_point_registers_;
-  }
-
-  static uint32_t RegisterSet::* GetRegisterFieldAccessor(bool fp) {
-    return fp ? &RegisterSet::floating_point_registers_ : &RegisterSet::core_registers_;
-  }
-
- private:
-  RegisterSet() : core_registers_(0), floating_point_registers_(0) {}
-  RegisterSet(uint32_t core, uint32_t fp) : core_registers_(core), floating_point_registers_(fp) {}
-
-  uint32_t core_registers_;
-  uint32_t floating_point_registers_;
-};
 
 static constexpr bool kIntrinsified = true;
 
