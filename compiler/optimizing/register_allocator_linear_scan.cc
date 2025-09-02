@@ -151,8 +151,9 @@ class RegisterAllocatorLinearScan::LinearScan {
       : codegen_(register_allocator->codegen_),
         number_of_registers_(codegen_->GetNumberOfCoreRegisters()),
         register_type_(RegisterType::kCoreRegister),
-        registers_blocked_for_call_(register_allocator->core_registers_blocked_for_call_),
-        available_registers_(register_allocator->available_core_registers_),
+        registers_blocked_for_call_(
+            register_allocator->registers_blocked_for_call_.GetCoreRegisterSet()),
+        available_registers_(register_allocator->available_registers_.GetCoreRegisterSet()),
         spill_slots_(&register_allocator->int_spill_slots_),
         wide_spill_slots_(&register_allocator->long_spill_slots_),
         unhandled_(TakeUnhandledIntervals(&register_allocator->unhandled_core_intervals_)),
@@ -170,8 +171,9 @@ class RegisterAllocatorLinearScan::LinearScan {
       : codegen_(register_allocator->codegen_),
         number_of_registers_(codegen_->GetNumberOfFloatingPointRegisters()),
         register_type_(RegisterType::kFpRegister),
-        registers_blocked_for_call_(register_allocator->fp_registers_blocked_for_call_),
-        available_registers_(register_allocator->available_fp_registers_),
+        registers_blocked_for_call_(
+            register_allocator->registers_blocked_for_call_.GetFpuRegisterSet()),
+        available_registers_(register_allocator->available_registers_.GetFpuRegisterSet()),
         spill_slots_(&register_allocator->float_spill_slots_),
         wide_spill_slots_(&register_allocator->double_spill_slots_),
         unhandled_(TakeUnhandledIntervals(&register_allocator->unhandled_fp_intervals_)),
@@ -415,8 +417,9 @@ void RegisterAllocatorLinearScan::BlockRegister(Location location,
     codegen_->AddAllocatedFpuRegister(reg);
   }
   if (will_call) {
-    uint32_t registers_blocked_for_call =
-        location.IsRegister() ? core_registers_blocked_for_call_ : fp_registers_blocked_for_call_;
+    uint32_t registers_blocked_for_call = location.IsRegister()
+        ? registers_blocked_for_call_.GetCoreRegisterSet()
+        : registers_blocked_for_call_.GetFpuRegisterSet();
     if ((registers_blocked_for_call & (1u << reg)) != 0u) {
       // Register is already marked as blocked by the `block_registers_for_call_interval_`.
       return;

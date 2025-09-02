@@ -21,6 +21,7 @@
 #include "base/array_ref.h"
 #include "base/arena_object.h"
 #include "base/macros.h"
+#include "register_set.h"
 
 namespace art HIDDEN {
 
@@ -114,10 +115,8 @@ class RegisterAllocator : public DeletableArenaObject<kArenaAllocRegisterAllocat
   // Cached values calculated from codegen data.
   const size_t num_core_registers_;
   const size_t num_fp_registers_;
-  const uint32_t available_core_registers_;
-  const uint32_t available_fp_registers_;
-  const uint32_t core_registers_blocked_for_call_;
-  const uint32_t fp_registers_blocked_for_call_;
+  const RegisterSet available_registers_;
+  const RegisterSet registers_blocked_for_call_;
 };
 
 }  // namespace art
