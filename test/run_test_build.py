@@ -571,6 +571,8 @@ def create_setup_script(is64: bool):
 # This takes into account any custom behaviour defined in per-test `run.py`.
 # We generate distinct scripts for all of the pre-defined variants.
 def create_ci_runner_scripts(out, mode, test_names):
+  DEVICE_DIR = "/data/local/tmp/art"
+
   out.mkdir(parents=True)
 
   # Very simple wrapper to isolate the test execution.
@@ -580,21 +582,26 @@ def create_ci_runner_scripts(out, mode, test_names):
   # (which is visible only to this process, so there is no unmount needed later)
   chroot = out / "chroot.sh"
   chroot.write_text("\n".join([
-    "DIR=`dirname -- $0`",
-    "chmod +x $DIR/apex/com.android.art/bin/*",
-    "unshare --mount sh $DIR/chroot2.sh $@",
+    "#!/bin/sh",
+    "set -e",
+    f"unshare --mount sh {DEVICE_DIR}/chroot2.sh $@",
   ]))
   chroot2 = out / "chroot2.sh"
   chroot2.write_text("\n".join([
-    "DIR=`dirname -- $0`",
-    "mount --bind $DIR/apex/com.android.art /apex/com.android.art",
+    "#!/bin/sh",
+    "set -e",
+    f"mount --bind {DEVICE_DIR}/apex/com.android.art /apex/com.android.art",
     "script=$1",
     "shift",
     "sh $script $@",
   ]))
 
   setup = out / "setup.sh"
-  setup_script = create_setup_script(False) + create_setup_script(True)
+  setup_script = [
+    "#!/bin/sh",
+    "set -e",
+    f"chmod +x {DEVICE_DIR}/apex/com.android.art/bin/*",
+  ] + create_setup_script(False) + create_setup_script(True)
   setup.write_text("\n".join(setup_script))
   test_names = list(set(test_names) - TRADEFED_DISABLED)
   if not test_names:
@@ -617,7 +624,6 @@ def create_ci_runner_scripts(out, mode, test_names):
     f"--{mode}",
   ]
   run([python, script] + args + test_names, env=envs, check=True)
-  DEVICE_DIR = "/data/local/tmp/art"
   tests = {
     "setup#compile-boot-image": {
       "adb push": [
