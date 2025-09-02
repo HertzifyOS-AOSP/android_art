@@ -319,7 +319,7 @@ void SlowPathCodeARMVIXL::SaveLiveRegisters(CodeGenerator* codegen, LocationSumm
   CodeGeneratorARMVIXL* arm_codegen = down_cast<CodeGeneratorARMVIXL*>(codegen);
   arm_codegen->GetAssembler()->StoreRegisterList(spills.GetCoreRegisterSet(), orig_offset);
 
-  uint32_t fp_spills = spills.GetFloatingPointRegisterSet();
+  uint32_t fp_spills = spills.GetFpuRegisterSet();
   orig_offset = stack_offset;
   for (uint32_t i : LowToHighBits(fp_spills)) {
     DCHECK_LT(i, kMaximumNumberOfExpectedRegisters);
@@ -353,7 +353,7 @@ void SlowPathCodeARMVIXL::RestoreLiveRegisters(CodeGenerator* codegen, LocationS
   CodeGeneratorARMVIXL* arm_codegen = down_cast<CodeGeneratorARMVIXL*>(codegen);
   arm_codegen->GetAssembler()->LoadRegisterList(spills.GetCoreRegisterSet(), orig_offset);
 
-  uint32_t fp_spills = spills.GetFloatingPointRegisterSet();
+  uint32_t fp_spills = spills.GetFpuRegisterSet();
   while (fp_spills != 0u) {
     uint32_t begin = CTZ(fp_spills);
     uint32_t tmp = fp_spills + (1u << begin);

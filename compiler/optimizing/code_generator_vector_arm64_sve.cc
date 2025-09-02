@@ -1473,7 +1473,7 @@ void SaveRestoreLiveRegistersHelperSveImpl(CodeGeneratorARM64* codegen,
   const RegisterSet spills = codegen->GetSlowPathSpills(locations);
   DCHECK(helpers::ArtVixlRegCodeCoherentForRegSet(spills.GetCoreRegisterSet(),
                                                   codegen->GetNumberOfCoreRegisters(),
-                                                  spills.GetFloatingPointRegisterSet(),
+                                                  spills.GetFpuRegisterSet(),
                                                   codegen->GetNumberOfFloatingPointRegisters()));
   MacroAssembler* masm = codegen->GetVIXLAssembler();
   Register base = masm->StackPointer();
@@ -1489,14 +1489,14 @@ void SaveRestoreLiveRegistersHelperSveImpl(CodeGeneratorARM64* codegen,
       masm->LoadCPURegList(core_list, MemOperand(base, spill_offset));
     }
     codegen->GetAssembler()->SaveRestoreZRegisterList<is_save>(
-        spills.GetFloatingPointRegisterSet(), fp_spill_offset);
+        spills.GetFpuRegisterSet(), fp_spill_offset);
     return;
   }
 
   // Case when we only need to restore D-registers.
   DCHECK(!codegen->GetGraph()->HasSIMD());
   DCHECK_LE(codegen->GetSlowPathFPWidth(), kDRegSizeInBytes);
-  CPURegList fp_list(CPURegister::kVRegister, kDRegSize, spills.GetFloatingPointRegisterSet());
+  CPURegList fp_list(CPURegister::kVRegister, kDRegSize, spills.GetFpuRegisterSet());
   if (is_save) {
     masm->StoreCPURegList(core_list, MemOperand(base, spill_offset));
     masm->StoreCPURegList(fp_list, MemOperand(base, fp_spill_offset));

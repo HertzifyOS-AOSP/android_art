@@ -259,7 +259,7 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
   }
 
   uint32_t GetCoreSpillMask() const { return spilled_registers_.GetCoreRegisterSet(); }
-  uint32_t GetFpuSpillMask() const { return spilled_registers_.GetFloatingPointRegisterSet(); }
+  uint32_t GetFpuSpillMask() const { return spilled_registers_.GetFpuRegisterSet(); }
 
   size_t GetNumberOfCoreRegisters() const { return number_of_core_registers_; }
   size_t GetNumberOfFloatingPointRegisters() const { return number_of_fpu_registers_; }
@@ -301,7 +301,7 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
   }
 
   uint32_t GetFloatingPointCalleeSaveRegisters() const {
-    return callee_saves_.GetFloatingPointRegisterSet();
+    return callee_saves_.GetFpuRegisterSet();
   }
 
   size_t GetNumberOfCoreCalleeSaveRegisters() const {
@@ -318,7 +318,7 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
   }
 
   bool IsFloatingPointCalleeSaveRegister(int reg) const {
-    return callee_saves_.ContainsFloatingPointRegister(reg);
+    return callee_saves_.ContainsFpuRegister(reg);
   }
 
   RegisterSet GetSlowPathSpills(LocationSummary* locations) const {
@@ -443,7 +443,7 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
   }
 
   uint32_t GetBlockedFloatingPointRegisters() const {
-    return blocked_registers_.GetFloatingPointRegisterSet();
+    return blocked_registers_.GetFpuRegisterSet();
   }
 
   bool IsBlockedCoreRegister(size_t i) {
@@ -453,7 +453,7 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
 
   bool IsBlockedFloatingPointRegister(size_t i) {
     DCHECK_LT(i, number_of_fpu_registers_);
-    return blocked_registers_.ContainsFloatingPointRegister(i);
+    return blocked_registers_.ContainsFpuRegister(i);
   }
 
   // Helper that returns the offset of the array's length field.
@@ -561,7 +561,7 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
   bool HasAllocatedRegister(bool is_core, int reg) const {
     return is_core
         ? allocated_registers_.ContainsCoreRegister(reg)
-        : allocated_registers_.ContainsFloatingPointRegister(reg);
+        : allocated_registers_.ContainsFpuRegister(reg);
   }
 
   // Type consistency check, used only in debug builds.
@@ -803,7 +803,7 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
   }
 
   uint32_t GetFpuSpillSize() const {
-    return POPCOUNT(spilled_registers_.GetFloatingPointRegisterSet()) * GetCalleePreservedFPWidth();
+    return POPCOUNT(spilled_registers_.GetFpuRegisterSet()) * GetCalleePreservedFPWidth();
   }
 
   uint32_t GetCoreSpillSize() const {
@@ -814,7 +814,7 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
     // We check the core registers against 1 because it always comprises the return PC.
     RegisterSet allocated_callee_saves = allocated_registers_.Intersect(callee_saves_);
     return (POPCOUNT(allocated_callee_saves.GetCoreRegisterSet()) != 1) ||
-        (POPCOUNT(allocated_callee_saves.GetFloatingPointRegisterSet()) != 0);
+        (POPCOUNT(allocated_callee_saves.GetFpuRegisterSet()) != 0);
   }
 
   bool CallPushesPC() const {
@@ -1069,8 +1069,8 @@ class SlowPathGenerator {
     RegisterSet* live2 = i2->GetLocations()->GetLiveRegisters();
     return (((live1->GetCoreRegisterSet() & core_spill) ==
              (live2->GetCoreRegisterSet() & core_spill)) &&
-            ((live1->GetFloatingPointRegisterSet() & fpu_spill) ==
-             (live2->GetFloatingPointRegisterSet() & fpu_spill)));
+            ((live1->GetFpuRegisterSet() & fpu_spill) ==
+             (live2->GetFpuRegisterSet() & fpu_spill)));
   }
 
   // Tests if both instructions have the same stack map. This ensures the interpreter

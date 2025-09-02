@@ -1708,14 +1708,13 @@ void SaveRestoreLiveRegistersHelperNeonImpl(CodeGeneratorARM64* codegen,
   const RegisterSet spills = codegen->GetSlowPathSpills(locations);
   DCHECK(helpers::ArtVixlRegCodeCoherentForRegSet(spills.GetCoreRegisterSet(),
                                                   codegen->GetNumberOfCoreRegisters(),
-                                                  spills.GetFloatingPointRegisterSet(),
+                                                  spills.GetFpuRegisterSet(),
                                                   codegen->GetNumberOfFloatingPointRegisters()));
 
   CPURegList core_list(CPURegister::kRegister, kXRegSize, spills.GetCoreRegisterSet());
   const unsigned v_reg_size_in_bits = codegen->GetSlowPathFPWidth() * 8;
   DCHECK_LE(codegen->GetSIMDRegisterWidth(), kQRegSizeInBytes);
-  CPURegList fp_list(
-      CPURegister::kVRegister, v_reg_size_in_bits, spills.GetFloatingPointRegisterSet());
+  CPURegList fp_list(CPURegister::kVRegister, v_reg_size_in_bits, spills.GetFpuRegisterSet());
 
   MacroAssembler* masm = codegen->GetVIXLAssembler();
   UseScratchRegisterScope temps(masm);

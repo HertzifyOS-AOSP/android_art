@@ -152,7 +152,7 @@ class TestCodeGeneratorX86 : public x86::CodeGeneratorX86 {
     RegisterSet blocked_registers = RegisterSet::Empty();
     blocked_registers.AddCoreRegisterSet(
         (blocked_registers_.GetCoreRegisterSet() | (1u << x86::EBX)) & ~(1u << x86::EDI));
-    blocked_registers.AddFpuRegisterSet(blocked_registers_.GetFloatingPointRegisterSet());
+    blocked_registers.AddFpuRegisterSet(blocked_registers_.GetFpuRegisterSet());
     blocked_registers_ = blocked_registers;
   }
 };

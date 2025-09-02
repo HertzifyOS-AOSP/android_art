@@ -1688,7 +1688,7 @@ void SlowPathCode::SaveLiveRegisters(CodeGenerator* codegen, LocationSummary* lo
     stack_offset += codegen->SaveCoreRegister(stack_offset, i);
   }
 
-  for (uint32_t i : LowToHighBits(spills.GetFloatingPointRegisterSet())) {
+  for (uint32_t i : LowToHighBits(spills.GetFpuRegisterSet())) {
     DCHECK_LT(stack_offset, codegen->GetFrameSize() - codegen->FrameEntrySpillSize());
     DCHECK_LT(i, kMaximumNumberOfExpectedRegisters);
     saved_fpu_stack_offsets_[i] = stack_offset;
@@ -1706,7 +1706,7 @@ void SlowPathCode::RestoreLiveRegisters(CodeGenerator* codegen, LocationSummary*
     stack_offset += codegen->RestoreCoreRegister(stack_offset, i);
   }
 
-  for (uint32_t i : LowToHighBits(spills.GetFloatingPointRegisterSet())) {
+  for (uint32_t i : LowToHighBits(spills.GetFpuRegisterSet())) {
     DCHECK_LT(stack_offset, codegen->GetFrameSize() - codegen->FrameEntrySpillSize());
     DCHECK_LT(i, kMaximumNumberOfExpectedRegisters);
     stack_offset += codegen->RestoreFloatingPointRegister(stack_offset, i);

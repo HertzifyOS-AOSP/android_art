@@ -91,15 +91,15 @@ class IntrinsicSlowPath : public TSlowPathCode {
             CHECK(!live_registers->ContainsCoreRegister(out.reg()));
             break;
           case Location::Kind::kFpuRegister:
-            CHECK(!live_registers->ContainsFloatingPointRegister(out.reg()));
+            CHECK(!live_registers->ContainsFpuRegister(out.reg()));
             break;
           case Location::Kind::kRegisterPair:
             CHECK(!live_registers->ContainsCoreRegister(out.low()));
             CHECK(!live_registers->ContainsCoreRegister(out.high()));
             break;
           case Location::Kind::kFpuRegisterPair:
-            CHECK(!live_registers->ContainsFloatingPointRegister(out.low()));
-            CHECK(!live_registers->ContainsFloatingPointRegister(out.high()));
+            CHECK(!live_registers->ContainsFpuRegister(out.low()));
+            CHECK(!live_registers->ContainsFpuRegister(out.high()));
             break;
           default:
             break;

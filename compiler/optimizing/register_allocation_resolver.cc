@@ -257,14 +257,14 @@ size_t RegisterAllocationResolver::CalculateMaximumSafepointSpillSize(
     if (locations->OnlyCallsOnSlowPath()) {
       RegisterSet spills = codegen_->GetSlowPathSpills(locations);
       size_t core_spills = POPCOUNT(spills.GetCoreRegisterSet());
-      size_t fp_spills = POPCOUNT(spills.GetFloatingPointRegisterSet());
+      size_t fp_spills = POPCOUNT(spills.GetFpuRegisterSet());
       size_t spill_size =
           core_register_spill_size * core_spills + fp_register_spill_size * fp_spills;
       maximum_safepoint_spill_size = std::max(maximum_safepoint_spill_size, spill_size);
     } else if (locations->CallsOnMainAndSlowPath()) {
       // Nothing to spill on the slow path if the main path already clobbers caller-saves.
       DCHECK_EQ(0u, codegen_->GetSlowPathSpills(locations).GetCoreRegisterSet());
-      DCHECK_EQ(0u, codegen_->GetSlowPathSpills(locations).GetFloatingPointRegisterSet());
+      DCHECK_EQ(0u, codegen_->GetSlowPathSpills(locations).GetFpuRegisterSet());
     }
   }
   return maximum_safepoint_spill_size;

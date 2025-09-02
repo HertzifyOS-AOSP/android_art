@@ -1904,7 +1904,7 @@ void CodeGeneratorX86_64::GenerateFrameEntry() {
     size_t xmm_spill_slot_size = GetCalleePreservedFPWidth();
 
     for (int i = arraysize(kFpuCalleeSaves) - 1; i >= 0; --i) {
-      if (allocated_registers_.ContainsFloatingPointRegister(kFpuCalleeSaves[i])) {
+      if (allocated_registers_.ContainsFpuRegister(kFpuCalleeSaves[i])) {
         int offset = xmm_spill_location + (xmm_spill_slot_size * i);
         __ movsd(Address(CpuRegister(RSP), offset), XmmRegister(kFpuCalleeSaves[i]));
         __ cfi().RelOffset(DWARFReg(kFpuCalleeSaves[i]), offset);
@@ -1936,7 +1936,7 @@ void CodeGeneratorX86_64::GenerateFrameExit() {
     uint32_t xmm_spill_location = GetFpuSpillStart();
     size_t xmm_spill_slot_size = GetCalleePreservedFPWidth();
     for (size_t i = 0; i < arraysize(kFpuCalleeSaves); ++i) {
-      if (allocated_registers_.ContainsFloatingPointRegister(kFpuCalleeSaves[i])) {
+      if (allocated_registers_.ContainsFpuRegister(kFpuCalleeSaves[i])) {
         int offset = xmm_spill_location + (xmm_spill_slot_size * i);
         __ movsd(XmmRegister(kFpuCalleeSaves[i]), Address(CpuRegister(RSP), offset));
         __ cfi().Restore(DWARFReg(kFpuCalleeSaves[i]));

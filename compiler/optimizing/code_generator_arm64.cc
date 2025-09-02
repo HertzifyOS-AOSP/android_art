@@ -196,7 +196,7 @@ void SlowPathCodeARM64::SaveLiveRegisters(CodeGenerator* codegen, LocationSummar
   }
 
   const size_t fp_reg_size = codegen->GetSlowPathFPWidth();
-  for (uint32_t i : LowToHighBits(spills.GetFloatingPointRegisterSet())) {
+  for (uint32_t i : LowToHighBits(spills.GetFpuRegisterSet())) {
     DCHECK_LT(stack_offset, codegen->GetFrameSize() - codegen->FrameEntrySpillSize());
     DCHECK_LT(i, kMaximumNumberOfExpectedRegisters);
     saved_fpu_stack_offsets_[i] = stack_offset;

@@ -84,7 +84,7 @@ class RegisterAllocatorTest : public CommonCompilerTest, public OptimizingUnitTe
     }
     RegisterSet blocked_registers = RegisterSet::Empty();
     blocked_registers.AddCoreRegisterSet(blocked_core_registers);
-    blocked_registers.AddFpuRegisterSet(codegen->blocked_registers_.GetFloatingPointRegisterSet());
+    blocked_registers.AddFpuRegisterSet(codegen->blocked_registers_.GetFpuRegisterSet());
     codegen->blocked_registers_ = blocked_registers;
   }
 

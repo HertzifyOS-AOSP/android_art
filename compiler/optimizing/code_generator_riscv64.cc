@@ -6224,7 +6224,7 @@ void CodeGeneratorRISCV64::GenerateFrameEntry() {
     for (size_t i = arraysize(kFpuCalleeSaves); i != 0; ) {
       --i;
       FRegister reg = kFpuCalleeSaves[i];
-      if (allocated_registers_.ContainsFloatingPointRegister(reg)) {
+      if (allocated_registers_.ContainsFpuRegister(reg)) {
         offset -= kRiscv64DoublewordSize;
         __ FStored(reg, SP, offset);
         __ cfi().RelOffset(dwarf::Reg::Riscv64Fp(reg), offset);
@@ -6267,7 +6267,7 @@ void CodeGeneratorRISCV64::GenerateFrameExit() {
     for (size_t i = arraysize(kFpuCalleeSaves); i != 0; ) {
       --i;
       FRegister reg = kFpuCalleeSaves[i];
-      if (allocated_registers_.ContainsFloatingPointRegister(reg)) {
+      if (allocated_registers_.ContainsFpuRegister(reg)) {
         offset -= kRiscv64DoublewordSize;
         __ FLoadd(reg, SP, offset);
         __ cfi().Restore(dwarf::Reg::Riscv64Fp(reg));
