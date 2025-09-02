@@ -6031,8 +6031,7 @@ CodeGeneratorRISCV64::CodeGeneratorRISCV64(HGraph* graph,
                     kNumberOfXRegisters,
                     kNumberOfFRegisters,
                     /*number_of_register_pairs=*/ 0u,
-                    ComputeRegisterMask(kCoreCalleeSaves, arraysize(kCoreCalleeSaves)),
-                    ComputeRegisterMask(kFpuCalleeSaves, arraysize(kFpuCalleeSaves)),
+                    ComputeCalleeSaves(),
                     compiler_options,
                     stats,
                     ArrayRef<const bool>(detail::kIsIntrinsicUnimplemented)),
@@ -6062,7 +6061,7 @@ CodeGeneratorRISCV64::CodeGeneratorRISCV64(HGraph* graph,
                           graph->GetAllocator()->Adapter(kArenaAllocCodeGenerator)),
       jit_class_patches_(TypeReferenceValueComparator(),
                          graph->GetAllocator()->Adapter(kArenaAllocCodeGenerator)) {
-  SetupBlockedRegisters();
+  blocked_registers_ = ComputeBlockedRegisters(graph);
   // Always mark the RA register to be saved.
   AddAllocatedCoreRegister(RA);
 }
@@ -6225,7 +6224,7 @@ void CodeGeneratorRISCV64::GenerateFrameEntry() {
     for (size_t i = arraysize(kFpuCalleeSaves); i != 0; ) {
       --i;
       FRegister reg = kFpuCalleeSaves[i];
-      if (allocated_registers_.ContainsFloatingPointRegister(reg)) {
+      if (allocated_registers_.ContainsFpuRegister(reg)) {
         offset -= kRiscv64DoublewordSize;
         __ FStored(reg, SP, offset);
         __ cfi().RelOffset(dwarf::Reg::Riscv64Fp(reg), offset);
@@ -6268,7 +6267,7 @@ void CodeGeneratorRISCV64::GenerateFrameExit() {
     for (size_t i = arraysize(kFpuCalleeSaves); i != 0; ) {
       --i;
       FRegister reg = kFpuCalleeSaves[i];
-      if (allocated_registers_.ContainsFloatingPointRegister(reg)) {
+      if (allocated_registers_.ContainsFpuRegister(reg)) {
         offset -= kRiscv64DoublewordSize;
         __ FLoadd(reg, SP, offset);
         __ cfi().Restore(dwarf::Reg::Riscv64Fp(reg));
@@ -6474,20 +6473,31 @@ void CodeGeneratorRISCV64::AddLocationAsTemp(Location location, LocationSummary*
   }
 }
 
-inline void CodeGeneratorRISCV64::SetupBlockedRegisters() {
-  blocked_core_registers_ =
+inline RegisterSet CodeGeneratorRISCV64::ComputeCalleeSaves() {
+  RegisterSet callee_saves = RegisterSet::Empty();
+  callee_saves.AddCoreRegisterSet(
+      ComputeRegisterMask(kCoreCalleeSaves, arraysize(kCoreCalleeSaves)));
+  callee_saves.AddFpuRegisterSet(ComputeRegisterMask(kFpuCalleeSaves, arraysize(kFpuCalleeSaves)));
+  return callee_saves;
+}
+
+inline RegisterSet CodeGeneratorRISCV64::ComputeBlockedRegisters(HGraph* graph) {
+  RegisterSet blocked_registers = RegisterSet::Empty();
+  blocked_registers.AddCoreRegisterSet(
       // ZERO, GP, SP, RA, TP and TR(S1, ART Thread register) are reserved and can't be allocated.
       (1u << Zero) | (1u << GP) | (1u << SP) | (1u << RA) | (1u << TP) | (1u << TR) |
       // TMP(T6) and TMP2(T5) are used as temporary/scratch registers.
-      (1u << TMP) | (1u << TMP2);
-  blocked_fpu_registers_ = 1u << FTMP;  // FTMP(FT11) is used as temporary/scratch register.
+      (1u << TMP) | (1u << TMP2));
+  blocked_registers.AddFpuRegister(FTMP);  // FTMP(FT11) is used as temporary/scratch register.
 
-  if (GetGraph()->IsDebuggable()) {
+  if (graph->IsDebuggable()) {
     // Stubs do not save callee-save floating point registers. If the graph
     // is debuggable, we need to deal with these registers differently. For
     // now, just block them.
-    blocked_fpu_registers_ |= ComputeRegisterMask(kFpuCalleeSaves, arraysize(kFpuCalleeSaves));
+    blocked_registers.AddFpuRegisterSet(
+        ComputeRegisterMask(kFpuCalleeSaves, arraysize(kFpuCalleeSaves)));
   }
+  return blocked_registers;
 }
 
 size_t CodeGeneratorRISCV64::SaveCoreRegister(size_t stack_index, uint32_t reg_id) {

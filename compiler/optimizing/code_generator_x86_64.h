@@ -468,7 +468,6 @@ class CodeGeneratorX86_64 : public CodeGenerator {
     return GetLabelOf(block)->Position();
   }
 
-  void SetupBlockedRegisters();
   void DumpCoreRegister(std::ostream& stream, int reg) const override;
   void DumpFloatingPointRegister(std::ostream& stream, int reg) const override;
   void Finalize() override;
@@ -733,6 +732,9 @@ class CodeGeneratorX86_64 : public CodeGenerator {
   static constexpr int32_t kPlaceholder32BitOffset = 256;
 
  private:
+  static RegisterSet ComputeCalleeSaves();
+  static RegisterSet ComputeBlockedRegisters();
+
   template <linker::LinkerPatch (*Factory)(size_t, const DexFile*, uint32_t, uint32_t)>
   static void EmitPcRelativeLinkerPatches(const ArenaDeque<PatchInfo<Label>>& infos,
                                           ArenaVector<linker::LinkerPatch>* linker_patches);

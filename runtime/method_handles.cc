@@ -791,8 +791,9 @@ static bool DoMethodHandleInvokeMethod(Thread* self,
   // Restore the values of virtual registers if a virtual thread is unparking
   if (kIsVirtualThreadEnabled && self->IsVirtualThreadUnparking()) {
     interpreter::FillVirtualThreadFrame(self, new_shadow_frame);
+  } else {
+    CopyArgumentsFromCallerFrame(shadow_frame, new_shadow_frame, operands, first_dest_reg);
   }
-  CopyArgumentsFromCallerFrame(shadow_frame, new_shadow_frame, operands, first_dest_reg);
   self->EndAssertNoThreadSuspension(old_cause);
 
   PerformCall(self,

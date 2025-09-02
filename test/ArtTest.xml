@@ -20,15 +20,6 @@
         <option name="force-root" value="true" />
     </target_preparer>
 
-    <target_preparer class="com.android.tradefed.targetprep.RunCommandTargetPreparer">
-        <!-- Use the non-debug ART library to increase the odds of booting successfully -->
-        <option name="run-command" value="setprop persist.sys.dalvik.vm.lib.2 libart.so" />
-    </target_preparer>
-
-    <target_preparer class="com.android.tradefed.targetprep.InstallApexModuleTargetPreparer" >
-        <option name="test-file-name" value="com.android.art.testing.apex" />
-    </target_preparer>
-
     <test class="com.android.tradefed.testtype.ArtTest">
     </test>
 </configuration>

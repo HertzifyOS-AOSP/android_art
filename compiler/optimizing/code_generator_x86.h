@@ -485,8 +485,6 @@ class CodeGeneratorX86 : public CodeGenerator {
     return GetLabelOf(block)->Position();
   }
 
-  void SetupBlockedRegisters();
-
   void DumpCoreRegister(std::ostream& stream, int reg) const override;
   void DumpFloatingPointRegister(std::ostream& stream, int reg) const override;
 
@@ -755,6 +753,9 @@ class CodeGeneratorX86 : public CodeGenerator {
   static constexpr int32_t kPlaceholder32BitOffset = 256;
 
  private:
+  static RegisterSet ComputeCalleeSaves();
+  static RegisterSet ComputeBlockedRegisters();
+
   struct X86PcRelativePatchInfo : PatchInfo<Label> {
     X86PcRelativePatchInfo(HX86ComputeBaseMethodAddress* address,
                            const DexFile* target_dex_file,

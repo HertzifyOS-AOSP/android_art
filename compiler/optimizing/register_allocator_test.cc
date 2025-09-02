@@ -82,7 +82,10 @@ class RegisterAllocatorTest : public CommonCompilerTest, public OptimizingUnitTe
       CHECK_LT(reg, number_of_core_registers);
       blocked_core_registers &= ~(1u << reg);
     }
-    codegen->blocked_core_registers_ = blocked_core_registers;
+    RegisterSet blocked_registers = RegisterSet::Empty();
+    blocked_registers.AddCoreRegisterSet(blocked_core_registers);
+    blocked_registers.AddFpuRegisterSet(codegen->blocked_registers_.GetFpuRegisterSet());
+    codegen->blocked_registers_ = blocked_registers;
   }
 
   void TestFreeUntil(bool special_first);

@@ -735,8 +735,6 @@ class CodeGeneratorARM64 : public CodeGenerator {
 
   // Register allocation.
 
-  void SetupBlockedRegisters();
-
   size_t SaveCoreRegister(size_t stack_index, uint32_t reg_id) override;
   size_t RestoreCoreRegister(size_t stack_index, uint32_t reg_id) override;
   size_t SaveFloatingPointRegister(size_t stack_index, uint32_t reg_id) override;
@@ -1127,6 +1125,9 @@ class CodeGeneratorARM64 : public CodeGenerator {
   bool CanUseImplicitSuspendCheck() const;
 
  private:
+  static RegisterSet ComputeCalleeSaves();
+  static RegisterSet ComputeBlockedRegisters(HGraph* graph);
+
   // Encoding of thunk type and data for link-time generated thunks for Baker read barriers.
 
   enum class BakerReadBarrierKind : uint8_t {

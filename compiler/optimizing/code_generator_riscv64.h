@@ -483,8 +483,6 @@ class CodeGeneratorRISCV64 : public CodeGenerator {
 
   void MaybeGenerateInlineCacheCheck(HInstruction* instruction, XRegister klass);
 
-  void SetupBlockedRegisters();
-
   size_t SaveCoreRegister(size_t stack_index, uint32_t reg_id) override;
   size_t RestoreCoreRegister(size_t stack_index, uint32_t reg_id) override;
   size_t SaveFloatingPointRegister(size_t stack_index, uint32_t reg_id) override;
@@ -782,6 +780,9 @@ class CodeGeneratorRISCV64 : public CodeGenerator {
   void SwapLocations(Location loc1, Location loc2, DataType::Type type);
 
  private:
+  static RegisterSet ComputeCalleeSaves();
+  static RegisterSet ComputeBlockedRegisters(HGraph* graph);
+
   using Uint32ToLiteralMap = ArenaSafeMap<uint32_t, Literal*>;
   using Uint64ToLiteralMap = ArenaSafeMap<uint64_t, Literal*>;
   using StringToLiteralMap =

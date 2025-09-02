@@ -1250,12 +1250,9 @@ static inline bool DoCallCommon(ArtMethod* called_method,
   // Restore the values of virtual registers if a virtual thread is unparking
   if (kIsVirtualThreadEnabled && self->IsVirtualThreadUnparking()) {
     FillVirtualThreadFrame(self, new_shadow_frame);
-  }
-  // TODO: Consider skip the following operations, e.g. copying registers, if
-  //   a virtual thread is unparking.
-
-  // Initialize new shadow frame by copying the registers from the callee shadow frame.
-  if (!shadow_frame.GetMethod()->SkipAccessChecks()) {
+    self->EndAssertNoThreadSuspension(old_cause);
+    // Else initialize new shadow frame by copying the registers from the callee shadow frame.
+  } else if (!shadow_frame.GetMethod()->SkipAccessChecks()) {
     // Slow path.
     // We might need to do class loading, which incurs a thread state change to kNative. So
     // register the shadow frame as under construction and allow suspension again.

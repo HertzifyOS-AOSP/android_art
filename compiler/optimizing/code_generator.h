@@ -39,6 +39,7 @@
 #include "oat/oat_quick_method_header.h"
 #include "optimizing_compiler_stats.h"
 #include "read_barrier_option.h"
+#include "register_set.h"
 #include "stack.h"
 #include "subtype_check.h"
 #include "utils/assembler.h"
@@ -257,16 +258,16 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
     return GetStackOverflowReservedBytes(GetInstructionSet());
   }
 
-  uint32_t GetCoreSpillMask() const { return core_spill_mask_; }
-  uint32_t GetFpuSpillMask() const { return fpu_spill_mask_; }
+  uint32_t GetCoreSpillMask() const { return spilled_registers_.GetCoreRegisterSet(); }
+  uint32_t GetFpuSpillMask() const { return spilled_registers_.GetFpuRegisterSet(); }
 
   size_t GetNumberOfCoreRegisters() const { return number_of_core_registers_; }
   size_t GetNumberOfFloatingPointRegisters() const { return number_of_fpu_registers_; }
 
   virtual void ComputeSpillMask() {
-    core_spill_mask_ = allocated_registers_.GetCoreRegisterSet() & core_callee_save_mask_;
-    DCHECK_NE(core_spill_mask_, 0u) << "At least the return address register must be saved";
-    fpu_spill_mask_ = allocated_registers_.GetFloatingPointRegisterSet() & fpu_callee_save_mask_;
+    spilled_registers_ = allocated_registers_.Intersect(callee_saves_);
+    DCHECK_NE(spilled_registers_.GetCoreRegisterSet(), 0u)
+        << "At least the return address register must be saved";
   }
 
   virtual void DumpCoreRegister(std::ostream& stream, int reg) const = 0;
@@ -296,15 +297,15 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
   }
 
   uint32_t GetCoreCalleeSaveRegisters() const {
-    return core_callee_save_mask_;
+    return callee_saves_.GetCoreRegisterSet();
   }
 
   uint32_t GetFloatingPointCalleeSaveRegisters() const {
-    return fpu_callee_save_mask_;
+    return callee_saves_.GetFpuRegisterSet();
   }
 
   size_t GetNumberOfCoreCalleeSaveRegisters() const {
-    return POPCOUNT(core_callee_save_mask_);
+    return POPCOUNT(callee_saves_.GetCoreRegisterSet());
   }
 
   size_t GetNumberOfCoreCallerSaveRegisters() const {
@@ -313,35 +314,25 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
   }
 
   bool IsCoreCalleeSaveRegister(int reg) const {
-    return (core_callee_save_mask_ & (1 << reg)) != 0;
+    return callee_saves_.ContainsCoreRegister(reg);
   }
 
   bool IsFloatingPointCalleeSaveRegister(int reg) const {
-    return (fpu_callee_save_mask_ & (1 << reg)) != 0;
+    return callee_saves_.ContainsFpuRegister(reg);
   }
 
-  uint32_t GetSlowPathSpills(LocationSummary* locations, bool core_registers) const {
+  RegisterSet GetSlowPathSpills(LocationSummary* locations) const {
     DCHECK(locations->OnlyCallsOnSlowPath() ||
            (locations->Intrinsified() && locations->CallsOnMainAndSlowPath() &&
                !locations->HasCustomSlowPathCallingConvention()));
-    uint32_t live_registers = core_registers
-        ? locations->GetLiveRegisters()->GetCoreRegisterSet()
-        : locations->GetLiveRegisters()->GetFloatingPointRegisterSet();
+    const RegisterSet& live_registers = *locations->GetLiveRegisters();
     if (locations->HasCustomSlowPathCallingConvention()) {
       // Save only the live registers that the custom calling convention wants us to save.
-      uint32_t caller_saves = core_registers
-          ? locations->GetCustomSlowPathCallerSaves().GetCoreRegisterSet()
-          : locations->GetCustomSlowPathCallerSaves().GetFloatingPointRegisterSet();
-      return live_registers & caller_saves;
+      return live_registers.Intersect(locations->GetCustomSlowPathCallerSaves());
     } else {
       // Default ABI, we need to spill non-callee-save live registers.
-      uint32_t callee_saves = core_registers ? core_callee_save_mask_ : fpu_callee_save_mask_;
-      return live_registers & ~callee_saves;
+      return live_registers.Subtract(callee_saves_);
     }
-  }
-
-  size_t GetNumberOfSlowPathSpills(LocationSummary* locations, bool core_registers) const {
-    return POPCOUNT(GetSlowPathSpills(locations, core_registers));
   }
 
   size_t GetStackOffsetOfShouldDeoptimizeFlag() const {
@@ -447,17 +438,22 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
   void ClearSpillSlotsFromLoopPhisInStackMap(HSuspendCheck* suspend_check,
                                              HParallelMove* spills) const;
 
-  uint32_t GetBlockedCoreRegisters() const { return blocked_core_registers_; }
-  uint32_t GetBlockedFloatingPointRegisters() const { return blocked_fpu_registers_; }
+  uint32_t GetBlockedCoreRegisters() const {
+    return blocked_registers_.GetCoreRegisterSet();
+  }
+
+  uint32_t GetBlockedFloatingPointRegisters() const {
+    return blocked_registers_.GetFpuRegisterSet();
+  }
 
   bool IsBlockedCoreRegister(size_t i) {
     DCHECK_LT(i, number_of_core_registers_);
-    return (blocked_core_registers_ & (1u << i)) != 0u;
+    return blocked_registers_.ContainsCoreRegister(i);
   }
 
   bool IsBlockedFloatingPointRegister(size_t i) {
     DCHECK_LT(i, number_of_fpu_registers_);
-    return (blocked_fpu_registers_ & (1u << i)) != 0u;
+    return blocked_registers_.ContainsFpuRegister(i);
   }
 
   // Helper that returns the offset of the array's length field.
@@ -565,7 +561,7 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
   bool HasAllocatedRegister(bool is_core, int reg) const {
     return is_core
         ? allocated_registers_.ContainsCoreRegister(reg)
-        : allocated_registers_.ContainsFloatingPointRegister(reg);
+        : allocated_registers_.ContainsFpuRegister(reg);
   }
 
   // Type consistency check, used only in debug builds.
@@ -786,11 +782,10 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
                 size_t number_of_core_registers,
                 size_t number_of_fpu_registers,
                 size_t number_of_register_pairs,
-                uint32_t core_callee_save_mask,
-                uint32_t fpu_callee_save_mask,
+                RegisterSet callee_saves,
                 const CompilerOptions& compiler_options,
                 OptimizingCompilerStats* stats,
-                const art::ArrayRef<const bool>& unimplemented_intrinsics);
+                ArrayRef<const bool> unimplemented_intrinsics);
 
   template <typename RegType>
   static uint32_t ComputeRegisterMask(const RegType* registers, size_t length) {
@@ -808,17 +803,18 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
   }
 
   uint32_t GetFpuSpillSize() const {
-    return POPCOUNT(fpu_spill_mask_) * GetCalleePreservedFPWidth();
+    return POPCOUNT(spilled_registers_.GetFpuRegisterSet()) * GetCalleePreservedFPWidth();
   }
 
   uint32_t GetCoreSpillSize() const {
-    return POPCOUNT(core_spill_mask_) * GetWordSize();
+    return POPCOUNT(spilled_registers_.GetCoreRegisterSet()) * GetWordSize();
   }
 
   virtual bool HasAllocatedCalleeSaveRegisters() const {
     // We check the core registers against 1 because it always comprises the return PC.
-    return (POPCOUNT(allocated_registers_.GetCoreRegisterSet() & core_callee_save_mask_) != 1) ||
-        (POPCOUNT(allocated_registers_.GetFloatingPointRegisterSet() & fpu_callee_save_mask_) != 0);
+    RegisterSet allocated_callee_saves = allocated_registers_.Intersect(callee_saves_);
+    return (POPCOUNT(allocated_callee_saves.GetCoreRegisterSet()) != 1) ||
+        (POPCOUNT(allocated_callee_saves.GetFpuRegisterSet()) != 0);
   }
 
   bool CallPushesPC() const {
@@ -872,27 +868,27 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
 
   // Frame size required for this method.
   uint32_t frame_size_;
-  uint32_t core_spill_mask_;
-  uint32_t fpu_spill_mask_;
   uint32_t first_register_slot_in_slow_path_;
+
+  // Callee-save registers.
+  const RegisterSet callee_saves_;
+
+  // Registers that cannot be allocated. Codegens should set this up in the constructor.
+  RegisterSet blocked_registers_;
 
   // Registers that were allocated during linear scan.
   RegisterSet allocated_registers_;
+
+  // Registers spilled to the method's frame.
+  RegisterSet spilled_registers_;
 
   // Bitmask of data types that need a register pair.
   // Codegens should set this up in the constructor if any data type requires a register pair.
   uint32_t data_types_requiring_register_pair_;
 
-  // Bitmasks used when doing register allocation to know which registers we can allocate.
-  // Codegens should set these up in the constructor.
-  uint32_t blocked_core_registers_;
-  uint32_t blocked_fpu_registers_;
-
   size_t number_of_core_registers_;
   size_t number_of_fpu_registers_;
   size_t number_of_register_pairs_;
-  const uint32_t core_callee_save_mask_;
-  const uint32_t fpu_callee_save_mask_;
 
   // The order to use for code generation.
   const ArenaVector<HBasicBlock*>* block_order_;
@@ -1073,8 +1069,8 @@ class SlowPathGenerator {
     RegisterSet* live2 = i2->GetLocations()->GetLiveRegisters();
     return (((live1->GetCoreRegisterSet() & core_spill) ==
              (live2->GetCoreRegisterSet() & core_spill)) &&
-            ((live1->GetFloatingPointRegisterSet() & fpu_spill) ==
-             (live2->GetFloatingPointRegisterSet() & fpu_spill)));
+            ((live1->GetFpuRegisterSet() & fpu_spill) ==
+             (live2->GetFpuRegisterSet() & fpu_spill)));
   }
 
   // Tests if both instructions have the same stack map. This ensures the interpreter

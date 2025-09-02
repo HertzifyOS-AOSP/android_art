@@ -1601,9 +1601,7 @@ CodeGeneratorX86_64::CodeGeneratorX86_64(HGraph* graph,
                     kNumberOfCpuRegisters,
                     kNumberOfFloatRegisters,
                     kNumberOfCpuRegisterPairs,
-                    ComputeRegisterMask(kCoreCalleeSaves, arraysize(kCoreCalleeSaves))
-                        | (1 << kFakeReturnRegister),
-                    ComputeRegisterMask(kFpuCalleeSaves, arraysize(kFpuCalleeSaves)),
+                    ComputeCalleeSaves(),
                     compiler_options,
                     stats,
                     ArrayRef<const bool>(detail::kIsIntrinsicUnimplemented)),
@@ -1631,7 +1629,7 @@ CodeGeneratorX86_64::CodeGeneratorX86_64(HGraph* graph,
       jit_class_patches_(graph->GetAllocator()->Adapter(kArenaAllocCodeGenerator)),
       jit_method_type_patches_(graph->GetAllocator()->Adapter(kArenaAllocCodeGenerator)),
       fixups_to_jump_tables_(graph->GetAllocator()->Adapter(kArenaAllocCodeGenerator)) {
-  SetupBlockedRegisters();
+  blocked_registers_ = ComputeBlockedRegisters();
   AddAllocatedCoreRegister(kFakeReturnRegister);
 }
 
@@ -1641,10 +1639,20 @@ InstructionCodeGeneratorX86_64::InstructionCodeGeneratorX86_64(HGraph* graph,
         assembler_(codegen->GetAssembler()),
         codegen_(codegen) {}
 
-inline void CodeGeneratorX86_64::SetupBlockedRegisters() {
+inline RegisterSet CodeGeneratorX86_64::ComputeCalleeSaves() {
+  RegisterSet callee_saves = RegisterSet::Empty();
+  callee_saves.AddCoreRegisterSet(
+      ComputeRegisterMask(kCoreCalleeSaves, arraysize(kCoreCalleeSaves)) |
+      (1 << kFakeReturnRegister));
+  callee_saves.AddFpuRegisterSet(ComputeRegisterMask(kFpuCalleeSaves, arraysize(kFpuCalleeSaves)));
+  return callee_saves;
+}
+
+inline RegisterSet CodeGeneratorX86_64::ComputeBlockedRegisters() {
+  RegisterSet blocked_registers = RegisterSet::Empty();
   // Stack register is always reserved. Block the register used as TMP.
-  blocked_core_registers_ = (1u << RSP) | (1u << TMP);
-  DCHECK_EQ(blocked_fpu_registers_, 0u);
+  blocked_registers.AddCoreRegisterSet((1u << RSP) | (1u << TMP));
+  return blocked_registers;
 }
 
 static dwarf::Reg DWARFReg(Register reg) {
@@ -1896,7 +1904,7 @@ void CodeGeneratorX86_64::GenerateFrameEntry() {
     size_t xmm_spill_slot_size = GetCalleePreservedFPWidth();
 
     for (int i = arraysize(kFpuCalleeSaves) - 1; i >= 0; --i) {
-      if (allocated_registers_.ContainsFloatingPointRegister(kFpuCalleeSaves[i])) {
+      if (allocated_registers_.ContainsFpuRegister(kFpuCalleeSaves[i])) {
         int offset = xmm_spill_location + (xmm_spill_slot_size * i);
         __ movsd(Address(CpuRegister(RSP), offset), XmmRegister(kFpuCalleeSaves[i]));
         __ cfi().RelOffset(DWARFReg(kFpuCalleeSaves[i]), offset);
@@ -1928,7 +1936,7 @@ void CodeGeneratorX86_64::GenerateFrameExit() {
     uint32_t xmm_spill_location = GetFpuSpillStart();
     size_t xmm_spill_slot_size = GetCalleePreservedFPWidth();
     for (size_t i = 0; i < arraysize(kFpuCalleeSaves); ++i) {
-      if (allocated_registers_.ContainsFloatingPointRegister(kFpuCalleeSaves[i])) {
+      if (allocated_registers_.ContainsFpuRegister(kFpuCalleeSaves[i])) {
         int offset = xmm_spill_location + (xmm_spill_slot_size * i);
         __ movsd(XmmRegister(kFpuCalleeSaves[i]), Address(CpuRegister(RSP), offset));
         __ cfi().Restore(DWARFReg(kFpuCalleeSaves[i]));

@@ -1144,9 +1144,7 @@ CodeGeneratorX86::CodeGeneratorX86(HGraph* graph,
                     kNumberOfCpuRegisters,
                     kNumberOfXmmRegisters,
                     kNumberOfRegisterPairs,
-                    ComputeRegisterMask(kCoreCalleeSaves, arraysize(kCoreCalleeSaves)) |
-                        (1 << kFakeReturnRegister),
-                    0u,
+                    ComputeCalleeSaves(),
                     compiler_options,
                     stats,
                     ArrayRef<const bool>(detail::kIsIntrinsicUnimplemented)),
@@ -1177,15 +1175,24 @@ CodeGeneratorX86::CodeGeneratorX86(HGraph* graph,
   // `long`s require register pairs.
   data_types_requiring_register_pair_ = 1u << enum_cast<>(DataType::Type::kInt64);
 
-  SetupBlockedRegisters();
+  blocked_registers_ = ComputeBlockedRegisters();
   // Use a fake return address register to mimic Quick.
   AddAllocatedCoreRegister(kFakeReturnRegister);
 }
 
-inline void CodeGeneratorX86::SetupBlockedRegisters() {
+inline RegisterSet CodeGeneratorX86::ComputeCalleeSaves() {
+  RegisterSet callee_saves = RegisterSet::Empty();
+  callee_saves.AddCoreRegisterSet(
+      ComputeRegisterMask(kCoreCalleeSaves, arraysize(kCoreCalleeSaves)) |
+      (1 << kFakeReturnRegister));
+  return callee_saves;
+}
+
+inline RegisterSet CodeGeneratorX86::ComputeBlockedRegisters() {
+  RegisterSet blocked_registers = RegisterSet::Empty();
   // Stack register is always reserved.
-  blocked_core_registers_ = 1u << ESP;
-  DCHECK_EQ(blocked_fpu_registers_, 0u);
+  blocked_registers.AddCoreRegister(ESP);
+  return blocked_registers;
 }
 
 InstructionCodeGeneratorX86::InstructionCodeGeneratorX86(HGraph* graph, CodeGeneratorX86* codegen)
