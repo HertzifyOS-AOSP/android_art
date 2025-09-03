@@ -175,8 +175,11 @@ TEST_F(FuzzerCorpusTest, VerifyCorpusClassDexFiles) {
 
 // Tests that we can compile classes with kOptimizing from dex files without crashing.
 TEST_F(FuzzerCorpusTest, OptimizeCompileDexFiles) {
-  // These dex files are expected to pass verification. The others are regressions tests.
-  const std::unordered_set<std::string> valid_dex_files = {"Main.dex", "hello_world.dex"};
+  // TODO(solanes): All DEX files that we we will add here will compile at least one method. Update
+  // TestFuzzerHelper to accomodate this. These dex files are expected to pass verification and
+  // compile at least one method.
+  const std::unordered_set<std::string> valid_dex_files = {
+      "Main.dex", "hello_world.dex", "duplicate_methods.dex"};
   const std::string archive_filename = "optimized_compiler_fuzzer_corpus.zip";
 
   TestFuzzerHelper(archive_filename, valid_dex_files, OptimizedCompilation);
@@ -184,7 +187,9 @@ TEST_F(FuzzerCorpusTest, OptimizeCompileDexFiles) {
 
 // Tests that we can compile classes with kOptimizing from dex files without crashing.
 TEST_F(FuzzerCorpusTest, BaselineCompileDexFiles) {
-  // These dex files are expected to pass verification. The others are regressions tests.
+  // TODO(solanes): All DEX files that we we will add here will compile at least one method. Update
+  // TestFuzzerHelper to accomodate this. These dex files are expected to pass verification and
+  // compile at least one method.
   const std::unordered_set<std::string> valid_dex_files = {"Main.dex", "hello_world.dex"};
   const std::string archive_filename = "baseline_compiler_fuzzer_corpus.zip";
 
