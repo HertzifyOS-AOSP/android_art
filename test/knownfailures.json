@@ -1666,5 +1666,11 @@
                   "2042-reference-processing"],
         "env_vars": {"ART_USE_RESTRICTED_MODE": "true"},
         "description": ["Test failures when using the restricted mode for simulator."]
+    },
+    {
+        "tests": "2235-JdkUnsafeTest",
+        "description": "clang++ miscompiles `Unsafe_copyMemory0` for x86.",
+        "variant": "host & ndebug",
+        "bug": "http://b/442763202"
     }
 ]

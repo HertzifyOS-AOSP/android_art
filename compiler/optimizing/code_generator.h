@@ -296,12 +296,8 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
            !unimplemented_intrinsics_[static_cast<size_t>(invoke->GetIntrinsic())];
   }
 
-  uint32_t GetCoreCalleeSaveRegisters() const {
-    return callee_saves_.GetCoreRegisterSet();
-  }
-
-  uint32_t GetFloatingPointCalleeSaveRegisters() const {
-    return callee_saves_.GetFpuRegisterSet();
+  RegisterSet GetCalleeSaveRegisters() const {
+    return callee_saves_;
   }
 
   size_t GetNumberOfCoreCalleeSaveRegisters() const {
@@ -438,12 +434,8 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
   void ClearSpillSlotsFromLoopPhisInStackMap(HSuspendCheck* suspend_check,
                                              HParallelMove* spills) const;
 
-  uint32_t GetBlockedCoreRegisters() const {
-    return blocked_registers_.GetCoreRegisterSet();
-  }
-
-  uint32_t GetBlockedFloatingPointRegisters() const {
-    return blocked_registers_.GetFpuRegisterSet();
+  RegisterSet GetBlockedRegisters() const {
+    return blocked_registers_;
   }
 
   bool IsBlockedCoreRegister(size_t i) {

@@ -1127,7 +1127,7 @@ void CodeGenerator::RecordPcInfo(HInstruction* instruction,
       register_mask &= ~spills;
     } else {
       // The register mask must be a subset of callee-save registers.
-      DCHECK_EQ(register_mask & GetCoreCalleeSaveRegisters(), register_mask);
+      DCHECK_EQ(register_mask & GetCalleeSaveRegisters().GetCoreRegisterSet(), register_mask);
     }
   }
 

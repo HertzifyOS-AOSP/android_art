@@ -30,22 +30,15 @@
 
 namespace art HIDDEN {
 
-static uint32_t GetAvailableCoreRegisters(const CodeGenerator* codegen) {
-  return MaxInt<uint32_t>(codegen->GetNumberOfCoreRegisters()) &
-         ~codegen->GetBlockedCoreRegisters();
+static RegisterSet GetAvailableRegisters(const CodeGenerator* codegen) {
+  RegisterSet registers = RegisterSet::Empty();
+  registers.AddCoreRegisterSet(MaxInt<uint32_t>(codegen->GetNumberOfCoreRegisters()));
+  registers.AddFpuRegisterSet(MaxInt<uint32_t>(codegen->GetNumberOfFloatingPointRegisters()));
+  return registers.Subtract(codegen->GetBlockedRegisters());
 }
 
-static uint32_t GetAvailableFpRegisters(const CodeGenerator* codegen) {
-  return MaxInt<uint32_t>(codegen->GetNumberOfFloatingPointRegisters()) &
-         ~codegen->GetBlockedFloatingPointRegisters();
-}
-
-static uint32_t GetBlockedCoreRegistersForCall(const CodeGenerator* codegen) {
-  return GetAvailableCoreRegisters(codegen) & ~codegen->GetCoreCalleeSaveRegisters();
-}
-
-static uint32_t GetBlockedFpRegistersForCall(const CodeGenerator* codegen) {
-  return GetAvailableFpRegisters(codegen) & ~codegen->GetFloatingPointCalleeSaveRegisters();
+static RegisterSet GetBlockedRegistersForCall(const CodeGenerator* codegen) {
+  return GetAvailableRegisters(codegen).Subtract(codegen->GetCalleeSaveRegisters());
 }
 
 RegisterAllocator::RegisterAllocator(ScopedArenaAllocator* allocator,
@@ -56,10 +49,8 @@ RegisterAllocator::RegisterAllocator(ScopedArenaAllocator* allocator,
       liveness_(liveness),
       num_core_registers_(codegen_->GetNumberOfCoreRegisters()),
       num_fp_registers_(codegen_->GetNumberOfFloatingPointRegisters()),
-      available_core_registers_(GetAvailableCoreRegisters(codegen)),
-      available_fp_registers_(GetAvailableFpRegisters(codegen)),
-      core_registers_blocked_for_call_(GetBlockedCoreRegistersForCall(codegen)),
-      fp_registers_blocked_for_call_(GetBlockedFpRegistersForCall(codegen)) {}
+      available_registers_(GetAvailableRegisters(codegen)),
+      registers_blocked_for_call_(GetBlockedRegistersForCall(codegen)) {}
 
 std::unique_ptr<RegisterAllocator> RegisterAllocator::Create(ScopedArenaAllocator* allocator,
                                                              CodeGenerator* codegen,
@@ -134,12 +125,12 @@ uint32_t RegisterAllocator::GetRegisterMask(LiveInterval* interval,
     uint32_t registers_blocked_for_call;
     switch (register_type) {
       case RegisterType::kCoreRegister:
-        available_registers = available_core_registers_;
-        registers_blocked_for_call = core_registers_blocked_for_call_;
+        available_registers = available_registers_.GetCoreRegisterSet();
+        registers_blocked_for_call = registers_blocked_for_call_.GetCoreRegisterSet();
         break;
       case RegisterType::kFpRegister:
-        available_registers = available_fp_registers_;
-        registers_blocked_for_call = fp_registers_blocked_for_call_;
+        available_registers = available_registers_.GetFpuRegisterSet();
+        registers_blocked_for_call = registers_blocked_for_call_.GetFpuRegisterSet();
         break;
     }
     return GetBlockedRegistersMask(interval,
@@ -162,14 +153,14 @@ bool RegisterAllocator::ValidateIntervals(ArrayRef<LiveInterval* const> interval
       ? codegen.GetNumberOfCoreRegisters()
       : codegen.GetNumberOfFloatingPointRegisters();
   uint32_t blocked_registers = (register_type == RegisterType::kCoreRegister)
-      ? codegen.GetBlockedCoreRegisters()
-      : codegen.GetBlockedFloatingPointRegisters();
-  size_t available_registers = (register_type == RegisterType::kCoreRegister)
-      ? GetAvailableCoreRegisters(&codegen)
-      : GetAvailableFpRegisters(&codegen);
+      ? codegen.GetBlockedRegisters().GetCoreRegisterSet()
+      : codegen.GetBlockedRegisters().GetFpuRegisterSet();
+  uint32_t available_registers = (register_type == RegisterType::kCoreRegister)
+      ? GetAvailableRegisters(&codegen).GetCoreRegisterSet()
+      : GetAvailableRegisters(&codegen).GetFpuRegisterSet();
   uint32_t registers_blocked_for_call = (register_type == RegisterType::kCoreRegister)
-      ? GetBlockedCoreRegistersForCall(&codegen)
-      : GetBlockedFpRegistersForCall(&codegen);
+      ? GetBlockedRegistersForCall(&codegen).GetCoreRegisterSet()
+      : GetBlockedRegistersForCall(&codegen).GetFpuRegisterSet();
 
   // A copy of `GetRegisterMask()` using local `number_of_registers` and
   // `registers_blocked_for_call` instead of the cached per-type members

@@ -65,13 +65,37 @@ Java_Main_addDefaultNamespaceLibsLinkToSystemLinkerNamespace(JNIEnv*, jclass) {
 #endif
 }
 
-extern "C" JNIEXPORT void JNICALL Java_Main_init(JNIEnv*, jclass) {
+// Note that this method is used by several hiddenapi-related run tests.
+extern "C" JNIEXPORT void JNICALL Java_Main_init(JNIEnv* env, jclass) {
   Runtime* runtime = Runtime::Current();
   runtime->SetHiddenApiEnforcementPolicy(hiddenapi::EnforcementPolicy::kEnabled);
   runtime->SetCorePlatformApiEnforcementPolicy(hiddenapi::EnforcementPolicy::kEnabled);
-  runtime->SetTargetSdkVersion(
-      static_cast<uint32_t>(hiddenapi::ApiList::MaxTargetO().GetMaxAllowedSdkVersion()));
   runtime->SetDedupeHiddenApiWarnings(false);
+
+  // Set targetSdkVersion through the Java method, to get the same setting in
+  // both the Java and native instances.
+  ScopedLocalRef<jclass> runtime_class(env, env->FindClass("dalvik/system/VMRuntime"));
+  CHECK_NE(runtime_class.get(), nullptr);
+  jmethodID get_runtime =
+      env->GetStaticMethodID(runtime_class.get(), "getRuntime", "()Ldalvik/system/VMRuntime;");
+  CHECK_NE(get_runtime, nullptr);
+  ScopedLocalRef<jobject> runtime_obj(
+      env, env->CallStaticObjectMethod(runtime_class.get(), get_runtime));
+  CHECK_NE(runtime_obj.get(), nullptr);
+  jmethodID set_target_sdk_version =
+      env->GetMethodID(runtime_class.get(), "setTargetSdkVersion", "(I)V");
+  CHECK_NE(set_target_sdk_version, nullptr);
+  uint32_t target_sdk_version =
+      static_cast<uint32_t>(hiddenapi::ApiList::MaxTargetO().GetMaxAllowedSdkVersion());
+  env->CallVoidMethod(runtime_obj.get(), set_target_sdk_version, target_sdk_version);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL Java_Main_runningOnHost(JNIEnv*, jclass) {
+#ifdef ART_TARGET_ANDROID
+  return JNI_FALSE;
+#else
+  return JNI_TRUE;
+#endif
 }
 
 extern "C" JNIEXPORT void JNICALL Java_Main_setDexDomain(JNIEnv*,
