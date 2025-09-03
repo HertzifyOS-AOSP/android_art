@@ -614,13 +614,11 @@ cc_defaults {
     ],
     cflags: [
         "-DBUILDING_LIBART",
-    ] + select(release_flag("RELEASE_BUILD_CLANG_VERSION"), {
         // Clang removed a null check and causes test failure. Turn off
         // the optimization as a temporary workaround.
         // http://b/411361340
-        "clang-r563880": ["-fno-delete-null-pointer-checks"],
-        default: [],
-    }),
+        "-fno-delete-null-pointer-checks",
+    ],
 }
 
 cc_defaults {
