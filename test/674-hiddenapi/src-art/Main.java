@@ -35,6 +35,9 @@ public class Main {
     System.loadLibrary(args[0]);
     prepareNativeLibFileName(args[1]);
 
+    // Cache flag value before `init()` makes the flag method inaccessible.
+    hiddenapiJniApiCallers = com.android.art.flags.Flags.hiddenapiJniApiCallers();
+
     // Enable hidden API checks in case they are disabled by default. Sets
     // targetSdkVersion to the version for O (i.e. 27).
     init();
@@ -105,7 +108,7 @@ public class Main {
     // that hiddenapi checks the closest native caller frame over the closest
     // Java caller. Disabled on host because hiddenapi doesn't support
     // identifying domains for native callers there.
-    if (!runningOnHost() && com.android.art.flags.Flags.hiddenapiJniApiCallers()) {
+    if (!runningOnHost() && hiddenapiJniApiCallers) {
       VMRuntime.getRuntime().setTargetSdkVersion(10000); // Enable native frame check in app domain.
 
       doTest(DexDomain.CorePlatform, DexDomain.Application, false, true);
@@ -217,6 +220,8 @@ public class Main {
       new File(System.getenv("DEX_LOCATION"), "674-hiddenapi-ex.jar").getAbsolutePath();
 
   private static ClassLoader BOOT_CLASS_LOADER = Object.class.getClassLoader();
+
+  private static boolean hiddenapiJniApiCallers;
 
   private static native void addDefaultNamespaceLibsLinkToSystemLinkerNamespace();
   private static native int appendToBootClassLoader(String dexPath, boolean isCorePlatform);
