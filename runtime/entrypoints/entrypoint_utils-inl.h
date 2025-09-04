@@ -33,7 +33,6 @@
 #include "handle_scope-inl.h"
 #include "imt_conflict_table.h"
 #include "imtable-inl.h"
-#include "indirect_reference_table.h"
 #include "mirror/array-alloc-inl.h"
 #include "mirror/class-alloc-inl.h"
 #include "mirror/class-inl.h"

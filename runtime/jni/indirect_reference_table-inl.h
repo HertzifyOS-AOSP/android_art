@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef ART_RUNTIME_INDIRECT_REFERENCE_TABLE_INL_H_
-#define ART_RUNTIME_INDIRECT_REFERENCE_TABLE_INL_H_
+#ifndef ART_RUNTIME_JNI_INDIRECT_REFERENCE_TABLE_INL_H_
+#define ART_RUNTIME_JNI_INDIRECT_REFERENCE_TABLE_INL_H_
 
 #include "indirect_reference_table.h"
 
@@ -114,4 +114,4 @@ inline void IrtEntry::SetReference(ObjPtr<mirror::Object> obj) {
 
 }  // namespace art
 
-#endif  // ART_RUNTIME_INDIRECT_REFERENCE_TABLE_INL_H_
+#endif  // ART_RUNTIME_JNI_INDIRECT_REFERENCE_TABLE_INL_H_
