@@ -274,7 +274,7 @@ public final class PrimaryDexopterReporterTest extends PrimaryDexopterTestBase {
             Supplier<String> isaMatcher, ArtdDexoptResult artdDexoptResult) throws RemoteException {
         lenient()
                 .when(mArtd.dexopt(any(), anyString(), isaMatcher.get(), anyString(), anyString(),
-                        any(), any(), any(), anyInt(), any(), any()))
+                        any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(artdDexoptResult);
     }
 
@@ -291,7 +291,7 @@ public final class PrimaryDexopterReporterTest extends PrimaryDexopterTestBase {
             throws RemoteException {
         lenient()
                 .when(mArtd.dexopt(any(), anyString(), isaMatcher.get(), anyString(), anyString(),
-                        any(), any(), any(), anyInt(), any(), any()))
+                        any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenThrow(exception);
     }
 

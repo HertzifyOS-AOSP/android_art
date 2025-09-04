@@ -162,7 +162,7 @@ public class SecondaryDexopterTest {
                 .thenReturn(dexoptIsNeeded());
         lenient()
                 .when(mArtd.dexopt(any(), any(), any(), any(), any(), any(), any(), any(), anyInt(),
-                        any(), any()))
+                        any(), any(), any()))
                 .thenReturn(createArtdDexoptResult());
 
         lenient()
@@ -319,7 +319,7 @@ public class SecondaryDexopterTest {
                 false /* isInDalvikCache */, permissionSettings, false /* isPreReboot */);
         artd.dexopt(deepEq(outputArtifacts), eq(dexPath), eq(isa), eq(classLoaderContext),
                 eq("speed-profile"), deepEq(profile), any(), isNull() /* dmFile */, anyInt(),
-                argThat(dexoptOptions -> dexoptOptions.generateAppImage == true), any());
+                argThat(dexoptOptions -> dexoptOptions.generateAppImage == true), any(), any());
     }
 
     private void checkDexoptWithNoProfile(IArtd artd, String dexPath, String isa,
@@ -329,7 +329,7 @@ public class SecondaryDexopterTest {
                 false /* isInDalvikCache */, permissionSettings, false /* isPreReboot */);
         artd.dexopt(deepEq(outputArtifacts), eq(dexPath), eq(isa), eq(classLoaderContext),
                 eq(compilerFilter), isNull(), any(), isNull() /* dmFile */, anyInt(),
-                argThat(dexoptOptions -> dexoptOptions.generateAppImage == false), any());
+                argThat(dexoptOptions -> dexoptOptions.generateAppImage == false), any(), any());
     }
 
     private PermissionSettings buildPermissionSettings(boolean isPublic) {

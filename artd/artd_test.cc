@@ -503,6 +503,7 @@ class ArtdTest : public CommonArtTest {
                                               priority_class_,
                                               dexopt_options_,
                                               cancellation_signal,
+                                              ndk::ScopedFileDescriptor(),
                                               &aidl_return);
     ASSERT_THAT(status, std::move(status_matcher)) << status.getMessage();
     if (status.isOk()) {

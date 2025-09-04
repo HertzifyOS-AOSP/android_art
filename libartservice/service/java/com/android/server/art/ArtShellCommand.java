@@ -18,6 +18,7 @@ package com.android.server.art;
 
 import static android.os.ParcelFileDescriptor.AutoCloseInputStream;
 
+import static com.android.art.rw.flags.Flags.pmCompileVerboseLogging;
 import static com.android.server.art.ArtManagerLocal.SnapshotProfileException;
 import static com.android.server.art.PrimaryDexUtils.PrimaryDexInfo;
 import static com.android.server.art.ReasonMapping.BatchDexoptReason;
@@ -60,6 +61,7 @@ import com.android.server.pm.pkg.PackageState;
 import libcore.io.Streams;
 
 import java.io.File;
+import java.io.FileDescriptor;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -217,6 +219,7 @@ public final class ArtShellCommand extends BasicShellCommandHandler {
         boolean verbose = false;
         boolean forceMergeProfile = false;
         boolean forceCompilerFilter = false;
+        String verboseLogTags = null;
 
         String opt;
         while ((opt = getNextOption()) != null) {
@@ -281,6 +284,9 @@ public final class ArtShellCommand extends BasicShellCommandHandler {
                     break;
                 case "-v":
                     verbose = true;
+                    if (peekNextArg().startsWith(":")) {
+                        verboseLogTags = getNextArg().substring(1);
+                    }
                     break;
                 case "--force-merge-profile":
                     forceMergeProfile = true;
@@ -352,6 +358,9 @@ public final class ArtShellCommand extends BasicShellCommandHandler {
         if (forAllPackages) {
             // We'll iterate over all packages anyway.
             paramsBuilder.setFlags(0, ArtFlags.FLAG_SHOULD_INCLUDE_DEPENDENCIES);
+        }
+        if (verboseLogTags != null) {
+            paramsBuilder.setVerboseLogTags(verboseLogTags);
         }
 
         if (reset) {
@@ -944,7 +953,8 @@ public final class ArtShellCommand extends BasicShellCommandHandler {
     public static void printHelp(@NonNull PrintWriter pw) {
         pw.println("compile [-r COMPILATION_REASON] [-m COMPILER_FILTER] [-p PRIORITY] [-f]");
         pw.println("    [--primary-dex] [--secondary-dex] [--include-dependencies] [--full]");
-        pw.println("    [--split SPLIT_NAME] [--reset] [-a | PACKAGE_NAME]");
+        pw.println("    [--split SPLIT_NAME] [--reset] [--force-merge-profile] [-v[:LOG_TAGS]]");
+        pw.println("    [-a | PACKAGE_NAME]");
         pw.println("  Dexopt a package or all packages.");
         pw.println("  Options:");
         pw.println("    -a Dexopt all packages");
@@ -980,7 +990,10 @@ public final class ArtShellCommand extends BasicShellCommandHandler {
         pw.println("       When this flag is set, all the other flags are ignored.");
         pw.println("       One of the use cases of this command is for app developers to get a");
         pw.println("       baseline for measuring performance improvements from compilation.");
-        pw.println("    -v Verbose mode. This mode prints detailed results.");
+        pw.println("    -v Verbose mode. This mode prints detailed results. If followed by");
+        pw.println("       ':LOG_TAGS', it also sets the switches for advanced logging.");
+        pw.println("       LOG_TAGS is a comma-separated list, where available options are in:");
+        pw.println("       https://cs.android.com/search?q=s:^art::LogVerbosity$%20f:^art/libartbase/base/logging.h");
         pw.println("    --force-merge-profile Force merge profiles even if the difference between");
         pw.println("       before and after the merge is not significant.");
         pw.println("  Scope options:");
@@ -1225,7 +1238,10 @@ public final class ArtShellCommand extends BasicShellCommandHandler {
     private int dexoptPackages(@NonNull PrintWriter pw,
             @NonNull PackageManagerLocal.FilteredSnapshot snapshot,
             @NonNull List<String> packageNames, @NonNull DexoptParams params, boolean verbose) {
-        try (var signal = new WithCancellationSignal(pw, verbose)) {
+        try (var signal = new WithCancellationSignal(pw, verbose);
+                var loggingFd = SilentParcelFileDescriptor.dup(
+                        verbose && allowLogRedirection() ? getErrFileDescriptor() : null)) {
+            params = params.toBuilder().setLoggingFd(loggingFd.fd()).build();
             for (String packageName : packageNames) {
                 DexoptResult result = mInjector.getArtManagerLocal().dexoptPackage(
                         snapshot, packageName, params, signal.get());
@@ -1312,6 +1328,11 @@ public final class ArtShellCommand extends BasicShellCommandHandler {
         throw new IllegalArgumentException("Unknown batch dexopt pass " + pass);
     }
 
+    private boolean allowLogRedirection() {
+        return Build.VERSION.SDK_INT_FULL >= Build.VERSION_CODES_FULL.BAKLAVA_1
+                && pmCompileVerboseLogging();
+    }
+
     private static class WithCancellationSignal implements AutoCloseable {
         @NonNull private final CancellationSignal mSignal = new CancellationSignal();
         @NonNull private final String mJobId;
@@ -1335,9 +1356,37 @@ public final class ArtShellCommand extends BasicShellCommandHandler {
             return mSignal;
         }
 
+        @Override
         public void close() {
             synchronized (sCancellationSignalMap) {
                 sCancellationSignalMap.remove(mJobId);
+            }
+        }
+    }
+
+    /** A wrapper of {@link ParcelFileDescriptor} that handles {@link IOException}. */
+    private record SilentParcelFileDescriptor(@Nullable ParcelFileDescriptor fd)
+            implements AutoCloseable {
+        public static SilentParcelFileDescriptor dup(@Nullable FileDescriptor originalFd) {
+            if (originalFd == null) {
+                return new SilentParcelFileDescriptor(null);
+            }
+            try {
+                return new SilentParcelFileDescriptor(ParcelFileDescriptor.dup(originalFd));
+            } catch (IOException e) {
+                AsLog.w("Failed to dup FD " + originalFd.getInt$(), e);
+                return new SilentParcelFileDescriptor(null);
+            }
+        }
+
+        @Override
+        public void close() {
+            if (fd != null) {
+                try {
+                    fd.close();
+                } catch (IOException e) {
+                    AsLog.w("Failed to close FD " + fd.getFd(), e);
+                }
             }
         }
     }
