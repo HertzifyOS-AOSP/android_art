@@ -773,7 +773,6 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
   CodeGenerator(HGraph* graph,
                 size_t number_of_core_registers,
                 size_t number_of_fpu_registers,
-                size_t number_of_register_pairs,
                 RegisterSet callee_saves,
                 const CompilerOptions& compiler_options,
                 OptimizingCompilerStats* stats,
@@ -880,7 +879,6 @@ class CodeGenerator : public DeletableArenaObject<kArenaAllocCodeGenerator> {
 
   size_t number_of_core_registers_;
   size_t number_of_fpu_registers_;
-  size_t number_of_register_pairs_;
 
   // The order to use for code generation.
   const ArenaVector<HBasicBlock*>* block_order_;

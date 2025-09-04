@@ -49,6 +49,7 @@ import com.android.server.art.prereboot.PreRebootDriver.PreRebootResult;
 import com.android.server.art.prereboot.PreRebootStatsReporter;
 import com.android.server.art.proto.PreRebootStats.Status;
 import com.android.server.art.testing.CommandExecution;
+import com.android.server.art.testing.PreRebootStatsReporterHarness;
 import com.android.server.art.testing.StaticMockitoRule;
 import com.android.server.pm.PackageManagerLocal;
 
@@ -76,8 +77,8 @@ public class ArtShellCommandTest {
 
     @Mock private BackgroundDexoptJobService mJobService;
     @Mock private PreRebootDriver mPreRebootDriver;
-    @Mock private PreRebootStatsReporter mPreRebootStatsReporter;
     @Mock private JobScheduler mJobScheduler;
+    @Mock private IArtd mArtd;
     @Mock private UpdateEngine mUpdateEngine;
     @Mock private PreRebootDexoptJob.Injector mPreRebootDexoptJobInjector;
     @Mock private ArtManagerLocal.Injector mArtManagerLocalInjector;
@@ -88,9 +89,12 @@ public class ArtShellCommandTest {
     private ArtManagerLocal mArtManagerLocal;
     private JobInfo mJobInfo;
     private JobParameters mJobParameters;
+    private PreRebootStatsReporterHarness mPreRebootStatsReporterHarness;
 
     @Before
     public void setUp() throws Exception {
+        mPreRebootStatsReporterHarness = new PreRebootStatsReporterHarness();
+
         lenient()
                 .when(SystemProperties.getBoolean(eq("dalvik.vm.enable_pr_dexopt"), anyBoolean()))
                 .thenReturn(true);
@@ -121,8 +125,9 @@ public class ArtShellCommandTest {
                 .thenReturn(mPreRebootDriver);
         lenient()
                 .when(mPreRebootDexoptJobInjector.getStatsReporter())
-                .thenReturn(mPreRebootStatsReporter);
+                .thenReturn(mPreRebootStatsReporterHarness.createStatsReporter());
         lenient().when(mPreRebootDexoptJobInjector.getJobScheduler()).thenReturn(mJobScheduler);
+        lenient().when(mPreRebootDexoptJobInjector.getArtd()).thenReturn(mArtd);
         lenient().when(mPreRebootDexoptJobInjector.getUpdateEngine()).thenReturn(mUpdateEngine);
         mPreRebootDexoptJob = new PreRebootDexoptJob(mPreRebootDexoptJobInjector);
 

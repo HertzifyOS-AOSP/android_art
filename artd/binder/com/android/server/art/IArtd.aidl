@@ -346,6 +346,25 @@ interface IArtd {
      */
     boolean checkPreRebootSystemRequirements(@utf8InCpp String chrootDir);
 
+    /**
+     * Returns the status of the Pre-reboot Dexopt staged files, determined based on the metadata
+     * file, or null if the metadata doesn't exist.
+     *
+     * Not supported in Pre-reboot Dexopt mode.
+     *
+     * Throws non-fatal errors.
+     */
+    @nullable com.android.server.art.PreRebootStagedFilesStatus checkPreRebootStagedFilesStatus();
+
+    /**
+     * Deletes the Pre-reboot Dexopt staged metadata file.
+     *
+     * Not supported in Pre-reboot Dexopt mode.
+     *
+     * Throws non-fatal errors.
+     */
+    void deletePreRebootStagedMetadata();
+
     // The methods below are only for Pre-reboot Dexopt and only supported in Pre-reboot Dexopt
     // mode.
 

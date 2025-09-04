@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef ART_RUNTIME_INDIRECT_REFERENCE_TABLE_H_
-#define ART_RUNTIME_INDIRECT_REFERENCE_TABLE_H_
+#ifndef ART_RUNTIME_JNI_INDIRECT_REFERENCE_TABLE_H_
+#define ART_RUNTIME_JNI_INDIRECT_REFERENCE_TABLE_H_
 
 #include <stdint.h>
 
@@ -331,4 +331,4 @@ class IndirectReferenceTable {
 
 }  // namespace art
 
-#endif  // ART_RUNTIME_INDIRECT_REFERENCE_TABLE_H_
+#endif  // ART_RUNTIME_JNI_INDIRECT_REFERENCE_TABLE_H_

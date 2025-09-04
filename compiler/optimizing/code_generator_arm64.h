@@ -748,7 +748,6 @@ class CodeGeneratorARM64 : public CodeGenerator {
   // can easily be mapped via to or from their type and index or code.
   static const int kNumberOfAllocatableRegisters = vixl::aarch64::kNumberOfRegisters - 1;
   static const int kNumberOfAllocatableFPRegisters = vixl::aarch64::kNumberOfVRegisters;
-  static constexpr int kNumberOfAllocatableRegisterPairs = 0;
 
   void DumpCoreRegister(std::ostream& stream, int reg) const override;
   void DumpFloatingPointRegister(std::ostream& stream, int reg) const override;

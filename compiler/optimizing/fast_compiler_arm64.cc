@@ -3331,7 +3331,7 @@ bool FastCompilerARM64::Compile() {
                                   /* core_spill_mask= */ 0u,
                                   /* fp_spill_mask= */ 0u,
                                   GetCodeItemAccessor().RegistersSize(),
-                                  /* is_compiling_baseline= */ true,
+                                  /* is_compiling_baseline= */ false,
                                   /* is_debuggable= */ false,
                                   /* has_should_deoptimize_flag= */ false,
                                   /* is_fast= */ true);

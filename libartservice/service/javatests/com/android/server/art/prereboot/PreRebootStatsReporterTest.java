@@ -35,6 +35,7 @@ import com.android.server.art.proto.PreRebootStats.FailureReason;
 import com.android.server.art.proto.PreRebootStats.JobRun;
 import com.android.server.art.proto.PreRebootStats.JobType;
 import com.android.server.art.proto.PreRebootStats.Status;
+import com.android.server.art.testing.PreRebootStatsReporterHarness;
 import com.android.server.pm.PackageManagerLocal;
 
 import org.junit.Before;
@@ -43,7 +44,6 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnitRunner;
 
-import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.util.List;
@@ -55,19 +55,18 @@ public class PreRebootStatsReporterTest {
     private static final String PKG_NAME_BAR = "com.example.bar";
     private static final String PKG_NAME_BAZ = "com.example.baz";
 
-    @Mock private PreRebootStatsReporter.Injector mInjector;
     @Mock private PackageManagerLocal mPackageManagerLocal;
     @Mock private PackageManagerLocal.FilteredSnapshot mSnapshot;
     @Mock private ArtManagerLocal mArtManagerLocal;
-    private File mTempFile;
+    private PreRebootStatsReporterHarness mReporterHarness;
+    private PreRebootStatsReporter.Injector mInjector;
 
     @Before
     public void setUp() throws Exception {
-        lenient().when(mPackageManagerLocal.withFilteredSnapshot()).thenReturn(mSnapshot);
+        mReporterHarness = new PreRebootStatsReporterHarness();
+        mInjector = mReporterHarness.getInjector();
 
-        mTempFile = File.createTempFile("pre-reboot-stats", ".pb");
-        mTempFile.deleteOnExit();
-        lenient().when(mInjector.getFilename()).thenReturn(mTempFile.getAbsolutePath());
+        lenient().when(mPackageManagerLocal.withFilteredSnapshot()).thenReturn(mSnapshot);
 
         lenient().when(mInjector.getPackageManagerLocal()).thenReturn(mPackageManagerLocal);
         lenient().when(mInjector.getArtManagerLocal()).thenReturn(mArtManagerLocal);
@@ -75,7 +74,7 @@ public class PreRebootStatsReporterTest {
 
     @Test
     public void testSuccess() throws Exception {
-        var reporter = new PreRebootStatsReporter(mInjector);
+        var reporter = mReporterHarness.createStatsReporter();
 
         doReturn(50l).when(mInjector).getCurrentTimeMillis();
         reporter.recordJobScheduled(true /* isAsync */, false /* isOtaUpdate */);
@@ -100,7 +99,7 @@ public class PreRebootStatsReporterTest {
                             .setPackagesWithArtifactsBeforeRebootCount(0)
                             .build());
 
-            var reporterInChroot = new PreRebootStatsReporter(mInjector);
+            var reporterInChroot = mReporterHarness.createStatsReporter();
             var progressSession = reporterInChroot.new ProgressSession();
 
             progressSession.recordProgress(1 /* skippedPackageCount */,
@@ -154,7 +153,7 @@ public class PreRebootStatsReporterTest {
                             .setPackagesWithArtifactsBeforeRebootCount(0)
                             .build());
 
-            var reporterInChroot = new PreRebootStatsReporter(mInjector);
+            var reporterInChroot = mReporterHarness.createStatsReporter();
             var progressSession = reporterInChroot.new ProgressSession();
 
             progressSession.recordProgress(1 /* skippedPackageCount */,
@@ -197,8 +196,10 @@ public class PreRebootStatsReporterTest {
         }
 
         {
-            var reporterAfterReboot = new PreRebootStatsReporter(mInjector);
+            var reporterAfterReboot = mReporterHarness.createStatsReporter();
             var afterRebootSession = reporterAfterReboot.new AfterRebootSession();
+            afterRebootSession.recordArtifactsEndStatus(
+                    PreRebootStatsReporter.END_STATUS_COMMITTED, 2000 /* ageMillis */);
 
             // For primary dex.
             afterRebootSession.recordPackageWithArtifacts(PKG_NAME_FOO);
@@ -237,7 +238,7 @@ public class PreRebootStatsReporterTest {
                     .when(mArtManagerLocal)
                     .getDexoptStatus(mSnapshot, PKG_NAME_BAZ);
 
-            afterRebootSession.report();
+            afterRebootSession.reportAsync();
         }
 
         verify(mInjector).writeStats(ArtStatsLog.PREREBOOT_DEXOPT_JOB_ENDED,
@@ -249,12 +250,14 @@ public class PreRebootStatsReporterTest {
                 2 /* packagesWithArtifactsUsableAfterRebootCount */, 2 /* jobRunCount */,
                 8 /* packagesWithArtifactsBeforeRebootCount */,
                 ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__JOB_TYPE__JOB_TYPE_MAINLINE,
-                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__FAILURE_REASON__FAILURE_UNSPECIFIED);
+                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__FAILURE_REASON__FAILURE_UNSPECIFIED,
+                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__ARTIFACTS_END_STATUS__END_STATUS_COMMITTED,
+                2000 /* artifactsAgeMillis */);
     }
 
     @Test
     public void testSuccessSync() throws Exception {
-        var reporter = new PreRebootStatsReporter(mInjector);
+        var reporter = mReporterHarness.createStatsReporter();
 
         reporter.recordJobScheduled(false /* isAsync */, true /* isOtaUpdate */);
         checkProto(PreRebootStats.newBuilder()
@@ -276,7 +279,7 @@ public class PreRebootStatsReporterTest {
                             .setPackagesWithArtifactsBeforeRebootCount(0)
                             .build());
 
-            var reporterInChroot = new PreRebootStatsReporter(mInjector);
+            var reporterInChroot = mReporterHarness.createStatsReporter();
             var progressSession = reporterInChroot.new ProgressSession();
 
             progressSession.recordProgress(1 /* skippedPackageCount */,
@@ -311,10 +314,12 @@ public class PreRebootStatsReporterTest {
         }
 
         {
-            var reporterAfterReboot = new PreRebootStatsReporter(mInjector);
+            var reporterAfterReboot = mReporterHarness.createStatsReporter();
             var afterRebootSession = reporterAfterReboot.new AfterRebootSession();
+            afterRebootSession.recordArtifactsEndStatus(
+                    PreRebootStatsReporter.END_STATUS_COMMITTED, 2000 /* ageMillis */);
 
-            afterRebootSession.report();
+            afterRebootSession.reportAsync();
         }
 
         verify(mInjector).writeStats(ArtStatsLog.PREREBOOT_DEXOPT_JOB_ENDED,
@@ -326,12 +331,14 @@ public class PreRebootStatsReporterTest {
                 0 /* packagesWithArtifactsUsableAfterRebootCount */, 1 /* jobRunCount */,
                 8 /* packagesWithArtifactsBeforeRebootCount */,
                 ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__JOB_TYPE__JOB_TYPE_OTA,
-                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__FAILURE_REASON__FAILURE_UNSPECIFIED);
+                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__FAILURE_REASON__FAILURE_UNSPECIFIED,
+                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__ARTIFACTS_END_STATUS__END_STATUS_COMMITTED,
+                2000 /* artifactsAgeMillis */);
     }
 
     private void checkFailure(Status status, FailureReason failureReason, int statusForStatsd,
             int failureReasonForStatsd) throws Exception {
-        var reporter = new PreRebootStatsReporter(mInjector);
+        var reporter = mReporterHarness.createStatsReporter();
 
         doReturn(50l).when(mInjector).getCurrentTimeMillis();
         reporter.recordJobScheduled(true /* isAsync */, false /* isOtaUpdate */);
@@ -375,10 +382,12 @@ public class PreRebootStatsReporterTest {
         }
 
         {
-            var reporterAfterReboot = new PreRebootStatsReporter(mInjector);
+            var reporterAfterReboot = mReporterHarness.createStatsReporter();
             var afterRebootSession = reporterAfterReboot.new AfterRebootSession();
+            afterRebootSession.recordArtifactsEndStatus(
+                    PreRebootStatsReporter.END_STATUS_MISSING, 0 /* ageMillis */);
 
-            afterRebootSession.report();
+            afterRebootSession.reportAsync();
         }
 
         verify(mInjector).writeStats(ArtStatsLog.PREREBOOT_DEXOPT_JOB_ENDED, statusForStatsd,
@@ -388,7 +397,9 @@ public class PreRebootStatsReporterTest {
                 0 /* packagesWithArtifactsUsableAfterRebootCount */, 1 /* jobRunCount */,
                 0 /* packagesWithArtifactsBeforeRebootCount */,
                 ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__JOB_TYPE__JOB_TYPE_MAINLINE,
-                failureReasonForStatsd);
+                failureReasonForStatsd,
+                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__ARTIFACTS_END_STATUS__END_STATUS_MISSING,
+                0 /* artifactsAgeMillis */);
     }
 
     @Test
@@ -407,7 +418,7 @@ public class PreRebootStatsReporterTest {
 
     @Test
     public void testStarted() throws Exception {
-        var reporter = new PreRebootStatsReporter(mInjector);
+        var reporter = mReporterHarness.createStatsReporter();
 
         doReturn(50l).when(mInjector).getCurrentTimeMillis();
         reporter.recordJobScheduled(true /* isAsync */, false /* isOtaUpdate */);
@@ -432,7 +443,7 @@ public class PreRebootStatsReporterTest {
                             .setPackagesWithArtifactsBeforeRebootCount(0)
                             .build());
 
-            var reporterInChroot = new PreRebootStatsReporter(mInjector);
+            var reporterInChroot = mReporterHarness.createStatsReporter();
             var progressSession = reporterInChroot.new ProgressSession();
 
             progressSession.recordProgress(1 /* skippedPackageCount */,
@@ -452,10 +463,12 @@ public class PreRebootStatsReporterTest {
         }
 
         {
-            var reporterAfterReboot = new PreRebootStatsReporter(mInjector);
+            var reporterAfterReboot = mReporterHarness.createStatsReporter();
             var afterRebootSession = reporterAfterReboot.new AfterRebootSession();
+            afterRebootSession.recordArtifactsEndStatus(
+                    PreRebootStatsReporter.END_STATUS_COMMITTED, 2000 /* ageMillis */);
 
-            afterRebootSession.report();
+            afterRebootSession.reportAsync();
         }
 
         verify(mInjector).writeStats(ArtStatsLog.PREREBOOT_DEXOPT_JOB_ENDED,
@@ -466,12 +479,14 @@ public class PreRebootStatsReporterTest {
                 0 /* packagesWithArtifactsUsableAfterRebootCount */, 1 /* jobRunCount */,
                 4 /* packagesWithArtifactsBeforeRebootCount */,
                 ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__JOB_TYPE__JOB_TYPE_MAINLINE,
-                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__FAILURE_REASON__FAILURE_UNSPECIFIED);
+                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__FAILURE_REASON__FAILURE_UNSPECIFIED,
+                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__ARTIFACTS_END_STATUS__END_STATUS_COMMITTED,
+                2000 /* artifactsAgeMillis */);
     }
 
     @Test
     public void testScheduled() throws Exception {
-        var reporter = new PreRebootStatsReporter(mInjector);
+        var reporter = mReporterHarness.createStatsReporter();
 
         doReturn(50l).when(mInjector).getCurrentTimeMillis();
         reporter.recordJobScheduled(true /* isAsync */, false /* isOtaUpdate */);
@@ -481,12 +496,7 @@ public class PreRebootStatsReporterTest {
                         .setJobScheduledTimestampMillis(50)
                         .build());
 
-        {
-            var reporterAfterReboot = new PreRebootStatsReporter(mInjector);
-            var afterRebootSession = reporterAfterReboot.new AfterRebootSession();
-
-            afterRebootSession.report();
-        }
+        mReporterHarness.recordFakeAfterRebootDataAndReport();
 
         verify(mInjector).writeStats(ArtStatsLog.PREREBOOT_DEXOPT_JOB_ENDED,
                 ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__STATUS__STATUS_SCHEDULED,
@@ -496,12 +506,14 @@ public class PreRebootStatsReporterTest {
                 0 /* packagesWithArtifactsUsableAfterRebootCount */, 0 /* jobRunCount */,
                 0 /* packagesWithArtifactsBeforeRebootCount */,
                 ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__JOB_TYPE__JOB_TYPE_MAINLINE,
-                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__FAILURE_REASON__FAILURE_UNSPECIFIED);
+                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__FAILURE_REASON__FAILURE_UNSPECIFIED,
+                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__ARTIFACTS_END_STATUS__END_STATUS_MISSING,
+                0 /* artifactsAgeMillis */);
     }
 
     @Test
     public void testNotScheduled() throws Exception {
-        var reporter = new PreRebootStatsReporter(mInjector);
+        var reporter = mReporterHarness.createStatsReporter();
 
         reporter.recordJobNotScheduled(
                 Status.STATUS_NOT_SCHEDULED_DISABLED, false /* isOtaUpdate */);
@@ -510,12 +522,7 @@ public class PreRebootStatsReporterTest {
                         .setJobType(JobType.JOB_TYPE_MAINLINE)
                         .build());
 
-        {
-            var reporterAfterReboot = new PreRebootStatsReporter(mInjector);
-            var afterRebootSession = reporterAfterReboot.new AfterRebootSession();
-
-            afterRebootSession.report();
-        }
+        mReporterHarness.recordFakeAfterRebootDataAndReport();
 
         verify(mInjector).writeStats(ArtStatsLog.PREREBOOT_DEXOPT_JOB_ENDED,
                 ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__STATUS__STATUS_NOT_SCHEDULED_DISABLED,
@@ -525,12 +532,14 @@ public class PreRebootStatsReporterTest {
                 0 /* packagesWithArtifactsUsableAfterRebootCount */, 0 /* jobRunCount */,
                 0 /* packagesWithArtifactsBeforeRebootCount */,
                 ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__JOB_TYPE__JOB_TYPE_MAINLINE,
-                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__FAILURE_REASON__FAILURE_UNSPECIFIED);
+                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__FAILURE_REASON__FAILURE_UNSPECIFIED,
+                ArtStatsLog.PRE_REBOOT_DEXOPT_JOB_ENDED__ARTIFACTS_END_STATUS__END_STATUS_MISSING,
+                0 /* artifactsAgeMillis */);
     }
 
     private void checkProto(PreRebootStats expected) throws Exception {
         PreRebootStats actual;
-        try (InputStream in = new FileInputStream(mTempFile.getPath())) {
+        try (InputStream in = new FileInputStream(mInjector.getFilename())) {
             actual = PreRebootStats.parseFrom(in);
         }
         assertThat(actual).isEqualTo(expected);
