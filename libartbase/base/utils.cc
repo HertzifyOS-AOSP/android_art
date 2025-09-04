@@ -530,7 +530,7 @@ std::string GetOSPressureIOSummary() {
 #if defined(__linux__)
   int stat_fd = open("/proc/pressure/io", O_RDONLY | O_CLOEXEC);
   if (stat_fd < 0) {
-    return nullptr;
+    return "";
   }
   static constexpr size_t kBufSize = 150;
   char tmp_buf[kBufSize + 1];
@@ -545,25 +545,25 @@ std::string GetOSPressureIOSummary() {
   DCHECK_EQ(0, strncmp(in, "some ", strlen("some ")));
   out = memcpy_fields(out, in, tmp_buf + kBufSize, 3);
   if (out == nullptr) {
-    return nullptr;
+    return "";
   }
   in += out - buf;
   *out++ = ',';
   *out++ = ' ';
   while (*in++ != '\n') {
     if (in >= tmp_buf + kBufSize) {
-      return nullptr;
+      return "";
     }
   }
   DCHECK_EQ(0, strncmp(in, "full ", strlen("full ")));
   out = memcpy_fields(out, in, tmp_buf + kBufSize, 3);
   if (out == nullptr) {
-    return nullptr;
+    return "";
   }
   *out++ = '\0';
   return std::string(buf);
 #else
-  return nullptr;
+  return "";
 #endif
 }
 
