@@ -584,7 +584,7 @@ def create_ci_runner_scripts(out, mode, test_names):
   chroot.write_text("\n".join([
     "#!/bin/sh",
     "set -e",
-    f"unshare --mount sh {DEVICE_DIR}/chroot2.sh $@",
+    f"su root unshare --mount sh {DEVICE_DIR}/chroot2.sh $@",
   ]))
   chroot2 = out / "chroot2.sh"
   chroot2.write_text("\n".join([
