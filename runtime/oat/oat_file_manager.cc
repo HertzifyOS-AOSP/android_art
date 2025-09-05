@@ -665,12 +665,12 @@ static bool UnlinkLeastRecentlyUsedVdexIfNeeded(const std::string& vdex_path_to_
 
   std::vector<std::pair<time_t, std::string>> cache;
 
-  DIR* c_dir = opendir(vdex_dir.c_str());
+  std::unique_ptr<DIR, int (*)(DIR*)> c_dir(opendir(vdex_dir.c_str()), closedir);
   if (c_dir == nullptr) {
     *error_msg = "Unable to open " + vdex_dir + " to delete unused vdex files";
     return false;
   }
-  for (struct dirent* de = readdir(c_dir); de != nullptr; de = readdir(c_dir)) {
+  for (struct dirent* de = readdir(c_dir.get()); de != nullptr; de = readdir(c_dir.get())) {
     if (de->d_type != DT_REG) {
       continue;
     }
@@ -689,7 +689,6 @@ static bool UnlinkLeastRecentlyUsedVdexIfNeeded(const std::string& vdex_path_to_
 
     cache.push_back(std::make_pair(s.st_atime, fullname));
   }
-  CHECK_EQ(0, closedir(c_dir)) << "Unable to close directory.";
 
   if (cache.size() < OatFileManager::kAnonymousVdexCacheSize) {
     return true;
