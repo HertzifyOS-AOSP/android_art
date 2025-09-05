@@ -509,6 +509,7 @@ art_cc_defaults {
         "optimizing/prepare_for_register_allocation_test.cc",
         "optimizing/pretty_printer_test.cc",
         "optimizing/reference_type_propagation_test.cc",
+        "optimizing/register_allocator_test.cc",
         "optimizing/side_effects_test.cc",
         "optimizing/ssa_liveness_analysis_test.cc",
         "optimizing/ssa_test.cc",
@@ -545,10 +546,6 @@ art_cc_defaults {
         x86: {
             srcs: [
                 "utils/x86/managed_register_x86_test.cc",
-
-                // This test is testing architecture-independent functionality,
-                // but happens to use x86 codegen as part of the test.
-                "optimizing/register_allocator_test.cc",
             ],
         },
         x86_64: {
