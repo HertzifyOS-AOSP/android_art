@@ -395,7 +395,7 @@ void EnterInterpreterFromInvoke(Thread* self,
   ShadowFrame* shadow_frame = shadow_frame_unique_ptr.get();
   uint32_t shorty_len = 0;
   const char* shorty = method->GetShorty(&shorty_len);
-  if (kIsVirtualThreadEnabled && self->IsVirtualThreadUnparking()) {
+  if (kIsVirtualThreadEnabled && UNLIKELY(self->IsVirtualThreadUnparking())) {
     interpreter::FillVirtualThreadFrame(self, shadow_frame);
   } else {
     size_t cur_reg = num_regs - num_ins;

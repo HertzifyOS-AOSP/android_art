@@ -1248,7 +1248,7 @@ static inline bool DoCallCommon(ArtMethod* called_method,
       CREATE_SHADOW_FRAME(num_regs, called_method, /* dex pc */ 0);
   ShadowFrame* new_shadow_frame = shadow_frame_unique_ptr.get();
   // Restore the values of virtual registers if a virtual thread is unparking
-  if (kIsVirtualThreadEnabled && self->IsVirtualThreadUnparking()) {
+  if (kIsVirtualThreadEnabled && UNLIKELY(self->IsVirtualThreadUnparking())) {
     FillVirtualThreadFrame(self, new_shadow_frame);
     self->EndAssertNoThreadSuspension(old_cause);
     // Else initialize new shadow frame by copying the registers from the callee shadow frame.

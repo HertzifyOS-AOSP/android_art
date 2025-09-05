@@ -789,7 +789,7 @@ static bool DoMethodHandleInvokeMethod(Thread* self,
       CREATE_SHADOW_FRAME(num_regs, called_method, /* dex pc */ 0);
   ShadowFrame* new_shadow_frame = shadow_frame_unique_ptr.get();
   // Restore the values of virtual registers if a virtual thread is unparking
-  if (kIsVirtualThreadEnabled && self->IsVirtualThreadUnparking()) {
+  if (kIsVirtualThreadEnabled && UNLIKELY(self->IsVirtualThreadUnparking())) {
     interpreter::FillVirtualThreadFrame(self, new_shadow_frame);
   } else {
     CopyArgumentsFromCallerFrame(shadow_frame, new_shadow_frame, operands, first_dest_reg);
