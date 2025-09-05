@@ -1285,6 +1285,7 @@ public final class ArtManagerLocal {
                 } else {
                     var statsAfterRebootSession =
                             mInjector.getPreRebootStatsReporter().new AfterRebootSession();
+                    statsAfterRebootSession.setExpectFound(false);
                     statsAfterRebootSession.recordArtifactsEndStatus(
                             PreRebootStatsReporter.END_STATUS_EXPIRED,
                             stagedFilesAge != null ? stagedFilesAge.age().toMillis() : 0);

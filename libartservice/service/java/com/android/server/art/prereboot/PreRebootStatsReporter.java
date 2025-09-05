@@ -40,6 +40,7 @@ import com.android.server.pm.PackageManagerLocal;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -192,6 +193,7 @@ public class PreRebootStatsReporter {
         private @NonNull Set<String> mPackagesWithArtifacts = new HashSet<>();
         private int mArtifactsEndStatus = END_STATUS_UNSPECIFIED;
         private long mArtifactsAgeMillis = 0;
+        private boolean mExpectFound = true;
 
         public void recordPackageWithArtifacts(@NonNull String packageName) {
             mPackagesWithArtifacts.add(packageName);
@@ -200,6 +202,10 @@ public class PreRebootStatsReporter {
         public void recordArtifactsEndStatus(int status, long ageMillis) {
             mArtifactsEndStatus = status;
             mArtifactsAgeMillis = ageMillis;
+        }
+
+        public void setExpectFound(boolean value) {
+            mExpectFound = value;
         }
 
         public void reportAsync() {
@@ -214,7 +220,7 @@ public class PreRebootStatsReporter {
         public void report() {
             Utils.check(mArtifactsEndStatus != END_STATUS_UNSPECIFIED);
 
-            PreRebootStats.Builder statsBuilder = load();
+            PreRebootStats.Builder statsBuilder = load(mExpectFound);
             delete();
 
             if (statsBuilder.getStatus() == Status.STATUS_UNKNOWN) {
@@ -332,12 +338,19 @@ public class PreRebootStatsReporter {
 
     @NonNull
     private PreRebootStats.Builder load() {
+        return load(true /* expectFound */);
+    }
+
+    @NonNull
+    private PreRebootStats.Builder load(boolean expectFound) {
         PreRebootStats.Builder statsBuilder = PreRebootStats.newBuilder();
         try (InputStream in = new FileInputStream(mInjector.getFilename())) {
             statsBuilder.mergeFrom(in);
         } catch (IOException e) {
             // Nothing else we can do but to start from scratch.
-            AsLog.e("Failed to load pre-reboot stats", e);
+            if (expectFound || !(e instanceof FileNotFoundException)) {
+                AsLog.e("Failed to load pre-reboot stats", e);
+            }
         }
         return statsBuilder;
     }
