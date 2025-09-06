@@ -627,6 +627,7 @@ public class PreRebootDexoptJob implements ArtServiceJobInterface {
             AsLog.e("Failed to clean up obsolete Pre-reboot staged files", e);
         } finally {
             var statsAfterRebootSession = mInjector.getStatsReporter().new AfterRebootSession();
+            statsAfterRebootSession.setExpectFound(false);
             statsAfterRebootSession.recordArtifactsEndStatus(
                     PreRebootStatsReporter.END_STATUS_SUPERSEDED,
                     status != null ? mInjector.getCurrentTimeMillis() - status.createdAtMillis : 0);

@@ -80,7 +80,6 @@ inline mirror::Object* Heap::AllocObjectWithAllocator(Thread* self,
   // bytes allocated for the (individual) object.
   size_t bytes_allocated;
   size_t usable_size;
-  size_t new_num_bytes_allocated = 0;
   NeedGc need_gc = kNoNeedGc;
   uint32_t starting_gc_num;  // o.w. GC number at which we observed need for GC.
   {
@@ -193,19 +192,7 @@ inline mirror::Object* Heap::AllocObjectWithAllocator(Thread* self,
     }
     if (bytes_tl_bulk_allocated > 0) {
       starting_gc_num = GetCurrentGcNum();
-      size_t num_bytes_allocated_before = AddBytesAllocated(bytes_tl_bulk_allocated);
-      new_num_bytes_allocated = num_bytes_allocated_before + bytes_tl_bulk_allocated;
-      // Only trace when we get an increase in the number of bytes allocated. This happens when
-      // obtaining a new TLAB and isn't often enough to hurt performance according to golem.
-      if (region_space_) {
-        // With CC collector, during a GC cycle, the heap usage increases as
-        // there are two copies of evacuated objects. Therefore, add evac-bytes
-        // to the heap size. When the GC cycle is not running, evac-bytes
-        // are 0, as required.
-        TraceHeapSize(new_num_bytes_allocated + region_space_->EvacBytes());
-      } else {
-        TraceHeapSize(new_num_bytes_allocated);
-      }
+      size_t new_num_bytes_allocated = UpdateAndReportBytesAllocated(bytes_tl_bulk_allocated);
       // IsGcConcurrent() isn't known at compile time so we can optimize by not checking it for the
       // BumpPointer or TLAB allocators. This is nice since it allows the entire if statement to be
       // optimized out.

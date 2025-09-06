@@ -148,6 +148,7 @@ using ::art::tools::Fatal;
 using ::art::tools::GetProcMountsAncestorsOfPath;
 using ::art::tools::NonFatal;
 using ::ndk::ScopedAStatus;
+using ::ndk::ScopedFileDescriptor;
 
 using PrimaryCurProfilePath = ProfilePath::PrimaryCurProfilePath;
 using TmpProfilePath = ProfilePath::TmpProfilePath;
@@ -1181,6 +1182,7 @@ ndk::ScopedAStatus Artd::dexopt(
     PriorityClass in_priorityClass,
     const DexoptOptions& in_dexoptOptions,
     const std::shared_ptr<IArtdCancellationSignal>& in_cancellationSignal,
+    const ScopedFileDescriptor& in_loggingFd,
     ArtdDexoptResult* _aidl_return) {
   _aidl_return->cancelled = false;
 
@@ -1354,6 +1356,15 @@ ndk::ScopedAStatus Artd::dexopt(
 
   // For being surfaced in crash reports on crashes.
   args.Add("--comments=%s", in_dexoptOptions.comments);
+
+  if (in_loggingFd.get() >= 0) {
+    if (fcntl(in_loggingFd.get(), F_SETFD, 0) < 0) {
+      PLOG(ERROR) << "Failed to F_SETFD for log redirection";
+    } else {
+      art_exec_args.Add("--redirect-stderr-to-fd=%d", in_loggingFd.get());
+      args.AddRuntime("-Xuse-stderr-logger");
+    }
+  }
 
   art_exec_args.Add("--keep-fds=%s", fd_logger.GetFds()).Add("--").Concat(std::move(args));
 
@@ -2085,6 +2096,8 @@ void Artd::AddCompilerConfigFlags(const std::string& instruction_set,
   } else {
     args.Add("--no-allow-profile-code");
   }
+
+  args.AddRuntimeIfNonEmpty("-verbose:%s", dexopt_options.verboseLogTags);
 }
 
 void Artd::AddPerfConfigFlags(PriorityClass priority_class,

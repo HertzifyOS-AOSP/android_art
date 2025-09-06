@@ -187,7 +187,8 @@ interface IArtd {
             in @nullable com.android.server.art.DexMetadataPath dmFile,
             com.android.server.art.PriorityClass priorityClass,
             in com.android.server.art.DexoptOptions dexoptOptions,
-            in com.android.server.art.IArtdCancellationSignal cancellationSignal);
+            in com.android.server.art.IArtdCancellationSignal cancellationSignal,
+            in @nullable android.os.ParcelFileDescriptor loggingFd);
 
     /**
      * Returns a cancellation signal which can be used to cancel {@code dexopt} calls.

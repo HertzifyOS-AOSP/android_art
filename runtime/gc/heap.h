@@ -570,9 +570,8 @@ class Heap {
     return num_bytes_allocated_.load(std::memory_order_relaxed);
   }
 
-  // Returns bytes_allocated before adding 'bytes' to it.
   size_t AddBytesAllocated(size_t bytes) {
-    return num_bytes_allocated_.fetch_add(bytes, std::memory_order_relaxed);
+    return num_bytes_allocated_.fetch_add(bytes, std::memory_order_relaxed) + bytes;
   }
 
   bool GetUseGenerational() const { return use_generational_gc_; }
@@ -994,6 +993,7 @@ class Heap {
   void PostForkChildAction(Thread* self) REQUIRES(!*gc_complete_lock_);
 
   EXPORT void TraceHeapSize(size_t heap_size);
+  EXPORT bool TraceEnabled();
 
   bool AddHeapTask(gc::HeapTask* task);
 
@@ -1318,6 +1318,10 @@ class Heap {
                                     size_t new_footprint,
                                     size_t alloc_size);
 
+  // Update 'num_bytes_allocated_' with bytes allocated and report it to atrace.
+  // Return the updated num-bytes-allocated.
+  EXPORT size_t UpdateAndReportBytesAllocated(size_t tl_bytes_allocated);
+
   // Return our best approximation of the number of bytes of native memory that
   // are currently in use, and could possibly be reclaimed as an indirect result
   // of a garbage collection.
@@ -1514,6 +1518,10 @@ class Heap {
   // Number of bytes currently allocated and not yet reclaimed. Includes active
   // TLABS in their entirety, even if they have not yet been parceled out.
   Atomic<size_t> num_bytes_allocated_;
+
+  // Heap size last reported via TraceHeapSize() as atrace push notification. Reporting it
+  // everytime is causing excessive number of push notifications (b/162547003).
+  Atomic<size_t> last_reported_heap_size_;
 
   // Number of registered native bytes allocated. Adjusted after each RegisterNativeAllocation and
   // RegisterNativeFree. Used to  help determine when to trigger GC for native allocations. Should

@@ -500,6 +500,8 @@ public abstract class Dexopter<DexInfoType extends DetailedDexInfo> {
                 String.format("app-name:%s,app-version-name:%s,app-version-code:%d,art-version:%d",
                         mPkgState.getPackageName(), mPkg.getVersionName(),
                         mPkg.getLongVersionCode(), mInjector.getArtVersion());
+        dexoptOptions.verboseLogTags =
+                mParams.getVerboseLogTags() != null ? mParams.getVerboseLogTags() : "";
         return dexoptOptions;
     }
 
@@ -598,7 +600,7 @@ public abstract class Dexopter<DexInfoType extends DetailedDexInfo> {
         ArtdDexoptResult result = mInjector.getArtd().dexopt(outputArtifacts,
                 target.dexInfo().dexPath(), target.isa(), target.dexInfo().classLoaderContext(),
                 target.compilerFilter(), profile, inputVdex, target.dmPath(), priorityClass,
-                dexoptOptions, artdCancellationSignal);
+                dexoptOptions, artdCancellationSignal, mParams.getLoggingFd());
 
         // Delete the existing runtime images after the dexopt is performed, even if they are still
         // usable (e.g., the compiler filter is "verify"). This is to make sure the dexopt puts the

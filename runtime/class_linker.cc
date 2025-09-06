@@ -4355,12 +4355,14 @@ void ClassLinker::LoadClassHelper::Load(const ClassAccessor& accessor,
               return lhs.dex_field_index < rhs.dex_field_index;
             });
 
-  // Sort the methods by dex methods index to facilitate fast lookups.
-  std::sort(methods.begin(),
-            methods.end(),
-            [](ArtMethodData& lhs, ArtMethodData& rhs) {
-              return lhs.dex_method_index < rhs.dex_method_index;
-            });
+  // Sort the methods by dex methods index to facilitate fast lookups. The array might contain more
+  // than one method with the same dex_method_index, where the subsequent methods are "duplicates"
+  // and should be ignored. Therefore we need to use stable_sort to preserve the original order
+  // amongst them.
+  std::stable_sort(
+      methods.begin(), methods.end(), [](const ArtMethodData& lhs, const ArtMethodData& rhs) {
+        return lhs.dex_method_index < rhs.dex_method_index;
+      });
 
   fields_ = fields;
   methods_ = methods;

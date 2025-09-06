@@ -105,7 +105,7 @@ class FuzzerCorpusTest : public CommonRuntimeTest {
 
   void TestFuzzerHelper(
       const std::string& archive_filename,
-      const std::unordered_set<std::string>& valid_dex_files,
+      std::function<bool(std::string&)> should_expect_success,
       std::function<void(const uint8_t*, size_t, const std::string&, bool)> verify_file) {
     // Consistency checks.
     const std::string folder = android::base::GetExecutableDirectory();
@@ -146,8 +146,7 @@ class FuzzerCorpusTest : public CommonRuntimeTest {
         file_data = reinterpret_cast<const uint8_t*>(&name);
       }
 
-      const bool is_valid_dex_file = valid_dex_files.find(name) != valid_dex_files.end();
-      verify_file(file_data, data.size(), name, is_valid_dex_file);
+      verify_file(file_data, data.size(), name, should_expect_success(name));
     }
 
     ASSERT_TRUE(error >= -1) << "failed iterating " << filename << " : " << ErrorCodeString(error);
@@ -161,7 +160,12 @@ TEST_F(FuzzerCorpusTest, VerifyCorpusDexFiles) {
   const std::unordered_set<std::string> valid_dex_files = {"Main.dex", "hello_world.dex"};
   const std::string archive_filename = "dex_verification_fuzzer_corpus.zip";
 
-  TestFuzzerHelper(archive_filename, valid_dex_files, DexFileVerification);
+  TestFuzzerHelper(
+      archive_filename,
+      [&valid_dex_files](std::string& str) {
+        return valid_dex_files.find(str) != valid_dex_files.end();
+      },
+      DexFileVerification);
 }
 
 // Tests that we can verify classes from dex files without crashing.
@@ -170,25 +174,30 @@ TEST_F(FuzzerCorpusTest, VerifyCorpusClassDexFiles) {
   const std::unordered_set<std::string> valid_dex_files = {"Main.dex", "hello_world.dex"};
   const std::string archive_filename = "class_verification_fuzzer_corpus.zip";
 
-  TestFuzzerHelper(archive_filename, valid_dex_files, ClassVerification);
+  TestFuzzerHelper(
+      archive_filename,
+      [&valid_dex_files](std::string& str) {
+        return valid_dex_files.find(str) != valid_dex_files.end();
+      },
+      ClassVerification);
 }
 
 // Tests that we can compile classes with kOptimizing from dex files without crashing.
 TEST_F(FuzzerCorpusTest, OptimizeCompileDexFiles) {
-  // These dex files are expected to pass verification. The others are regressions tests.
-  const std::unordered_set<std::string> valid_dex_files = {"Main.dex", "hello_world.dex"};
   const std::string archive_filename = "optimized_compiler_fuzzer_corpus.zip";
 
-  TestFuzzerHelper(archive_filename, valid_dex_files, OptimizedCompilation);
+  // All added dex files should try to compile at least one method.
+  constexpr auto should_expect_success = [](std::string&) { return true; };
+  TestFuzzerHelper(archive_filename, should_expect_success, OptimizedCompilation);
 }
 
-// Tests that we can compile classes with kOptimizing from dex files without crashing.
+// Tests that we can compile classes with kBaseline from dex files without crashing.
 TEST_F(FuzzerCorpusTest, BaselineCompileDexFiles) {
-  // These dex files are expected to pass verification. The others are regressions tests.
-  const std::unordered_set<std::string> valid_dex_files = {"Main.dex", "hello_world.dex"};
   const std::string archive_filename = "baseline_compiler_fuzzer_corpus.zip";
 
-  TestFuzzerHelper(archive_filename, valid_dex_files, BaselineCompilation);
+  // All added dex files should try to compile at least one method.
+  constexpr auto should_expect_success = [](std::string&) { return true; };
+  TestFuzzerHelper(archive_filename, should_expect_success, BaselineCompilation);
 }
 
 }  // namespace art

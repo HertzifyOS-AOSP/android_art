@@ -251,6 +251,7 @@ class Artd : public aidl::com::android::server::art::BnArtd {
       const aidl::com::android::server::art::DexoptOptions& in_dexoptOptions,
       const std::shared_ptr<aidl::com::android::server::art::IArtdCancellationSignal>&
           in_cancellationSignal,
+      const ndk::ScopedFileDescriptor& in_loggingFd,
       aidl::com::android::server::art::ArtdDexoptResult* _aidl_return) override;
 
   ndk::ScopedAStatus createCancellationSignal(
