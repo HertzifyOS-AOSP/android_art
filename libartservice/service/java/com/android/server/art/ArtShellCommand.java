@@ -39,6 +39,8 @@ import android.os.ParcelFileDescriptor;
 import android.os.Process;
 import android.system.ErrnoException;
 import android.system.Os;
+import android.system.OsConstants;
+import android.system.StructPollfd;
 import android.system.StructStat;
 
 import androidx.annotation.RequiresApi;
@@ -60,6 +62,7 @@ import com.android.server.pm.pkg.PackageState;
 
 import libcore.io.Streams;
 
+import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileDescriptor;
 import java.io.FileInputStream;
@@ -1238,13 +1241,18 @@ public final class ArtShellCommand extends BasicShellCommandHandler {
     private int dexoptPackages(@NonNull PrintWriter pw,
             @NonNull PackageManagerLocal.FilteredSnapshot snapshot,
             @NonNull List<String> packageNames, @NonNull DexoptParams params, boolean verbose) {
-        try (var signal = new WithCancellationSignal(pw, verbose);
-                var loggingFd = SilentParcelFileDescriptor.dup(
-                        verbose && allowLogRedirection() ? getErrFileDescriptor() : null)) {
-            params = params.toBuilder().setLoggingFd(loggingFd.fd()).build();
+        try (var signal = new WithCancellationSignal(pw, verbose)) {
             for (String packageName : packageNames) {
-                DexoptResult result = mInjector.getArtManagerLocal().dexoptPackage(
-                        snapshot, packageName, params, signal.get());
+                DexoptResult result;
+                try (var loggingFd = verbose && allowLogRedirection()
+                                ? BufferedOutputFileDescriptor.wrap(getErrFileDescriptor())
+                                : null) {
+                    DexoptParams localParams = loggingFd != null
+                            ? params.toBuilder().setLoggingFd(loggingFd.getFd()).build()
+                            : params;
+                    result = mInjector.getArtManagerLocal().dexoptPackage(
+                            snapshot, packageName, localParams, signal.get());
+                }
                 printDexoptResult(pw, result, verbose, packageNames.size() > 1);
             }
         }
@@ -1364,29 +1372,70 @@ public final class ArtShellCommand extends BasicShellCommandHandler {
         }
     }
 
-    /** A wrapper of {@link ParcelFileDescriptor} that handles {@link IOException}. */
-    private record SilentParcelFileDescriptor(@Nullable ParcelFileDescriptor fd)
-            implements AutoCloseable {
-        public static SilentParcelFileDescriptor dup(@Nullable FileDescriptor originalFd) {
-            if (originalFd == null) {
-                return new SilentParcelFileDescriptor(null);
-            }
+    /**
+     * A wrapper of {@link ParcelFileDescriptor} that buffers the output in a pipe and reads from
+     * it occasionally, for more efficient, less frequent reads.
+     */
+    private static class BufferedOutputFileDescriptor implements AutoCloseable {
+        private final int BUFFER_SIZE = 200 * 1024 * 1024;
+        private final int SYNC_INTERVAL_MILLIS = 10;
+
+        private final FileDescriptor mOriginalFd;
+        private final ParcelFileDescriptor[] mPipe;
+        private final int mActualBufferSize;
+        private final Thread mSyncThread;
+
+        public static @Nullable BufferedOutputFileDescriptor wrap(FileDescriptor originalFd) {
             try {
-                return new SilentParcelFileDescriptor(ParcelFileDescriptor.dup(originalFd));
+                return new BufferedOutputFileDescriptor(originalFd);
+            } catch (ErrnoException | IOException e) {
+                AsLog.w("Failed to wrap FD " + originalFd.getInt$(), e);
+                return null;
+            }
+        }
+
+        public ParcelFileDescriptor getFd() {
+            return mPipe[1];
+        }
+
+        private BufferedOutputFileDescriptor(FileDescriptor originalFd)
+                throws ErrnoException, IOException {
+            mOriginalFd = originalFd;
+            mPipe = ParcelFileDescriptor.createPipe();
+            mActualBufferSize = ArtJni.setPipeSize(mPipe[0].getFileDescriptor(), BUFFER_SIZE);
+            mSyncThread = new Thread(this::sync);
+            mSyncThread.start();
+        }
+
+        private void sync() {
+            byte[] buf = new byte[mActualBufferSize];
+            int n;
+
+            try (var in = new FileInputStream(mPipe[0].getFileDescriptor());
+                    var out = new FileOutputStream(mOriginalFd)) {
+                while ((n = in.read(buf)) != -1) {
+                    out.write(buf, 0, n);
+                    try {
+                        Thread.sleep(SYNC_INTERVAL_MILLIS);
+                    } catch (InterruptedException e) {
+                        // Expected.
+                    }
+                }
+                out.flush();
             } catch (IOException e) {
-                AsLog.w("Failed to dup FD " + originalFd.getInt$(), e);
-                return new SilentParcelFileDescriptor(null);
+                AsLog.e("Failed to sync", e);
             }
         }
 
         @Override
         public void close() {
-            if (fd != null) {
-                try {
-                    fd.close();
-                } catch (IOException e) {
-                    AsLog.w("Failed to close FD " + fd.getFd(), e);
-                }
+            try {
+                mPipe[1].close();
+                mSyncThread.interrupt();
+                mSyncThread.join();
+                mPipe[0].close();
+            } catch (IOException | InterruptedException e) {
+                AsLog.w("Failed to close", e);
             }
         }
     }
