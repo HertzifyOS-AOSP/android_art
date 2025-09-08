@@ -229,6 +229,12 @@ class FastCompilerARM64 : public FastCompiler {
   // branching.
   void MoveConstantsAndFpusToRegisters();
 
+  // Reset all locations to core registers. Used for branch targets.
+  void ResetLocations();
+
+  // Handle the beginning of a branch target.
+  void StartBranchTarget(bool flow_continues, uint32_t dex_pc);
+
   // Update the masks associated to the given dex_pc. Used when dex_pc is a
   // branch target.
   void UpdateMasks(uint32_t dex_pc);
@@ -554,9 +560,36 @@ void FastCompilerARM64::MoveConstantsAndFpusToRegisters() {
   }
 }
 
+void FastCompilerARM64::ResetLocations() {
+  for (uint32_t i = 0; i < vreg_locations_.size(); ++i) {
+    Location location  = vreg_locations_[i];
+    if (location.IsValid()) {
+      // Set the returned register back to what it should be by marking it
+      // with an invalid location and let the `CreateNewRegisterLocation` pick
+      // the right register again.
+      vreg_locations_[i] = Location();
+      vreg_locations_[i] =
+          CreateNewRegisterLocation(i, DataType::Type::kInt64, /* next= */ nullptr);
+    }
+  }
+}
+
 void FastCompilerARM64::UpdateMasks(uint32_t dex_pc) {
   object_register_masks_[dex_pc] &= object_register_mask_;
   is_non_null_masks_[dex_pc] &= is_non_null_mask_;
+}
+
+void FastCompilerARM64::StartBranchTarget(bool flow_continues, uint32_t dex_pc) {
+  if (flow_continues) {
+    // Emulate a branch to this pc.
+    PrepareToBranch(dex_pc);
+  } else {
+    // Otherwise reset locations to known locations.
+    ResetLocations();
+  }
+  // Set new masks based on all incoming edges.
+  is_non_null_mask_ = is_non_null_masks_[dex_pc];
+  object_register_mask_ = object_register_masks_[dex_pc];
 }
 
 bool FastCompilerARM64::ProcessInstructions() {
@@ -584,23 +617,13 @@ bool FastCompilerARM64::ProcessInstructions() {
     }
     vixl::aarch64::Label* label = GetLabelOf(pair.DexPc());
     if (label->IsLinked()) {
-      if (flow_continues) {
-        // Emulate a branch to this pc.
-        PrepareToBranch(pair.DexPc());
-      }
-      // Set new masks based on all incoming edges.
-      is_non_null_mask_ = is_non_null_masks_[pair.DexPc()];
-      object_register_mask_ = object_register_masks_[pair.DexPc()];
+      StartBranchTarget(flow_continues, pair.DexPc());
       __ Bind(label);
     }
 
     if (catch_pcs_.IsBitSet(pair.DexPc())) {
+      StartBranchTarget(flow_continues, pair.DexPc());
       catch_stack_maps_.push_back(std::make_pair(pair.DexPc(), GetAssembler()->CodePosition()));
-      // Emulate a branch to this pc.
-      PrepareToBranch(pair.DexPc());
-      // Set new masks based on all throwing instructions.
-      is_non_null_mask_ = is_non_null_masks_[pair.DexPc()];
-      object_register_mask_ = object_register_masks_[pair.DexPc()];
     }
 
     // If the instruction can throw, emulate a branch to the catch handler by
@@ -2478,19 +2501,6 @@ bool FastCompilerARM64::BuildReturn(const Instruction& instruction) {
                     vreg_locations_[register_index],
                     return_type_)) {
     return false;
-  }
-  if (has_frame_) {
-    // We may have used the "record last instruction before return in return
-    // register" optimization (see `CreateNewRegisterLocation`),
-    // so set the returned register back to what it should be by marking it
-    // with an invalid location and let the `CreateNewRegisterLocation` pick
-    // the right register again.
-    vreg_locations_[register_index] = Location();
-    CreateNewRegisterLocation(
-        register_index, return_type_, /* next= */ nullptr);
-    if (HitUnimplemented()) {
-      return false;
-    }
   }
   PopFrameAndReturn();
   return true;
