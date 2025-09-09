@@ -102,3 +102,22 @@ flag {
   is_fixed_read_only: false
   is_exported: false
 }
+
+flag {
+    namespace: "core_libraries"
+    name: "read_only_dynamic_code_load_ww_log"
+    is_exported: false
+    description: "This flag controls if the system logs to WW when loading native code and read only is not enforced"
+    bug: "408070506"
+    is_fixed_read_only: false
+}
+
+flag {
+    namespace: "core_libraries"
+    name: "read_only_dynamic_code_load_throw_exception"
+    is_exported: false
+    description: "This flag controls if the system throws an exception when loading native code and read only is not enforced"
+    bug: "408070506"
+    is_fixed_read_only: false
+}
+
