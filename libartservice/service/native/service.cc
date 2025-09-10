@@ -16,18 +16,23 @@
 
 #include "service.h"
 
+#include <fcntl.h>
 #include <jni.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <string_view>
 
 #include "android-base/errors.h"
 #include "android-base/file.h"
+#include "android-base/parseint.h"
 #include "android-base/properties.h"
 #include "android-base/result.h"
+#include "android-base/strings.h"
 #include "class_loader_context.h"
 #include "gc/heap.h"
 #include "nativehelper/JNIHelp.h"
+#include "nativehelper/JNIPlatformHelp.h"
 #include "nativehelper/utils.h"
 #include "runtime.h"
 #include "tools/tools.h"
@@ -36,8 +41,11 @@ namespace art {
 namespace service {
 
 using ::android::base::Dirname;
+using ::android::base::ParseInt;
+using ::android::base::ReadFileToString;
 using ::android::base::Result;
 using ::android::base::SetProperty;
+using ::android::base::Trim;
 
 Result<void> ValidateAbsoluteNormalPath(const std::string& path_str) {
   if (path_str.empty()) {
@@ -170,6 +178,33 @@ extern "C" JNIEXPORT void JNICALL Java_com_android_server_art_ArtJni_ensureNoPro
       !result.ok()) {
     jniThrowException(env, "java/io/IOException", result.error().message().c_str());
   }
+}
+
+extern "C" JNIEXPORT int JNICALL Java_com_android_server_art_ArtJni_setPipeSizeNative(JNIEnv* env,
+                                                                                      jobject,
+                                                                                      jobject j_fd,
+                                                                                      jint size) {
+  int fd = jniGetFDFromFileDescriptor(env, j_fd);
+
+  std::string max_size_str;
+  if (!ReadFileToString("/proc/sys/fs/pipe-max-size", &max_size_str)) {
+    jniThrowIOException(env, errno);
+    return 0;
+  }
+
+  int max_size;
+  if (!ParseInt(Trim(max_size_str), &max_size)) {
+    jniThrowException(env, "java/io/IOException", "Failed to parse /proc/sys/fs/pipe-max-size");
+    return 0;
+  }
+
+  int ret = fcntl(fd, F_SETPIPE_SZ, std::min(size, max_size));
+  if (ret < 0) {
+    jniThrowErrnoException(env, "fcntl", errno);
+    return 0;
+  }
+
+  return ret;
 }
 
 }  // namespace service

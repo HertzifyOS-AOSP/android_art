@@ -425,6 +425,7 @@ art_cc_defaults {
         ":art-gtest-jars-Dex2oatVdexTestDex",
         ":art-gtest-jars-ImageLayoutA",
         ":art-gtest-jars-ImageLayoutB",
+        ":art-gtest-jars-InlinedString",
         ":art-gtest-jars-Interfaces",
         ":art-gtest-jars-LinkageTest",
         ":art-gtest-jars-Main",

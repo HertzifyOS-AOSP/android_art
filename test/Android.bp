@@ -1483,6 +1483,7 @@ filegroup {
         ":art-gtest-jars-ImageLayoutB",
         ":art-gtest-jars-IMTA",
         ":art-gtest-jars-IMTB",
+        ":art-gtest-jars-InlinedString",
         ":art-gtest-jars-Instrumentation",
         ":art-gtest-jars-Interfaces",
         ":art-gtest-jars-Lookup",
@@ -1659,6 +1660,13 @@ java_library {
 java_library {
     name: "art-gtest-jars-Instrumentation",
     srcs: ["Instrumentation/**/*.java"],
+    defaults: ["art-gtest-jars-defaults"],
+}
+
+java_library {
+    name: "art-gtest-jars-InlinedString",
+    srcs: ["InlinedString/**/*.java"],
+    libs: ["art-gtest-jars-StringLiterals"],
     defaults: ["art-gtest-jars-defaults"],
 }
 

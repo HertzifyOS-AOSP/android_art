@@ -20,11 +20,13 @@ import android.annotation.NonNull;
 import android.annotation.Nullable;
 import android.os.Build;
 import android.os.RemoteException;
+import android.system.ErrnoException;
 
 import androidx.annotation.RequiresApi;
 
 import dalvik.system.VMRuntime;
 
+import java.io.FileDescriptor;
 import java.io.IOException;
 
 /**
@@ -185,6 +187,21 @@ public class ArtJni {
         return null;
     }
 
+    /**
+     * Generally the same as
+     * <a href="https://man7.org/linux/man-pages/man2/F_SETPIPE_SZ.2const.html">F_SETPIPE_SZ</a>,
+     * but caps the size to {@code /proc/sys/fs/pipe-max-size} to avoid the EPERM error.
+     */
+    public static int setPipeSize(@NonNull FileDescriptor fd, int size)
+            throws IOException, ErrnoException {
+        if (GlobalInjector.getInstance().isPreReboot()) {
+            // This is for shell commands only. We don't need this for Pre-reboot Dexopt.
+            throw new UnsupportedOperationException();
+        }
+        loadLibrary();
+        return setPipeSizeNative(fd, size);
+    }
+
     @Nullable private static native String validateDexPathNative(@NonNull String dexPath);
     @Nullable
     private static native String validateClassLoaderContextNative(
@@ -193,4 +210,6 @@ public class ArtJni {
     private static native void setPropertyNative(@NonNull String key, @NonNull String value);
     private static native void ensureNoProcessInDirNative(@NonNull String dir, int timeoutMs)
             throws IOException;
+    private static native int setPipeSizeNative(@NonNull FileDescriptor fd, int size)
+            throws IOException, ErrnoException;
 }
