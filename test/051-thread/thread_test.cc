@@ -79,7 +79,6 @@ extern "C" JNIEXPORT jstring JNICALL Java_Main_getPriorityInfo(JNIEnv* env,
     result << p << ": " << Thread::PriorityToNiceness(p);
   }
   result << ";\nSetpriority effects: ";
-  int32_t me = static_cast<int32_t>(::art::GetTid());
   int my_niceness = getpriority(PRIO_PROCESS, 0 /* self */);
   for (int p = -20; p <= 19; p += 3) {
     if (p != -20) {
