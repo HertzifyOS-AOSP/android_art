@@ -1180,17 +1180,17 @@ void JitCodeCache::RemoveUnmarkedCode(Thread* self) {
       {
         WriterMutexLock mu2(self, *Locks::jit_mutator_lock_);
         auto method_it = method_code_map_.find(header->GetCode());
-
         if (method_it != method_code_map_.end()) {
           ArtMethod* method = method_it->second;
-          auto code_ptrs_it = method_code_map_reversed_.find(method);
-
-          if (code_ptrs_it != method_code_map_reversed_.end()) {
-            std::vector<const void*>& code_ptrs = code_ptrs_it->second;
-            RemoveElement(code_ptrs, code_ptr);
-
-            if (code_ptrs.empty()) {
-              method_code_map_reversed_.erase(code_ptrs_it);
+          auto reversed_it = method_code_map_reversed_.find(method);
+          if (reversed_it != method_code_map_reversed_.end()) {
+            std::vector<const void*>& code_ptrs = reversed_it->second;
+            auto code_ptr_it = std::find(code_ptrs.begin(), code_ptrs.end(), code_ptr);
+            if (code_ptr_it != code_ptrs.end()) {
+              code_ptrs.erase(code_ptr_it);
+              if (code_ptrs.empty()) {
+                method_code_map_reversed_.erase(reversed_it);
+              }
             }
           }
         }
