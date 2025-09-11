@@ -31,7 +31,6 @@ from shutil import copyfile, copytree
 from testrunner import env
 from typing import Optional, Dict, List
 from zipfile import ZipFile
-from base64 import b32encode
 
 COLOR = (os.environ.get("LUCI_CONTEXT") == None)  # Disable colors on LUCI.
 COLOR_BLUE = '\033[94m' if COLOR else ''
@@ -109,9 +108,9 @@ def make_tmp_dir():
   parent = Path(os.environ.get("TMPDIR", "/tmp")) / "art" / "test"
   parent.mkdir(parents=True, exist_ok=True)
   args = [a for a in sys.argv[1:] if not a.startswith("--create-runner")]
-  hash = b32encode(sha1((" ".join(args)).encode()).digest()).decode().lower()[:6]
+  hash = sha1((" ".join(args)).encode()).hexdigest()
   for i in range(100):
-    tmp_dir = parent / (f"{hash}" + (f"-{i}" if i > 0 else ""))
+    tmp_dir = parent / (f"{hash[:8]}" + (f"-{i}" if i > 0 else ""))
     lock = tmp_dir.with_suffix(".lock")  # NB: Next to the directory, not inside.
     lock_handle = open(lock, "w")
     try:
@@ -854,7 +853,6 @@ if True:
     parsed_args.stdout_file = os.path.join(DEX_LOCATION, test_stdout)
     parsed_args.stderr_file = os.path.join(DEX_LOCATION, test_stderr)
 
-    ctx.export(FULL_TEST_NAME=os.environ['FULL_TEST_NAME'])
     ctx.run(f"cd {DEX_LOCATION}")
     if not target_mode:
       # Make "out" directory accessible from test directory.
@@ -895,6 +893,7 @@ if True:
   runner = create_runner_script()
 
   if args.create_runner:
+    # TODO: Generate better unique names.
     dst = args.create_runner / TEST_NAME / f"{Path(tmp_dir).name}.sh"
     assert not dst.exists(), dst
     dst.parent.mkdir(parents=True, exist_ok=True)
