@@ -2539,6 +2539,7 @@ class InitializeClassVisitor : public CompilationVisitor {
       if (value_it.GetValueType() == annotations::RuntimeEncodedStaticFieldValueIterator::kString) {
         dex::StringIndex string_index(value_it.GetJavaValue().i);
         if (com::android::art::flags::weak_const_string()) {
+          // Strongly intern the string to ensure it stays alive and makes it to the image.
           uint32_t utf16_length;
           const char* utf8_data =
               dex_cache->GetDexFile()->GetStringDataAndUtf16Length(string_index, &utf16_length);

@@ -419,6 +419,8 @@ void HSharpening::ProcessLoadString(
           if (string != nullptr && runtime->GetHeap()->ObjectIsInBootImageSpace(string)) {
             desired_load_kind = HLoadString::LoadKind::kBootImageRelRo;
           } else {
+            // We shall collect and strongly intern all strings that make it to the
+            // linking stage, referenced by a corresponding `LinkerPatch`.
             desired_load_kind = HLoadString::LoadKind::kBootImageLinkTimePcRelative;
           }
         } else {
