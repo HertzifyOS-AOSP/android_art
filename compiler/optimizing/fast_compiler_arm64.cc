@@ -109,6 +109,16 @@ static const vixl::aarch64::VRegister kAvailableTempFpuRegisters[] = {
   vixl::aarch64::d23,
 };
 
+static constexpr size_t kMaximumRegisters = arraysize(kAvailableCalleeSaveRegisters);
+static_assert(kMaximumRegisters == arraysize(kAvailableTempRegisters));
+static_assert(kMaximumRegisters == arraysize(kAvailableTempFpuRegisters));
+static_assert(kMaximumRegisters == arraysize(kAvailableCalleeSaveFpuRegisters));
+
+// The core register or FPU register number we are going to use when a dex
+// register is stored in stack, and the operation that stores to it needs a
+// temporary register.
+static constexpr size_t kResultRegisterForSpill = 0u;
+
 class FastCompilerARM64 : public FastCompiler {
  public:
   FastCompilerARM64(ArtMethod* method,
@@ -132,6 +142,8 @@ class FastCompilerARM64 : public FastCompiler {
                         allocator->Adapter()),
         object_register_masks_(dex_compilation_unit.GetCodeItemAccessor().InsnsSizeInCodeUnits(),
                                allocator->Adapter()),
+        object_stack_masks_(dex_compilation_unit.GetCodeItemAccessor().InsnsSizeInCodeUnits(),
+                               allocator->Adapter()),
         is_non_null_masks_(dex_compilation_unit.GetCodeItemAccessor().InsnsSizeInCodeUnits(),
                            allocator->Adapter()),
         catch_pcs_(ArenaBitVector::CreateFixedSize(
@@ -143,10 +155,39 @@ class FastCompilerARM64 : public FastCompiler {
         core_spill_mask_(0u),
         fpu_spill_mask_(0u),
         object_register_mask_(0u),
+        object_stack_mask_(allocator, /*start_bits=*/ 0, /*expandable=*/ true),
         is_non_null_mask_(0u) {
+    ResetTempRegisters();
+    ResetRegisterToSpill();
     memset(is_non_null_masks_.data(), ~0, is_non_null_masks_.size() * sizeof(uint64_t));
     memset(object_register_masks_.data(), ~0, object_register_masks_.size() * sizeof(uint64_t));
+    memset(object_stack_masks_.data(), 0, object_stack_masks_.size() * sizeof(ArenaBitVector*));
     GetAssembler()->cfi().SetEnabled(compiler_options.GenerateAnyDebugInfo());
+  }
+
+  void ResetTempRegisters() {
+    temp_core_register_ = 0u;
+    temp_fpu_register_ = 0u;
+  }
+
+  uint32_t GetTempCoreRegister() {
+    DCHECK(has_frame_);
+    DCHECK_LT(temp_core_register_, kMaximumRegisters);
+    return kAvailableTempRegisters[temp_core_register_++].GetCode();
+  }
+
+  uint32_t GetTempFpuRegister() {
+    DCHECK(has_frame_);
+    DCHECK_LT(temp_fpu_register_, kMaximumRegisters);
+    return kAvailableTempFpuRegisters[temp_fpu_register_++].GetCode();
+  }
+
+  void ResetRegisterToSpill() {
+    register_to_spill_ = std::make_pair(-1, DataType::Type::kVoid);
+  }
+
+  bool NeedsToSpill() const {
+    return register_to_spill_.first != static_cast<uint32_t>(-1);
   }
 
   // Top-level method to generate code for `method_`.
@@ -168,9 +209,16 @@ class FastCompilerARM64 : public FastCompiler {
     if (!has_frame_) {
       return 0;
     }
+    uint16_t number_of_vregs = GetCodeItemAccessor().RegistersSize();
+    uint16_t number_of_parameters = GetCodeItemAccessor().InsSize();
+    uint32_t extra_stack_slots = 0u;
+    if ((number_of_vregs - number_of_parameters) > kMaximumRegisters) {
+      extra_stack_slots += (number_of_vregs - number_of_parameters - kMaximumRegisters);
+    }
     size_t size = FrameEntrySpillSize() +
         /* method */ static_cast<size_t>(kArm64PointerSize) +
-        /* out registers */ GetCodeItemAccessor().OutsSize() * kVRegSize;
+        extra_stack_slots * kVRegSize +
+        GetCodeItemAccessor().OutsSize() * kVRegSize;
     return RoundUp(size, kStackAlignment);
   }
 
@@ -201,9 +249,12 @@ class FastCompilerARM64 : public FastCompiler {
   // Initialize the locations of parameters for this method.
   bool InitializeParameters();
 
-  // Generate code for the frame entry. Only called when needed. If the frame
-  // entry has already been generated, do nothing.
+  // Generate code for the frame entry, as well as the suspend check.
+  // Only called when needed. If the frame entry has already been generated, do nothing.
   bool EnsureHasFrame();
+
+  bool GenerateFrame();
+  void GenerateSuspendCheck();
 
   // Generate code for a frame exit.
   void PopFrameAndReturn();
@@ -221,6 +272,7 @@ class FastCompilerARM64 : public FastCompiler {
   // `vreg_locations_` for next uses of `reg`.
   // `next` should be the next dex instruction, to help choose the register.
   Location CreateNewRegisterLocation(uint32_t reg, DataType::Type type, const Instruction* next);
+  Location CreateNewLocation(uint32_t reg, DataType::Type type);
 
   // Return the existing register location for `reg`.
   Location GetExistingRegisterLocation(uint32_t reg, DataType::Type type);
@@ -342,13 +394,27 @@ class FastCompilerARM64 : public FastCompiler {
   }
 
   // Mark whether dex register `vreg_index` is an object.
-  void UpdateRegisterMask(uint32_t vreg_index, bool is_object) {
-    // Note that the register mask is only useful when there is a frame, so we
-    // use the callee save registers for the mask.
-    if (is_object) {
-      object_register_mask_ |= (1 << kAvailableCalleeSaveRegisters[vreg_index].GetCode());
+  void UpdateRegisterMask(uint32_t vreg_index, bool is_object, bool is_wide) {
+    DCHECK(!(is_object && is_wide));
+    // A `vreg_index` greater than kMaximumRegisters means the dex register is
+    // stored in stack.
+    if (vreg_index < kMaximumRegisters) {
+      // Note that the register mask is only useful when there is a frame, so we
+      // use the callee save registers for the mask.
+      if (is_object) {
+        object_register_mask_ |= (1 << kAvailableCalleeSaveRegisters[vreg_index].GetCode());
+      } else {
+        object_register_mask_ &= ~(1 << kAvailableCalleeSaveRegisters[vreg_index].GetCode());
+      }
     } else {
-      object_register_mask_ &= ~(1 << kAvailableCalleeSaveRegisters[vreg_index].GetCode());
+      if (is_object) {
+        object_stack_mask_.SetBit(GetStackSlot(vreg_index) / kVRegSize);
+      } else {
+        object_stack_mask_.ClearBit(GetStackSlot(vreg_index) / kVRegSize);
+        if (is_wide) {
+          object_stack_mask_.ClearBit(GetStackSlot(vreg_index + 1) / kVRegSize);
+        }
+      }
     }
   }
 
@@ -362,8 +428,9 @@ class FastCompilerARM64 : public FastCompiler {
   }
 
   // Update information about dex register `vreg_index`.
-  void UpdateLocal(uint32_t vreg_index, bool is_object, bool can_be_null = true) {
-    UpdateRegisterMask(vreg_index, is_object);
+  void UpdateLocal(uint32_t vreg_index, bool is_object, bool is_wide, bool can_be_null = true) {
+    DCHECK(!(is_object && is_wide));
+    UpdateRegisterMask(vreg_index, is_object, is_wide);
     UpdateNonNullMask(vreg_index, can_be_null);
   }
 
@@ -386,6 +453,25 @@ class FastCompilerARM64 : public FastCompiler {
     }
   }
 
+  bool IsParameter(uint32_t vreg) const {
+    uint16_t number_of_vregs = GetCodeItemAccessor().RegistersSize();
+    uint16_t number_of_parameters = GetCodeItemAccessor().InsSize();
+    return vreg >= (number_of_vregs - number_of_parameters);
+  }
+
+  uint32_t GetStackSlot(uint32_t vreg) const {
+    if (IsParameter(vreg)) {
+      // Parameters are stored in the caller stack, as per our ABI.
+      uint16_t number_of_vregs = GetCodeItemAccessor().RegistersSize();
+      uint16_t number_of_parameters = GetCodeItemAccessor().InsSize();
+      uint16_t first_parameter_index = number_of_vregs - number_of_parameters;
+      return GetFrameSize() + sizeof(ArtMethod*) + (vreg - first_parameter_index) * kVRegSize;
+    } else {
+      return sizeof(ArtMethod*) +
+          GetCodeItemAccessor().OutsSize() * kVRegSize +
+          (vreg - kMaximumRegisters) * kVRegSize;
+    }
+  }
 
   // Compiler utilities.
   //
@@ -435,9 +521,10 @@ class FastCompilerARM64 : public FastCompiler {
   // A vector of size code units for dex pcs that are branch targets.
   ArenaVector<vixl::aarch64::Label> branch_targets_;
 
-  // For dex pcs that are branch targets, the register mask that will be used at
-  // the point of that pc.
+  // For dex pcs that are branch targets, the register mask and the stack mask that
+  // will be used at the point of that pc.
   ArenaVector<uint64_t> object_register_masks_;
+  ArenaVector<ArenaBitVector*> object_stack_masks_;
 
   // For dex pcs that are branch targets, the mask for non-null objects that will
   // be used at the point of that pc.
@@ -463,11 +550,22 @@ class FastCompilerARM64 : public FastCompiler {
   // FPU registers that have been spilled in the frame.
   uint32_t fpu_spill_mask_;
 
-  // The current mask to know which physical register holds an object.
+  // The current mask to know which core register holds an object.
   uint64_t object_register_mask_;
+
+  // The current mask to know which stack entry holds an object.
+  ArenaBitVector object_stack_mask_;
 
   // The current mask to know if a dex register is known non-null.
   uint64_t is_non_null_mask_;
+
+  // At the end of an instruction, the register we need to spill to stack. -1 if
+  // there is no register to spill.
+  std::pair<uint32_t, DataType::Type> register_to_spill_;
+
+  // Temporary registers for when we need to have dex registers in stack.
+  uint32_t temp_core_register_;
+  uint32_t temp_fpu_register_;
 
   // The return type of the compiled method. Saved to avoid re-computing it on
   // the return instruction.
@@ -485,21 +583,31 @@ bool FastCompilerARM64::InitializeParameters() {
   uint16_t number_of_vregs = GetCodeItemAccessor().RegistersSize();
   uint16_t number_of_parameters = GetCodeItemAccessor().InsSize();
   uint16_t vreg_parameter_index = number_of_vregs - number_of_parameters;
+  bool needs_spill = false;
 
-  if (number_of_vregs > arraysize(kAvailableTempRegisters) ||
-      number_of_vregs > arraysize(kAvailableCalleeSaveRegisters) ||
-      number_of_vregs > arraysize(kAvailableTempFpuRegisters) ||
-      number_of_vregs > arraysize(kAvailableCalleeSaveFpuRegisters)) {
-    // Too many registers for this compiler.
-    unimplemented_reason_ = "TooManyRegisters";
-    return false;
+  if (number_of_vregs > kMaximumRegisters) {
+    // Generate the frame, but don't emit the suspend check yet, as we haven't
+    // updated the register and stack masks yet.
+    if (!GenerateFrame()) {
+      return false;
+    }
+    needs_spill = true;
   }
 
   InvokeDexCallingConventionVisitorARM64 convention;
   if (!dex_compilation_unit_.IsStatic()) {
     // Add the implicit 'this' argument, not expressed in the signature.
     vreg_locations_[vreg_parameter_index] = convention.GetNextLocation(DataType::Type::kReference);
-    UpdateLocal(vreg_parameter_index, /* is_object= */ true, /* can_be_null= */ false);
+    if (needs_spill) {
+      Location new_location = CreateNewLocation(vreg_parameter_index, DataType::Type::kReference);
+      DCHECK(vreg_locations_[vreg_parameter_index].IsRegister());
+      MoveLocation(new_location, vreg_locations_[vreg_parameter_index], DataType::Type::kReference);
+      vreg_locations_[vreg_parameter_index] = new_location;
+    }
+    UpdateLocal(vreg_parameter_index,
+                /* is_object= */ true,
+                /* is_wide= */ false,
+                /* can_be_null= */ false);
     ++vreg_parameter_index;
     --number_of_parameters;
   }
@@ -508,16 +616,35 @@ bool FastCompilerARM64::InitializeParameters() {
        i < number_of_parameters;
        i++, shorty_pos++, vreg_parameter_index++) {
     DataType::Type type = DataType::FromShorty(shorty[shorty_pos]);
-    vreg_locations_[vreg_parameter_index] = convention.GetNextLocation(type);
+    Location location = convention.GetNextLocation(type);
+    if (location.IsDoubleStackSlot() || location.IsStackSlot()) {
+      // We only handle single stack slots in the fast compiler. The
+      // dex instructions know if they need two stack slot entries or one.
+      location = Location::StackSlot(location.GetStackIndex() + GetFrameSize());
+    }
+    if (needs_spill) {
+      Location new_location = CreateNewLocation(vreg_parameter_index, type);
+      MoveLocation(new_location, location, type);
+      vreg_locations_[vreg_parameter_index] = new_location;
+    } else {
+      vreg_locations_[vreg_parameter_index] = location;
+    }
+    bool is_wide = DataType::Is64BitType(type);
     UpdateLocal(vreg_parameter_index,
                 /* is_object= */ (type == DataType::Type::kReference),
+                is_wide,
                 /* can_be_null= */ true);
-    if (DataType::Is64BitType(type)) {
+    if (is_wide) {
       ++i;
       ++vreg_parameter_index;
     }
   }
   return_type_ = DataType::FromShorty(shorty[0]);
+
+  if (needs_spill) {
+    // We can now generate the suspend check.
+    GenerateSuspendCheck();
+  }
 
   if (GetCodeItemAccessor().TriesSize() != 0) {
     if (!EnsureHasFrame()) {
@@ -545,37 +672,32 @@ void FastCompilerARM64::MoveConstantsAndFpusToRegisters() {
       DataType::Type type = location.GetConstant()->IsIntConstant()
           ? DataType::Type::kInt32
           : DataType::Type::kInt64;
-      vreg_locations_[i] = CreateNewRegisterLocation(i, type, /* next= */ nullptr);
+      vreg_locations_[i] = CreateNewLocation(i, type);
       MoveLocation(vreg_locations_[i], location, type);
       DCHECK(!HitUnimplemented());
     } else if (location.IsFpuRegister()) {
-      vreg_locations_[i] =
-          CreateNewRegisterLocation(i, DataType::Type::kInt64, /* next= */ nullptr);
+      vreg_locations_[i] = CreateNewLocation(i, DataType::Type::kInt64);
       MoveLocation(vreg_locations_[i], location, DataType::Type::kInt64);
       DCHECK(!HitUnimplemented());
-      // The floating point value may have come from a zero constant, which we
-      // treat as object. Therefore, remove the flag if it is there.
-      UpdateLocal(i, /* is_object= */ false);
     }
   }
 }
 
 void FastCompilerARM64::ResetLocations() {
   for (uint32_t i = 0; i < vreg_locations_.size(); ++i) {
-    Location location  = vreg_locations_[i];
-    if (location.IsValid()) {
-      // Set the returned register back to what it should be by marking it
-      // with an invalid location and let the `CreateNewRegisterLocation` pick
-      // the right register again.
-      vreg_locations_[i] = Location();
-      vreg_locations_[i] =
-          CreateNewRegisterLocation(i, DataType::Type::kInt64, /* next= */ nullptr);
-    }
+    vreg_locations_[i] = CreateNewLocation(i, DataType::Type::kInt64);
   }
 }
 
 void FastCompilerARM64::UpdateMasks(uint32_t dex_pc) {
   object_register_masks_[dex_pc] &= object_register_mask_;
+  if (object_stack_masks_[dex_pc] == nullptr) {
+    object_stack_masks_[dex_pc] =
+        new (allocator_) ArenaBitVector(allocator_, /*start_bits=*/ 0, /*expandable=*/ true);
+    object_stack_masks_[dex_pc]->Copy(&object_stack_mask_);
+  } else {
+    object_stack_masks_[dex_pc]->Intersect(&object_stack_mask_);
+  }
   is_non_null_masks_[dex_pc] &= is_non_null_mask_;
 }
 
@@ -590,6 +712,9 @@ void FastCompilerARM64::StartBranchTarget(bool flow_continues, uint32_t dex_pc) 
   // Set new masks based on all incoming edges.
   is_non_null_mask_ = is_non_null_masks_[dex_pc];
   object_register_mask_ = object_register_masks_[dex_pc];
+  if (object_stack_masks_[dex_pc] != nullptr) {
+    object_stack_mask_.Copy(object_stack_masks_[dex_pc]);
+  }
 }
 
 bool FastCompilerARM64::ProcessInstructions() {
@@ -644,6 +769,20 @@ bool FastCompilerARM64::ProcessInstructions() {
       DCHECK(HitUnimplemented());
       return false;
     }
+    ResetTempRegisters();
+    if (NeedsToSpill()) {
+      Location stack_location =
+          CreateNewLocation(register_to_spill_.first, register_to_spill_.second);
+      Location reg_location = DataType::IsFloatingPointType(register_to_spill_.second)
+          ? Location::FpuRegisterLocation(kResultRegisterForSpill)
+          : Location::RegisterLocation(kResultRegisterForSpill);
+      MoveLocation(stack_location, reg_location, register_to_spill_.second);
+      vreg_locations_[register_to_spill_.first] = stack_location;
+      if (DataType::Is64BitType(register_to_spill_.second)) {
+        DCHECK(vreg_locations_[register_to_spill_.first + 1].IsInvalid());
+      }
+      ResetRegisterToSpill();
+    }
     // Note: There may be no Thread for gtests.
     DCHECK(Thread::Current() == nullptr || !Thread::Current()->IsExceptionPending())
         << GetDexFile().PrettyMethod(dex_compilation_unit_.GetDexMethodIndex())
@@ -681,8 +820,8 @@ bool FastCompilerARM64::MoveLocation(Location destination,
       __ Mov(dst, source.GetConstant()->AsLongConstant()->GetValue());
       return true;
     }
-    if (source.IsStackSlot() || source.IsDoubleStackSlot()) {
-      DCHECK(dst.Is64Bits() == source.IsDoubleStackSlot());
+    if (source.IsStackSlot()) {
+      DCHECK_EQ(dst.Is64Bits(), DataType::Is64BitType(hint_type));
       __ Ldr(dst, StackOperandFrom(source));
       return true;
     }
@@ -709,7 +848,8 @@ bool FastCompilerARM64::MoveLocation(Location destination,
       __ Fmov(dst, src);
       return true;
     }
-    if (source.IsStackSlot() || source.IsDoubleStackSlot()) {
+    if (source.IsStackSlot()) {
+      DCHECK_EQ(dst.Is64Bits(), DataType::Is64BitType(hint_type));
       __ Ldr(dst, StackOperandFrom(source));
       return true;
     }
@@ -734,7 +874,7 @@ bool FastCompilerARM64::MoveLocation(Location destination,
     return false;
   }
 
-  if (destination.IsStackSlot() || destination.IsDoubleStackSlot()) {
+  if (destination.IsStackSlot()) {
     if (source.IsRegister()) {
       DataType::Type src_type = DataType::Is64BitType(hint_type)
           ? DataType::Type::kInt64
@@ -750,17 +890,54 @@ bool FastCompilerARM64::MoveLocation(Location destination,
       __ Str(src, StackOperandFrom(destination));
       return true;
     }
-    unimplemented_reason_ = "UnimplementedSourceForStackDestination";
-    return false;
+    if (source.IsConstant()) {
+      UseScratchRegisterScope temps(GetVIXLAssembler());
+      if (source.GetConstant()->IsIntConstant()) {
+        DCHECK(destination.IsStackSlot());
+        Register reg = temps.AcquireW();
+        __ Mov(reg, source.GetConstant()->AsIntConstant()->GetValue());
+        __ Str(reg, StackOperandFrom(destination));
+        return true;
+      }
+      DCHECK(source.GetConstant()->IsLongConstant());
+      Register reg = temps.AcquireX();
+      __ Mov(reg, source.GetConstant()->AsLongConstant()->GetValue());
+      __ Str(reg, StackOperandFrom(destination));
+      return true;
+    }
+    DCHECK(source.IsStackSlot()) << source;
+    UseScratchRegisterScope temps(GetVIXLAssembler());
+    Register reg = DataType::Is64BitType(hint_type)
+        ? temps.AcquireX()
+        : temps.AcquireW();
+    __ Ldr(reg, StackOperandFrom(source));
+    __ Str(reg, StackOperandFrom(destination));
+    return true;
   }
 
   unimplemented_reason_ = "UnimplementedDestinationLocation";
   return false;
 }
 
+Location FastCompilerARM64::CreateNewLocation(uint32_t reg, DataType::Type type) {
+  if (reg >= kMaximumRegisters) {
+    return Location::StackSlot(GetStackSlot(reg));
+  }
+  if (DataType::IsFloatingPointType(type)) {
+    return Location::FpuRegisterLocation(kAvailableCalleeSaveFpuRegisters[reg].GetCode());
+  }
+  return Location::RegisterLocation(kAvailableCalleeSaveRegisters[reg].GetCode());
+}
+
 Location FastCompilerARM64::CreateNewRegisterLocation(uint32_t reg,
                                                       DataType::Type type,
                                                       const Instruction* next) {
+  if (DataType::Is64BitType(type)) {
+    // To prevent branch points from moving dex registers which are used for
+    // the other half of 64bit types, we invalidate those registers.
+    vreg_locations_[reg + 1] = Location();
+  }
+
   if (next != nullptr &&
       (next->Opcode() == Instruction::RETURN_OBJECT || next->Opcode() == Instruction::RETURN) &&
       (next->VRegA_11x() == reg)) {
@@ -771,18 +948,16 @@ Location FastCompilerARM64::CreateNewRegisterLocation(uint32_t reg,
     return vreg_locations_[reg];
   }
 
-  if (vreg_locations_[reg].IsStackSlot() || vreg_locations_[reg].IsDoubleStackSlot()) {
-    unimplemented_reason_ = "NewRegisterFromStackSlot";
-    // Return a phony location.
-    return DataType::IsFloatingPointType(type)
-        ? Location::FpuRegisterLocation(1)
-        : Location::RegisterLocation(1);
-  }
-
   if (DataType::IsFloatingPointType(type)) {
     if (vreg_locations_[reg].IsFpuRegister()) {
       // Re-use existing register.
       return vreg_locations_[reg];
+    }
+    if (reg >= kMaximumRegisters) {
+      DCHECK(has_frame_);
+      DCHECK(!NeedsToSpill());
+      register_to_spill_ = std::make_pair(reg, type);
+      return Location::FpuRegisterLocation(kResultRegisterForSpill);
     }
     uint32_t register_code = has_frame_
         ? kAvailableCalleeSaveFpuRegisters[reg].GetCode()
@@ -794,6 +969,13 @@ Location FastCompilerARM64::CreateNewRegisterLocation(uint32_t reg,
   if (vreg_locations_[reg].IsRegister()) {
     // Re-use existing register.
     return vreg_locations_[reg];
+  }
+
+  if (reg >= kMaximumRegisters) {
+    DCHECK(has_frame_);
+    DCHECK(!NeedsToSpill());
+    register_to_spill_ = std::make_pair(reg, type);
+    return Location::RegisterLocation(kResultRegisterForSpill);
   }
 
   uint32_t register_code = has_frame_
@@ -811,28 +993,29 @@ Location FastCompilerARM64::GetExistingRegisterLocation(uint32_t reg, DataType::
         ? Location::FpuRegisterLocation(1)
         : Location::RegisterLocation(1);
   }
-  if (vreg_locations_[reg].IsStackSlot() || vreg_locations_[reg].IsDoubleStackSlot()) {
-    unimplemented_reason_ = "ExistingRegisterFromStackSlot";
-    // Return a phony location.
-    return DataType::IsFloatingPointType(type)
-        ? Location::FpuRegisterLocation(1)
-        : Location::RegisterLocation(1);
-  }
 
   if (DataType::IsFloatingPointType(type)) {
     if (vreg_locations_[reg].IsFpuRegister()) {
       return vreg_locations_[reg];
     }
-    uint32_t register_code = has_frame_
-        ? kAvailableCalleeSaveFpuRegisters[reg].GetCode()
-        : kAvailableTempFpuRegisters[reg].GetCode();
-    Location new_location = Location::FpuRegisterLocation(register_code);
-    bool res = MoveLocation(new_location, vreg_locations_[reg], type);
-    DCHECK(res);
-    vreg_locations_[reg] = new_location;
+    Location new_location;
+    if (reg >= kMaximumRegisters) {
+      DCHECK(has_frame_);
+      new_location = Location::FpuRegisterLocation(GetTempFpuRegister());
+      bool res = MoveLocation(new_location, vreg_locations_[reg], type);
+      DCHECK(res);
+    } else {
+      uint32_t register_code = has_frame_
+          ? kAvailableCalleeSaveFpuRegisters[reg].GetCode()
+          : kAvailableTempFpuRegisters[reg].GetCode();
+      new_location = Location::FpuRegisterLocation(register_code);
+      bool res = MoveLocation(new_location, vreg_locations_[reg], type);
+      DCHECK(res);
+      vreg_locations_[reg] = new_location;
+    }
     // The floating point value may have come from a zero constant, which we
     // treat as object. Therefore, remove the flag if it is there.
-    UpdateLocal(reg, /* is_object= */ false);
+    UpdateLocal(reg, /* is_object= */ false, /* is_wide= */ DataType::Is64BitType(type));
     return new_location;
   }
 
@@ -840,13 +1023,21 @@ Location FastCompilerARM64::GetExistingRegisterLocation(uint32_t reg, DataType::
     return vreg_locations_[reg];
   }
 
-  uint32_t register_code = has_frame_
-      ? kAvailableCalleeSaveRegisters[reg].GetCode()
-      : kAvailableTempRegisters[reg].GetCode();
-  Location new_location = Location::RegisterLocation(register_code);
-  bool res = MoveLocation(new_location, vreg_locations_[reg], type);
-  DCHECK(res);
-  vreg_locations_[reg] = new_location;
+  Location new_location;
+  if (reg >= kMaximumRegisters) {
+    DCHECK(has_frame_);
+    new_location = Location::RegisterLocation(GetTempCoreRegister());
+    bool res = MoveLocation(new_location, vreg_locations_[reg], type);
+    DCHECK(res);
+  } else {
+    uint32_t register_code = has_frame_
+        ? kAvailableCalleeSaveRegisters[reg].GetCode()
+        : kAvailableTempRegisters[reg].GetCode();
+    new_location = Location::RegisterLocation(register_code);
+    bool res = MoveLocation(new_location, vreg_locations_[reg], type);
+    DCHECK(res);
+    vreg_locations_[reg] = new_location;
+  }
   return new_location;
 }
 
@@ -855,10 +1046,16 @@ void FastCompilerARM64::RecordPcInfo(uint32_t dex_pc) {
   uint32_t native_pc = GetAssembler()->CodePosition();
   StackMapStream* stack_map_stream = code_generation_data_->GetStackMapStream();
   CHECK_EQ(object_register_mask_ & callee_saved_core_registers.GetList(), object_register_mask_);
+  ArenaBitVector* stack_mask = nullptr;
+  if (object_stack_mask_.IsAnyBitSet()) {
+    stack_mask =
+        new (allocator_) ArenaBitVector(allocator_, /*start_bits=*/ 0, /*expandable=*/ true);
+    stack_mask->Copy(&object_stack_mask_);
+  }
   stack_map_stream->BeginStackMapEntry(dex_pc,
                                        native_pc,
                                        object_register_mask_,
-                                       /* sp_mask= */ nullptr,
+                                       stack_mask,
                                        StackMap::Kind::Default,
                                        needs_vreg_info_);
   if (needs_vreg_info_) {
@@ -884,24 +1081,19 @@ void FastCompilerARM64::RecordPcInfo(uint32_t dex_pc) {
 
         case Location::kStackSlot: {
           stack_map_stream->AddDexRegisterEntry(Kind::kInStack, location.GetStackIndex());
-          break;
-        }
-
-        case Location::kDoubleStackSlot: {
-          stack_map_stream->AddDexRegisterEntry(Kind::kInStack, location.GetStackIndex());
-          stack_map_stream->AddDexRegisterEntry(
-              Kind::kInStack, location.GetHighStackIndex(kVRegSize));
-          ++i;
-          DCHECK_LT(i, size);
+          // Note: if we were using the fast compiler for debuggable, we would
+          // need to emit another `kInStack` here for long/double values. This would
+          // require knowing if the current entry is a long/double.
+          DCHECK(!compiler_options_.GetDebuggable());
           break;
         }
 
         case Location::kRegister: {
           stack_map_stream->AddDexRegisterEntry(Kind::kInRegister, location.reg());
-          DCHECK(!compiler_options_.GetDebuggable());
           // Note: if we were using the fast compiler for debuggable, we would
           // need to emit a `kInRegisterHi` here for long values. This would
           // require knowing if the current entry is a long.
+          DCHECK(!compiler_options_.GetDebuggable());
           break;
         }
 
@@ -942,9 +1134,19 @@ bool FastCompilerARM64::EnsureHasFrame() {
     // Frame entry has already been generated.
     return true;
   }
+  if (!GenerateFrame()) {
+    return false;
+  }
+
+  GenerateSuspendCheck();
+  return true;
+}
+
+bool FastCompilerARM64::GenerateFrame() {
+  DCHECK(!has_frame_);
   has_frame_ = true;
   uint16_t number_of_vregs = GetCodeItemAccessor().RegistersSize();
-  for (int i = 0; i < number_of_vregs; ++i) {
+  for (int i = 0; i < std::min(number_of_vregs, static_cast<uint16_t>(kMaximumRegisters)); ++i) {
     // Assume any vreg will be held in a callee-save register.
     core_spill_mask_ |= (1 << kAvailableCalleeSaveRegisters[i].GetCode());
     // TODO: do this lazily for floats, and recompile?
@@ -979,33 +1181,40 @@ bool FastCompilerARM64::EnsureHasFrame() {
                                     GetFramePreservedFPRegisters(),
                                     /* requires_current_method= */ true);
 
-  // Move registers which are currently allocated from caller-saves to callee-saves,
-  // and adjust the offsets of stack locations.
-  for (int i = 0; i < number_of_vregs; ++i) {
-    if (vreg_locations_[i].IsRegister()) {
-      Location new_location =
-          Location::RegisterLocation(kAvailableCalleeSaveRegisters[i].GetCode());
-      if (!MoveLocation(new_location, vreg_locations_[i], DataType::Type::kInt64)) {
+  if (number_of_vregs <= kMaximumRegisters) {
+    // Move registers which are currently allocated from caller-saves to callee-saves,
+    // and adjust the offsets of stack locations.
+    for (uint32_t i = 0; i < number_of_vregs; ++i) {
+      if (vreg_locations_[i].IsRegister()) {
+        Location new_location =
+            Location::RegisterLocation(kAvailableCalleeSaveRegisters[i].GetCode());
+        if (!MoveLocation(new_location, vreg_locations_[i], DataType::Type::kInt64)) {
+          return false;
+        }
+        vreg_locations_[i] = new_location;
+      } else if (vreg_locations_[i].IsFpuRegister()) {
+        Location new_location =
+            Location::FpuRegisterLocation(kAvailableCalleeSaveFpuRegisters[i].GetCode());
+        if (!MoveLocation(new_location, vreg_locations_[i], DataType::Type::kFloat64)) {
+          return false;
+        }
+        vreg_locations_[i] = new_location;
+      } else if (vreg_locations_[i].IsStackSlot()) {
+        DCHECK(IsParameter(i));
+        vreg_locations_[i] =
+            Location::StackSlot(vreg_locations_[i].GetStackIndex() + GetFrameSize());
+        Location new_location =
+            Location::RegisterLocation(kAvailableCalleeSaveRegisters[i].GetCode());
+        if (!MoveLocation(new_location, vreg_locations_[i], DataType::Type::kInt32)) {
+          return false;
+        }
+        vreg_locations_[i] = new_location;
+      } else if (vreg_locations_[i].IsConstant() || vreg_locations_[i].IsInvalid()) {
+        // Nothing to do.
+      } else {
+        unimplemented_reason_ = "UnhandledLocation";
         return false;
       }
-      vreg_locations_[i] = new_location;
-    } else if (vreg_locations_[i].IsFpuRegister()) {
-      Location new_location =
-          Location::FpuRegisterLocation(kAvailableCalleeSaveFpuRegisters[i].GetCode());
-      if (!MoveLocation(new_location, vreg_locations_[i], DataType::Type::kFloat64)) {
-        return false;
-      }
-      vreg_locations_[i] = new_location;
-    } else if (vreg_locations_[i].IsStackSlot()) {
-      vreg_locations_[i] = Location::StackSlot(vreg_locations_[i].GetStackIndex() + GetFrameSize());
-    } else if (vreg_locations_[i].IsDoubleStackSlot()) {
-      vreg_locations_[i] =
-          Location::DoubleStackSlot(vreg_locations_[i].GetStackIndex() + GetFrameSize());
-    } else if (vreg_locations_[i].IsConstant() || vreg_locations_[i].IsInvalid()) {
-      // Nothing to do.
-    } else {
-      unimplemented_reason_ = "UnhandledLocation";
-      return false;
     }
   }
 
@@ -1029,12 +1238,13 @@ bool FastCompilerARM64::EnsureHasFrame() {
     __ Strh(counter, MemOperand(kArtMethodRegister, ArtMethod::HotnessCountOffset().Int32Value()));
     __ Bind(&done);
   }
+  return true;
+}
 
-  // Do the suspend check.
+void FastCompilerARM64::GenerateSuspendCheck() {
+  MacroAssembler* masm = GetVIXLAssembler();
   if (compiler_options_.GetImplicitSuspendChecks()) {
-    ExactAssemblyScope eas(GetVIXLAssembler(),
-                           kInstructionSize,
-                           CodeBufferCheckScope::kExactSize);
+    ExactAssemblyScope eas(masm, kInstructionSize, CodeBufferCheckScope::kExactSize);
     __ ldr(kImplicitSuspendCheckRegister, MemOperand(kImplicitSuspendCheckRegister));
     RecordPcInfo(0);
   } else {
@@ -1048,15 +1258,12 @@ bool FastCompilerARM64::EnsureHasFrame() {
         GetThreadOffset<kArm64PointerSize>(kQuickTestSuspend).Int32Value();
     __ Ldr(lr, MemOperand(tr, entrypoint_offset));
     {
-      ExactAssemblyScope eas(GetVIXLAssembler(),
-                             kInstructionSize,
-                             CodeBufferCheckScope::kExactSize);
+      ExactAssemblyScope eas(masm, kInstructionSize, CodeBufferCheckScope::kExactSize);
       __ blr(lr);
       RecordPcInfo(0);
     }
     __ Bind(&continue_label);
   }
-  return true;
 }
 
 
@@ -1067,7 +1274,6 @@ bool FastCompilerARM64::SetupArguments(InvokeType invoke_type,
   const size_t number_of_operands = operands.GetNumberOfOperands();
 
   size_t start_index = 0u;
-  size_t argument_index = 0u;
   InvokeDexCallingConventionVisitorARM64 convention;
 
   // Handle 'this' parameter.
@@ -1087,7 +1293,7 @@ bool FastCompilerARM64::SetupArguments(InvokeType invoke_type,
 
   uint32_t shorty_index = 1;  // Skip the return type.
   // Handle all parameters except 'this'.
-  for (size_t i = start_index; i < number_of_operands; ++i, ++argument_index, ++shorty_index) {
+  for (size_t i = start_index; i < number_of_operands; ++i, ++shorty_index) {
     // Make sure we don't go over the expected arguments or over the number of
     // dex registers given. If the instruction was seen as dead by the verifier,
     // it hasn't been properly checked.
@@ -1103,7 +1309,14 @@ bool FastCompilerARM64::SetupArguments(InvokeType invoke_type,
       unimplemented_reason_ = "BogusSignature";
       return false;
     }
-    if (!MoveLocation(convention.GetNextLocation(type),
+    Location loc = convention.GetNextLocation(type);
+    if (loc.IsDoubleStackSlot()) {
+      // We only handle single stack slots in the fast compiler. The
+      // instructions will be the ones knowing if we need two stack slot entries
+      // or one.
+      loc = Location::StackSlot(loc.GetStackIndex());
+    }
+    if (!MoveLocation(loc,
                       vreg_locations_[operands.GetOperand(i)],
                       type)) {
       return false;
@@ -1313,7 +1526,7 @@ bool FastCompilerARM64::BuildLoadString(uint32_t vreg,
                                                            code_generation_data_.get()));
   __ Ldr(dst.W(), MemOperand(dst.X()));
   DoReadBarrierOn(dst);
-  UpdateLocal(vreg, /* is_object= */ true, /* can_be_null= */ false);
+  UpdateLocal(vreg, /* is_object= */ true, /* is_wide= */ false, /* can_be_null= */ false);
   return true;
 }
 
@@ -1350,7 +1563,7 @@ bool FastCompilerARM64::BuildLoadClass(uint32_t vreg,
                                                           code_generation_data_.get()));
   __ Ldr(dst.W(), MemOperand(dst.X()));
   DoReadBarrierOn(dst);
-  UpdateLocal(vreg, /* is_object= */ true, /* can_be_null= */ false);
+  UpdateLocal(vreg, /* is_object= */ true, /* is_wide= */ false, /* can_be_null= */ false);
   return true;
 }
 
@@ -1404,7 +1617,7 @@ bool FastCompilerARM64::BuildNewInstance(uint32_t vreg,
   if (HitUnimplemented()) {
     return false;
   }
-  UpdateLocal(vreg, /* is_object= */ true, /* can_be_null= */ false);
+  UpdateLocal(vreg, /* is_object= */ true, /* is_wide= */ false, /* can_be_null= */ false);
   return true;
 }
 
@@ -1477,7 +1690,7 @@ bool FastCompilerARM64::BuildNewArray(const Instruction& instruction,
   if (HitUnimplemented()) {
     return false;
   }
-  UpdateLocal(dst, /* is_object= */ true, /* can_be_null= */ false);
+  UpdateLocal(dst, /* is_object= */ true, /* is_wide= */ false, /* can_be_null= */ false);
   return true;
 }
 
@@ -1504,10 +1717,21 @@ bool FastCompilerARM64::BuildFilledNewArray(uint32_t dex_pc,
   Register array = RegisterFrom(calling_convention.GetReturnLocation(DataType::Type::kReference),
                                 DataType::Type::kReference);
   size_t offset = mirror::Array::DataOffset(DataType::Size(type)).Uint32Value();
-  for (int32_t i = 0; i < number_of_operands; ++i) {
-    Register value = RegisterFrom(GetExistingRegisterLocation(operands.GetOperand(i), type), type);
-    MemOperand mem = HeapOperand(array, offset + (i <<  DataType::SizeShift(type)));
-    CodeGeneratorARM64::Store(GetVIXLAssembler(), type, value, mem);
+  {
+    UseScratchRegisterScope temps(GetVIXLAssembler());
+    Register temp = temps.AcquireW();
+    for (int32_t i = 0; i < number_of_operands; ++i) {
+      Location loc = vreg_locations_[operands.GetOperand(i)];
+      Register value;
+      if (loc.IsRegister()) {
+        value = RegisterFrom(loc, type);
+      } else {
+        MoveLocation(Location::RegisterLocation(temp.GetCode()), loc, type);
+        value = temp;
+      }
+      MemOperand mem = HeapOperand(array, offset + (i <<  DataType::SizeShift(type)));
+      CodeGeneratorARM64::Store(GetVIXLAssembler(), type, value, mem);
+    }
   }
   if (HitUnimplemented()) {
     return false;
@@ -1526,7 +1750,6 @@ bool FastCompilerARM64::BuildCheckCast(uint32_t vreg, dex::TypeIndex type_index,
   }
 
   InvokeRuntimeCallingConvention calling_convention;
-  UseScratchRegisterScope temps(GetVIXLAssembler());
   Register cls = calling_convention.GetRegisterAt(1);
   Register obj_cls = calling_convention.GetRegisterAt(2);
   Register obj = WRegisterFrom(GetExistingRegisterLocation(vreg, DataType::Type::kReference));
@@ -1651,7 +1874,7 @@ bool FastCompilerARM64::BuildInstanceOf(uint32_t vreg,
     return false;
   }
   __ Bind(&exit);
-  UpdateLocal(vreg_result, /* is_object= */ false);
+  UpdateLocal(vreg_result, /* is_object= */ false, /* is_wide= */ false);
   return true;
 }
 
@@ -1763,7 +1986,7 @@ bool FastCompilerARM64::If_21_22t(const Instruction& instruction, uint32_t dex_p
         }
       }
     } else {
-      DCHECK(location.IsStackSlot());
+      DCHECK(location.IsStackSlot()) << location;
       unimplemented_reason_ = "CompareWithZeroOnStackSlot";
     }
     return false;
@@ -1825,7 +2048,7 @@ bool FastCompilerARM64::DoGet(const MemOperand& mem,
         RecordPcInfo(dex_pc);
       }
     }
-    UpdateLocal(dest_reg, /* is_object= */ true);
+    UpdateLocal(dest_reg, /* is_object= */ true, /* is_wide= */ false);
     DoReadBarrierOn(dst);
     return true;
   }
@@ -1888,7 +2111,7 @@ bool FastCompilerARM64::DoGet(const MemOperand& mem,
       unimplemented_reason_ = Instruction::Name(opcode);
       return false;
   }
-  UpdateLocal(dest_reg, is_object);
+  UpdateLocal(dest_reg, is_object, is_wide);
   if (can_receiver_be_null) {
     RecordPcInfo(dex_pc);
   }
@@ -1899,7 +2122,10 @@ bool FastCompilerARM64::BuildMove(uint32_t dest_reg,
                                   uint32_t src_reg,
                                   DataType::Type type,
                                   const Instruction* next) {
-  UpdateLocal(dest_reg, /* is_object= */ type == DataType::Type::kReference, CanBeNull(src_reg));
+  UpdateLocal(dest_reg,
+              /* is_object= */ type == DataType::Type::kReference,
+              /* is_wide= */ DataType::Is64BitType(type),
+              CanBeNull(src_reg));
 
   // Translate a move into an actual move instruction. We could just update
   // `vreg_locations_`, but that would require tracking aliases, which may be
@@ -1931,7 +2157,7 @@ void FastCompilerARM64::SetIntConstant(uint32_t register_index,
   }
   // In case we branch, we need to make sure a null value can be merged
   // with an object value, so treat the 0 value as an object.
-  UpdateLocal(register_index, can_be_object);
+  UpdateLocal(register_index, can_be_object, /* is_wide= */ false);
 }
 
 bool FastCompilerARM64::BuildInvokeRuntime11x(QuickEntrypointEnum entrypoint,
@@ -1957,6 +2183,7 @@ void FastCompilerARM64::SetLongConstant(uint32_t register_index,
   if (GetCodeItemAccessor().TriesSize() == 0) {
     vreg_locations_[register_index] =
         Location::ConstantLocation(new (allocator_) HLongConstant(constant));
+    vreg_locations_[register_index + 1] = Location();
   } else {
     // In the presence of try/catch, we put the constant in a register directly.
     // This avoids having to dump dex register maps for stack maps, saving
@@ -1965,7 +2192,7 @@ void FastCompilerARM64::SetLongConstant(uint32_t register_index,
                  Location::ConstantLocation(new (allocator_) HLongConstant(constant)),
                  DataType::Type::kInt64);
   }
-  UpdateLocal(register_index, /* is_object= */ false);
+  UpdateLocal(register_index, /* is_object= */ false, /* is_wide= */ true);
 }
 
 bool FastCompilerARM64::BuildArrayAccess(const Instruction& instruction,
@@ -2035,7 +2262,7 @@ bool FastCompilerARM64::BuildArrayAccess(const Instruction& instruction,
     CodeGeneratorARM64::Store(GetVIXLAssembler(), type, value_or_dest, src);
   } else {
     CodeGeneratorARM64::Load(GetVIXLAssembler(), type, value_or_dest, src);
-    UpdateLocal(source_or_dest_reg, is_object);
+    UpdateLocal(source_or_dest_reg, is_object, DataType::Is64BitType(type));
     if (is_object) {
       DoReadBarrierOn(Register(value_or_dest));
     }
@@ -2072,7 +2299,7 @@ bool FastCompilerARM64::BuildArrayLength(
       RecordPcInfo(dex_pc);
     }
   }
-  UpdateLocal(dest, /* is_object= */ false);
+  UpdateLocal(dest, /* is_object= */ false, /* is_wide= */ false);
   return true;
 }
 
@@ -2201,7 +2428,7 @@ bool FastCompilerARM64::DoPut(const MemOperand& mem,
         return false;
       }
     }
-  } else if (src.IsStackSlot() || src.IsDoubleStackSlot()) {
+  } else if (src.IsStackSlot()) {
     unimplemented_reason_ = "IPUTOnStackSlot";
     return false;
   }
@@ -2401,48 +2628,50 @@ bool FastCompilerARM64::Frem(CPURegister dst,
   if (HitUnimplemented()) { \
     return false; \
   } \
-  UpdateLocal(vreg_a, /* is_object= */ false);
+  UpdateLocal(vreg_a, /* is_object= */ false, DataType::Is64BitType(output_type));
 
-#define SETUP_BINOP_12x(type) \
+#define SETUP_BINOP_12x(type, is_shift) \
   int32_t vreg_a = instruction.VRegA_12x(); \
   CPURegister first = CPURegisterFrom(GetExistingRegisterLocation(vreg_a, type), type); \
+  DataType::Type second_type = is_shift ? DataType::Type::kInt32 : type; \
   CPURegister second = CPURegisterFrom( \
-      GetExistingRegisterLocation(instruction.VRegB_12x(), type), type); \
+      GetExistingRegisterLocation(instruction.VRegB_12x(), second_type), type); \
   CPURegister dst = CPURegisterFrom(CreateNewRegisterLocation(vreg_a, type, next), type); \
   if (HitUnimplemented()) { \
     return false; \
   } \
-  UpdateLocal(vreg_a, /* is_object= */ false);
+  UpdateLocal(vreg_a, /* is_object= */ false, DataType::Is64BitType(type));
 
-#define SETUP_BINOP_23x(type) \
+#define SETUP_BINOP_23x(type, is_shift) \
   int32_t vreg_a = instruction.VRegA_23x(); \
   CPURegister first = CPURegisterFrom( \
       GetExistingRegisterLocation(instruction.VRegB_23x(), type), type); \
+  DataType::Type second_type = is_shift ? DataType::Type::kInt32 : type; \
   CPURegister second = CPURegisterFrom( \
-      GetExistingRegisterLocation(instruction.VRegC_23x(), type), type); \
+      GetExistingRegisterLocation(instruction.VRegC_23x(), second_type), type); \
   CPURegister dst = CPURegisterFrom(CreateNewRegisterLocation(vreg_a, type, next), type); \
   if (HitUnimplemented()) { \
     return false; \
   } \
-  UpdateLocal(vreg_a, /* is_object= */ false);
+  UpdateLocal(vreg_a, /* is_object= */ false, DataType::Is64BitType(type));
 
-#define SIMPLE_BINOP_12x(type, instruction) \
-    SETUP_BINOP_12x(type) \
+#define SIMPLE_BINOP_12x(type, instruction, is_shift) \
+    SETUP_BINOP_12x(type, is_shift) \
     __ instruction(Register(dst), Register(first), Register(second)); \
     return true;
 
 #define SIMPLE_FPU_BINOP_12x(type, instruction) \
-    SETUP_BINOP_12x(type) \
+    SETUP_BINOP_12x(type, false) \
     __ instruction(VRegister(dst), VRegister(first), VRegister(second)); \
     return true;
 
-#define SIMPLE_BINOP_23x(type, instruction) \
-    SETUP_BINOP_23x(type) \
+#define SIMPLE_BINOP_23x(type, instruction, is_shift) \
+    SETUP_BINOP_23x(type, is_shift) \
     __ instruction(Register(dst), Register(first), Register(second)); \
     return true;
 
 #define SIMPLE_FPU_BINOP_23x(type, instruction) \
-    SETUP_BINOP_23x(type) \
+    SETUP_BINOP_23x(type, false) \
     __ instruction(VRegister(dst), VRegister(first), VRegister(second)); \
     return true;
 
@@ -2450,7 +2679,7 @@ bool FastCompilerARM64::Frem(CPURegister dst,
     if (!EnsureHasFrame()) { \
       return false; \
     } \
-    SETUP_BINOP_12x(type) \
+    SETUP_BINOP_12x(type, false) \
     instruction(Register(dst), Register(first), Register(second), dex_pc); \
     return true;
 
@@ -2458,7 +2687,7 @@ bool FastCompilerARM64::Frem(CPURegister dst,
     if (!EnsureHasFrame()) { \
       return false; \
     } \
-    SETUP_BINOP_23x(type) \
+    SETUP_BINOP_23x(type, false) \
     instruction(Register(dst), Register(first), Register(second), dex_pc); \
     return true;
 
@@ -2482,7 +2711,7 @@ bool FastCompilerARM64::BuildCompare(const Instruction& instruction, const Instr
   if (HitUnimplemented()) {
     return false;
   }
-  UpdateLocal(vreg_a, /* is_object= */ false);
+  UpdateLocal(vreg_a, /* is_object= */ false, /* is_wide= */ false);
 
   if (is_long) {
     __ Cmp(first.X(), second.X());
@@ -2521,7 +2750,7 @@ bool FastCompilerARM64::BuildMoveResult(const Instruction& instruction,
                     previous_invoke_return_type_)) {
     return false;
   }
-  UpdateLocal(register_index, is_object);
+  UpdateLocal(register_index, is_object, DataType::Is64BitType(previous_invoke_return_type_));
   return true;
 }
 
@@ -2850,7 +3079,7 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
     if (!EnsureHasFrame()) { \
       return false; \
     } \
-    SETUP_BINOP_##format(type); \
+    SETUP_BINOP_##format(type, false); \
     return Frem(dst, first, second, dex_pc, type);
 
     case Instruction::REM_FLOAT: {
@@ -2890,29 +3119,29 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
     SIMPLE_FPU_OP_CASE(DIV, Fdiv)
 #undef SIMPLE_FPU_OP_CASE
 
-#define SIMPLE_OP_CASE(opcode, instruction) \
+#define SIMPLE_OP_CASE(opcode, instruction, is_shift) \
     case Instruction::opcode ##_INT_2ADDR: { \
-      SIMPLE_BINOP_12x(DataType::Type::kInt32, instruction) \
+      SIMPLE_BINOP_12x(DataType::Type::kInt32, instruction, is_shift) \
     } \
     case Instruction::opcode ##_LONG_2ADDR: { \
-      SIMPLE_BINOP_12x(DataType::Type::kInt64, instruction) \
+      SIMPLE_BINOP_12x(DataType::Type::kInt64, instruction, is_shift) \
     } \
     case Instruction::opcode ##_INT: { \
-      SIMPLE_BINOP_23x(DataType::Type::kInt32, instruction) \
+      SIMPLE_BINOP_23x(DataType::Type::kInt32, instruction, is_shift) \
     } \
     case Instruction::opcode ##_LONG: { \
-      SIMPLE_BINOP_23x(DataType::Type::kInt64, instruction) \
+      SIMPLE_BINOP_23x(DataType::Type::kInt64, instruction, is_shift) \
     }
 
-    SIMPLE_OP_CASE(ADD, Add)
-    SIMPLE_OP_CASE(SUB, Sub)
-    SIMPLE_OP_CASE(MUL, Mul)
-    SIMPLE_OP_CASE(SHL, Lsl)
-    SIMPLE_OP_CASE(SHR, Asr)
-    SIMPLE_OP_CASE(USHR, Lsr)
-    SIMPLE_OP_CASE(AND, And)
-    SIMPLE_OP_CASE(OR, Orr)
-    SIMPLE_OP_CASE(XOR, Eor)
+    SIMPLE_OP_CASE(ADD, Add, false)
+    SIMPLE_OP_CASE(SUB, Sub, false)
+    SIMPLE_OP_CASE(MUL, Mul, false)
+    SIMPLE_OP_CASE(AND, And, false)
+    SIMPLE_OP_CASE(OR, Orr, false)
+    SIMPLE_OP_CASE(XOR, Eor, false)
+    SIMPLE_OP_CASE(SHL, Lsl, true)
+    SIMPLE_OP_CASE(SHR, Asr, true)
+    SIMPLE_OP_CASE(USHR, Lsr, true)
 #undef SIMPLE_OP_CASE
 
 #define DIV_REM_OP_CASE(opcode, instruction) \
@@ -2945,7 +3174,7 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
     return false; \
   } \
   int16_t constant = instruction.VRegC_22 ## suffix(); \
-  UpdateLocal(register_index, /* is_object= */ false);
+  UpdateLocal(register_index, /* is_object= */ false, /* is_wide= */ false);
 
     case Instruction::ADD_INT_LIT16: {
       SETUP_BINOP_22(s)
@@ -3266,7 +3495,8 @@ bool FastCompilerARM64::ProcessDexInstruction(const Instruction& instruction,
           MemOperand(tr, Thread::ExceptionOffset<kArm64PointerSize>().Int32Value());
       __ Ldr(WRegisterFrom(new_location), exception);
       __ Str(wzr, exception);
-      UpdateLocal(register_index, /* is_object= */ true, /* can_be_null= */ false);
+      UpdateLocal(
+          register_index, /* is_object= */ true, /* is_wide= */ false, /* can_be_null= */ false);
       return true;
     }
 

@@ -640,13 +640,9 @@ def create_ci_runner_scripts(out, mode, test_names):
   }
   for runner in Path(out).glob("*/*.sh"):
     test_name = runner.parent.name
-    m = re.search("FULL_TEST_NAME=(.*)", runner.read_text())
-    assert m, f"Can not find full test name of {test_name}"
-    full_name = f"run-test.{test_name}#{m.group(1).replace(test_name, "")}"
-
     test_hash = runner.stem
     target_dir = f"{DEVICE_DIR}/test/{test_hash}"
-    tests[full_name] = {
+    tests[f"{test_name}#{test_hash}"] = {
       "dependencies": ["setup#compile-boot-image"],
       "adb push": [
         [f"../{mode}/{test_name}", f"{target_dir}"],
