@@ -59,8 +59,20 @@ inline uintptr_t MarkCompact::LiveWordsBitmap<kAlignment>::SetLiveWords(uintptr_
     // overhead of a function call for this, highly likely (as most of the objects
     // are small), case.
     if (diff > 1) {
+      for (uintptr_t* check_begin = begin_bm_address + 1; check_begin < end_bm_address;
+           check_begin++) {
+        DCHECK_EQ(*check_begin, static_cast<uintptr_t>(0))
+            << " size:" << size << " begin:" << std::hex << begin << " check_begin:" << check_begin
+            << " begin-addr:" << begin_bm_address << " end-addr:" << end_bm_address;
+      }
       // Set all intermediate bits to 1.
       std::memset(static_cast<void*>(begin_bm_address + 1), 0xff, (diff - 1) * sizeof(uintptr_t));
+      for (uintptr_t* check_begin = begin_bm_address + 1; check_begin < end_bm_address;
+           check_begin++) {
+        DCHECK_EQ(*check_begin, static_cast<uintptr_t>(~0))
+            << " size:" << size << " begin:" << std::hex << begin << " check_begin:" << check_begin
+            << " begin-addr:" << begin_bm_address << " end-addr:" << end_bm_address;
+      }
     }
   }
   uintptr_t end_mask = Bitmap::BitIndexToMask(end_bit_idx);
