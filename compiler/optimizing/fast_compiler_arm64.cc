@@ -287,6 +287,10 @@ class FastCompilerARM64 : public FastCompiler {
   // Handle the beginning of a branch target.
   void StartBranchTarget(bool flow_continues, uint32_t dex_pc);
 
+  // Whether the branch target is initialized, which means we've already seen a
+  // branch to it.
+  bool BranchTargetIsInitialized(uint32_t dex_pc);
+
   // Update the masks associated to the given dex_pc. Used when dex_pc is a
   // branch target.
   void UpdateMasks(uint32_t dex_pc);
@@ -701,6 +705,11 @@ void FastCompilerARM64::UpdateMasks(uint32_t dex_pc) {
   is_non_null_masks_[dex_pc] &= is_non_null_mask_;
 }
 
+bool FastCompilerARM64::BranchTargetIsInitialized(uint32_t dex_pc) {
+  // We always create a stack mask for branch targets.
+  return object_stack_masks_[dex_pc] != nullptr;
+}
+
 void FastCompilerARM64::StartBranchTarget(bool flow_continues, uint32_t dex_pc) {
   if (flow_continues) {
     // Emulate a branch to this pc.
@@ -712,9 +721,8 @@ void FastCompilerARM64::StartBranchTarget(bool flow_continues, uint32_t dex_pc) 
   // Set new masks based on all incoming edges.
   is_non_null_mask_ = is_non_null_masks_[dex_pc];
   object_register_mask_ = object_register_masks_[dex_pc];
-  if (object_stack_masks_[dex_pc] != nullptr) {
-    object_stack_mask_.Copy(object_stack_masks_[dex_pc]);
-  }
+  DCHECK_NE(object_stack_masks_[dex_pc], nullptr);
+  object_stack_mask_.Copy(object_stack_masks_[dex_pc]);
 }
 
 bool FastCompilerARM64::ProcessInstructions() {
@@ -742,11 +750,16 @@ bool FastCompilerARM64::ProcessInstructions() {
     }
     vixl::aarch64::Label* label = GetLabelOf(pair.DexPc());
     if (label->IsLinked()) {
+      DCHECK(BranchTargetIsInitialized(pair.DexPc()));
       StartBranchTarget(flow_continues, pair.DexPc());
       __ Bind(label);
     }
 
     if (catch_pcs_.IsBitSet(pair.DexPc())) {
+      if (!BranchTargetIsInitialized(pair.DexPc())) {
+        unimplemented_reason_ = "BackwardsCatch";
+        return false;
+      }
       StartBranchTarget(flow_continues, pair.DexPc());
       catch_stack_maps_.push_back(std::make_pair(pair.DexPc(), GetAssembler()->CodePosition()));
     }
@@ -760,6 +773,10 @@ bool FastCompilerARM64::ProcessInstructions() {
         for (CatchHandlerIterator iterator(GetCodeItemAccessor(), *try_item);
              iterator.HasNext();
              iterator.Next()) {
+          if (iterator.GetHandlerAddress() <= pair.DexPc()) {
+            unimplemented_reason_ = "BackwardsCatch";
+            return false;
+          }
           UpdateMasks(iterator.GetHandlerAddress());
         }
       }

@@ -1000,6 +1000,7 @@
           "864-move-object",
           "865-fallthrough",
           "866-fast",
+          "867-backwards-catch",
           "900-hello-plugin",
           "901-hello-ti-agent",
           "903-hello-tagging",
