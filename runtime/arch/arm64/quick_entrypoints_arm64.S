@@ -2640,9 +2640,8 @@ ENTRY art_quick_record_long_running_exit_trace_event
     tst xIP1, 1
     bne .Lrecord_exit_event
     // The previous event was an entry event. This exit corresponds to the previous method entry.
-    // Check if the method is long running by getting the current timestamp and comparing with the
-    // previous event's timestamp.
-    mrs xIP0, cntvct_el0
+    // Check if the method is long running by comparing the current timestamp with the previous
+    // event's timestamp.
     sub xIP1, xIP0, xIP1
     cmp xIP1, #LONG_RUNNING_METHOD_THRESHOLD
     bhs .Lrecord_exit_event
