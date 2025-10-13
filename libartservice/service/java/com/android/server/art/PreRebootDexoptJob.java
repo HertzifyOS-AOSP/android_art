@@ -471,7 +471,9 @@ public class PreRebootDexoptJob implements ArtServiceJobInterface {
                             && e.getMessage().contains("TriggerPostinstall");
             if (updateSuperseded || updateRevoked) {
                 AsLog.i("update_engine error ignored: " + e.getMessage());
-                cancelAny();
+                synchronized (this) {
+                    mCancellationSignal.cancel();
+                }
                 return;
             }
             throw new UpdateEngineException("Failed to trigger postinstall: " + e.getMessage());

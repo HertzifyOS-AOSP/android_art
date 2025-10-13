@@ -24,6 +24,7 @@ import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.anyBoolean;
 import static org.mockito.Mockito.anyInt;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.isNull;
 import static org.mockito.Mockito.lenient;
@@ -305,6 +306,43 @@ public class PreRebootDexoptJobTest {
     public void testStartMainline() throws Exception {
         checkStart(null /* otaSlot */, () -> anyBoolean() /* mapSnapshotsForOtaMatcher */);
         verify(mUpdateEngine, never()).triggerPostinstall(any());
+    }
+
+    @Test
+    @EnableFlags({android.os.Flags.FLAG_UPDATE_ENGINE_API})
+    public void testStartWithUpdateEngineApiSkippedDueToUpdateGone() throws Exception {
+        final int POSTINTALL_RUNNER_ERROR = 5;
+        doThrow(new ServiceSpecificException(POSTINTALL_RUNNER_ERROR,
+                        "Postinstall action did not run. OTA update must first reach the "
+                                + "Postinstall phase(which verfies that all partitions can be "
+                                + "mounted) before calling TriggerPostinstall"))
+                .when(mUpdateEngine)
+                .triggerPostinstall("system");
+
+        mPreRebootDexoptJob.onUpdateReadyImpl("_b");
+        mPreRebootDexoptJob.onStartJobImpl(mJobService, mJobParameters);
+
+        mPreRebootDexoptJob.waitForRunningJob();
+
+        mPreRebootStatsReporterHarness.recordFakeAfterRebootDataAndReport();
+        mPreRebootStatsReporterHarness.verifyJobStats(Status.STATUS_FINISHED);
+    }
+
+    @Test
+    @EnableFlags({android.os.Flags.FLAG_UPDATE_ENGINE_API})
+    public void testStartWithUpdateEngineApiFailedDueToUnknownError() throws Exception {
+        final int POSTINTALL_RUNNER_ERROR = 5;
+        doThrow(new ServiceSpecificException(POSTINTALL_RUNNER_ERROR, "Some unknown error"))
+                .when(mUpdateEngine)
+                .triggerPostinstall("system");
+
+        mPreRebootDexoptJob.onUpdateReadyImpl("_b");
+        mPreRebootDexoptJob.onStartJobImpl(mJobService, mJobParameters);
+
+        mPreRebootDexoptJob.waitForRunningJob();
+
+        mPreRebootStatsReporterHarness.recordFakeAfterRebootDataAndReport();
+        mPreRebootStatsReporterHarness.verifyJobStats(Status.STATUS_FAILED);
     }
 
     private void checkSyncStart(boolean isUpdateEngineReady, boolean expectedMapSnapshotsForOta)
